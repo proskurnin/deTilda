@@ -124,10 +124,6 @@ service_files:
     filenames:
       - "aida-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"
-  scripts_to_comment_out_tags:
-    filenames:
-      - "tilda-stat-1.0.min.js"
-      - "aida-stat-1.0.min.js"
   protected_files_in_refs_update:
     files:
       - "form-handler.js"

@@ -87,7 +87,6 @@ def _update_links_in_html(
     rename_map: Dict[str, str],
     project_root: Path,
     ignore_prefixes: Iterable[str],
-    script_names: Iterable[str],
     link_rel_values: Iterable[str],
     replace_patterns: Iterable[str],
     comment_patterns: Iterable[str],
@@ -147,22 +146,6 @@ def _update_links_in_html(
         re.IGNORECASE,
     )
     text = pattern.sub(repl, text)
-
-    for script in script_names:
-        script_pattern = re.compile(
-            rf"(<script[^>]+{re.escape(script)}[^>]*></script>)",
-            re.IGNORECASE,
-        )
-
-        def _script_replacer(match: re.Match[str]) -> str:
-            nonlocal fixed
-            tag = match.group(1)
-            if "<!--" in tag and "-->" in tag:
-                return tag
-            fixed += 1
-            return f"<!-- {tag} -->"
-
-        text = script_pattern.sub(_script_replacer, text)
 
     for rel_value in link_rel_values:
         link_pattern = re.compile(
@@ -232,12 +215,6 @@ def update_all_refs_in_project(
     replace_rules = _compile_replace_rules(patterns_cfg.get("replace_rules", []))
 
     images_cfg = loader.images()
-    service_cfg = loader.service_files()
-    script_names = [
-        value
-        for value in service_cfg.get("scripts_to_comment_out_tags", {}).get("filenames", [])
-        if isinstance(value, str)
-    ]
     link_rel_values = [
         value
         for value in images_cfg.get("comment_out_link_tags", {}).get("rel_values", [])
@@ -279,7 +256,6 @@ def update_all_refs_in_project(
                 rename_map,
                 project_root,
                 ignore_prefixes,
-                script_names,
                 link_rel_values,
                 replace_patterns,
                 comment_patterns,
