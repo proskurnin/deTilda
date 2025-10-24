@@ -1,86 +1,62 @@
-# -*- coding: utf-8 -*-
-"""
-inject.py — внедрение JS-обработчиков в HTML-файлы Detilda v4.2 LTS
-Добавляет form-handler.js и aida-forms-1.0.min.js после </body>,
-а также комментирует устаревшие тильдовские теги <script>.
-"""
+"""Helpers for injecting Detilda form scripts into HTML pages."""
+from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
-from core import logger, config_loader, utils
+
+from core import logger, utils
+from core.config_loader import ConfigLoader
+
+__all__ = ["inject_form_scripts"]
 
 
-def inject_scripts_and_handlers(project_root: str, script_dir: str):
-    """
-    Основная функция внедрения JS-скриптов в HTML.
-    Использует параметры из rules_service_files.json → html_inject_options.
-    """
-    script_dir = Path(script_dir)
+def _load_options(loader: ConfigLoader) -> tuple[str, str]:
+    service_cfg = loader.service_files()
+    options = service_cfg.get("html_inject_options", {})
+    handler = str(options.get("inject_handler_script", "form-handler.js"))
+    marker = str(options.get("inject_after_marker", "</body>"))
+    return handler, marker
+
+
+def inject_form_scripts(project_root: Path, loader: ConfigLoader) -> int:
     project_root = Path(project_root)
-
-    cfg_service = config_loader.get_rules_service_files(script_dir)
-    inject_opts = cfg_service.get("html_inject_options", {})
-    scripts_to_comment = cfg_service.get("scripts_to_comment_out_tags", {}).get("filenames", [])
-
-    inject_script_name = inject_opts.get("inject_handler_script", "form-handler.js")
-    inject_after_marker = inject_opts.get("inject_after_marker", "</body>")
-
-    logger.info("→ Внедрение form-handler.js и очистка старых скриптов...")
-
+    handler, marker = _load_options(loader)
     processed = 0
-    modified = 0
+
+    marker_pattern = re.compile(re.escape(marker), re.IGNORECASE)
 
     for path in project_root.rglob("*.html"):
         try:
             content = utils.safe_read(path)
-        except Exception as e:
-            logger.warn(f"[inject] Пропуск {path.name}: {e}")
+        except Exception as exc:
+            logger.warn(f"[inject] Пропуск {path.name}: {exc}")
             continue
 
-        new_content = content
+        original = content
 
-        # --- Удаление старых тильдовских скриптов ---
-        for bad_script in scripts_to_comment:
-            pattern = rf'(<script[^>]+{re.escape(bad_script)}[^>]*><\/script>)'
-            new_content = re.sub(pattern, r"<!-- \1 -->", new_content, flags=re.IGNORECASE)
+        def _ensure_script(text: str, script_name: str) -> tuple[str, bool]:
+            tag = f'\n<script src="js/{script_name}"></script>'
+            if script_name in text:
+                return text, False
+            if marker_pattern.search(text):
+                return marker_pattern.sub(tag + marker, text), True
+            return text + tag, True
 
-        # --- Проверяем, есть ли уже наш обработчик ---
-        if inject_script_name not in new_content:
-            inject_tag = f'\n<script src="js/{inject_script_name}"></script>\n'
-            pattern_marker = re.compile(re.escape(inject_after_marker), re.IGNORECASE)
-            if pattern_marker.search(new_content):
-                new_content = pattern_marker.sub(inject_tag + inject_after_marker, new_content)
-                logger.info(f"🧩 Добавлен скрипт {inject_script_name} в {path.name}")
-                modified += 1
-            else:
-                # если </body> не найден — добавляем в конец
-                new_content += inject_tag
-                logger.warn(f"[inject] В {path.name} не найден </body> — скрипт добавлен в конец.")
-                modified += 1
+        content, added_handler = _ensure_script(content, handler)
+        content, added_forms = _ensure_script(content, "aida-forms-1.0.min.js")
 
-        # --- Добавляем AIDA forms (если нет) ---
-        if "aida-forms-1.0.min.js" not in new_content:
-            new_content = new_content.replace(
-                inject_after_marker,
-                f'\n<script src="js/aida-forms-1.0.min.js"></script>\n{inject_after_marker}',
-            )
-            logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
-            modified += 1
-
-        # --- Сохраняем, если изменилось ---
-        if new_content != content:
-            utils.safe_write(path, new_content)
+        if content != original:
+            utils.safe_write(path, content)
             processed += 1
+            if added_handler:
+                logger.info(f"🧩 Добавлен скрипт {handler} в {path.name}")
+            if added_forms:
+                logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
 
-    logger.info(f"✓ Внедрение завершено. Изменено файлов: {processed}, обновлено вставок: {modified}")
-
-
-# === Прямая отладка ===
-if __name__ == "__main__":
-    test_project = "./_workdir/project5059034"
-    test_script_dir = "."
-    try:
-        inject_scripts_and_handlers(test_project, test_script_dir)
-    except Exception as e:
-        logger.err(f"💥 Ошибка в inject.py: {e}")
+    if processed:
+        logger.info(
+            f"✓ Внедрение завершено. Обновлено файлов: {processed} (маркер: {marker})."
+        )
+    else:
+        logger.info("✓ Внедрение завершено. Изменений не требуется.")
+    return processed
