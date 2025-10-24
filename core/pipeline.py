@@ -52,13 +52,11 @@ class DetildaPipeline:
             stats.removed += clean_result.removed
             report.generate_intermediate_report(stats.renamed, stats.cleaned, 0, 0)
 
-            forms.generate_form_assets(context.project_root, email)
-            inject.inject_form_scripts(context.project_root, context.config_loader)
+            forms.generate_send_email_php(context, email)
+            inject.inject_form_scripts(context)
 
             fixed_links, broken_links = refs.update_all_refs_in_project(
-                context.project_root,
-                context.rename_map,
-                context.config_loader,
+                context.project_root, context.rename_map
             )
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links
