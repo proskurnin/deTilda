@@ -2,7 +2,6 @@
 """CLI entry point orchestrating the Detilda pipeline."""
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from core import archive, assets, checker, cleaners, forms, inject, logger, refs, report
