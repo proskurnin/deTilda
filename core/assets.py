@@ -1,215 +1,368 @@
-# -*- coding: utf-8 -*-
-"""
-assets.py — обработка ассетов Detilda v4.6.1 config-driven
-Правила из config/patterns.yaml, rules_images.json, rules_service_files.json:
- - til* → ai* (регистронезависимо, по границе слова) — применяется к изображениям, файлам, CSS и JS
- - исключения для переименования
- - списки физических удалений: as_is (до) и after_rename (после)
-Также создаём валидный images/1px.png (1×1 прозрачный).
-"""
+"""Asset rename and cleanup utilities."""
+from __future__ import annotations
 
+import contextlib
 import json
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
-from core import logger
-from core.utils import file_exists, safe_read
+from typing import Dict, Iterable, Iterator, Tuple
 
-# Где ищем ассеты (деревья с медиа)
-_ASSET_DIRS = ("images", "img", "files", "media")
-# Где обычно лежат стили/скрипты
-_CODE_DIRS = ("css", "js")
+from core import logger, utils
+from core.config_loader import ConfigLoader, iter_section_list
 
-# Валидный 1×1 PNG (прозрачный)
-_ONEPX_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
-    b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
-)
+__all__ = ["AssetStats", "rename_and_cleanup_assets"]
 
-def _project_base_dir(project_root: Path) -> Path:
-    return project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent
 
-def _load_yaml(path: Path) -> dict:
-    try:
-        import yaml  # type: ignore
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        data = {}
-        current = None
-        for line in safe_read(path).splitlines():
-            s = line.strip()
-            if not s or s.startswith("#"):
+@dataclass
+class AssetStats:
+    renamed: int = 0
+    removed: int = 0
+    downloaded: int = 0
+
+
+@dataclass
+class AssetResult:
+    rename_map: Dict[str, str]
+    stats: AssetStats
+
+
+@dataclass
+class ResourceCopyRule:
+    source: Path
+    destination: str
+    originals: list[str] = field(default_factory=list)
+    applied: bool = False
+
+
+def _normalize_config_path(value: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("/"):
+        normalized = normalized[1:]
+    return normalized
+
+
+def _collect_lowercase_names(section: Dict[str, object], *keys: str) -> set[str]:
+    return {name.lower() for name in iter_section_list(section, *keys)}
+
+
+def _sanitize(name: str) -> str:
+    sanitized = (
+        name.replace(" ", "_")
+        .replace("(", "")
+        .replace(")", "")
+        .replace(",", "")
+        .replace("&", "and")
+    )
+    return re.sub(r"_+", "_", sanitized)
+
+
+def _iter_links(text: str, link_patterns: Iterable[str]) -> Iterator[str]:
+    for pattern in link_patterns:
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            logger.warn(f"[assets] Некорректный паттерн ссылки: {pattern}")
+            continue
+        for match in regex.finditer(text):
+            link = match.groupdict().get("link")
+            if link:
+                yield link
+
+
+def _resolve_download_target(url: str, rules: Iterable[Dict[str, object]]) -> Tuple[str, str] | None:
+    parsed = urllib.parse.urlsplit(url if not url.startswith("//") else f"https:{url}")
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    filename = Path(urllib.parse.unquote(parsed.path)).name
+    if not filename:
+        return None
+    suffix = Path(filename).suffix.lower()
+    for rule in rules:
+        folder = str(rule.get("folder", "")).strip().strip("/")
+        if not folder:
+            continue
+        extensions = rule.get("extensions")
+        if extensions:
+            exts = {str(ext).lower() for ext in extensions if isinstance(ext, str)}
+            if suffix not in exts:
                 continue
-            if ":" in s and not s.startswith("-"):
-                k, v = s.split(":", 1)
-                k = k.strip()
-                v = v.strip().strip("'").strip('"')
-                if v == "":
-                    data[k] = []
-                    current = k
-                else:
-                    data[k] = v
-                    current = k
-            elif s.startswith("-") and current:
-                item = s[1:].strip().strip("'").strip('"')
-                data.setdefault(current, []).append(item)
-        return data
+        return folder, filename
+    return None
 
-def _load_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.warn(f"[assets] Не удалось прочитать JSON: {path}")
-        return {}
 
-def _load_configs(project_root: Path) -> tuple[dict, dict, dict]:
-    base_dir = _project_base_dir(project_root)
-    cfg_dir = base_dir / "config"
-    patterns = _load_yaml(cfg_dir / "patterns.yaml")
-    rules_images = _load_json(cfg_dir / "rules_images.json")
-    rules_service = _load_json(cfg_dir / "rules_service_files.json")
-    return patterns, rules_images, rules_service
+def _fetch_url(url: str) -> bytes:
+    normalized = url
+    if url.startswith("//"):
+        normalized = f"https:{url}"
+    request = urllib.request.Request(
+        normalized,
+        headers={
+            "User-Agent": "Detilda/1.0",
+            "Accept": "*/*",
+        },
+    )
+    with contextlib.closing(urllib.request.urlopen(request, timeout=15)) as response:  # type: ignore[arg-type]
+        return response.read()
 
-def _compile_til_to_ai_regex(patterns: dict) -> re.Pattern:
-    # В YAML: assets.til_to_ai_filename, по умолчанию \btil
-    p = None
-    try:
-        p = patterns.get("assets", {}).get("til_to_ai_filename", r"\btil")
-    except Exception:
-        p = r"\btil"
-    return re.compile(p, re.IGNORECASE)
 
-def _excluded_from_rename(rules_service: dict) -> set[str]:
-    try:
-        items = rules_service.get("exclude_from_rename", {}).get("files", []) or []
-        return {s.lower() for s in items}
-    except Exception:
-        return set()
+def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
+    service_cfg = loader.service_files()
+    remote_cfg = service_cfg.get("remote_assets", {})
+    rules = remote_cfg.get("rules", [])
+    if not rules:
+        return 0
 
-def _delete_lists(rules_images: dict) -> tuple[set[str], set[str]]:
-    try:
-        after_rename = set((rules_images.get("delete_physical_files", {}).get("after_rename", []) or []))
-        as_is = set((rules_images.get("delete_physical_files", {}).get("as_is", []) or []))
-        return {s.lower() for s in after_rename}, {s.lower() for s in as_is}
-    except Exception:
-        return set(), set()
+    patterns_cfg = loader.patterns()
+    link_patterns = patterns_cfg.get("links", [])
+    if not link_patterns:
+        return 0
 
-def _sanitize_filename(name: str) -> str:
-    out = (name.replace(" ", "_")
-               .replace("(", "")
-               .replace(")", "")
-               .replace(",", "")
-               .replace("&", "and"))
-    out = re.sub(r"_+", "_", out)
-    return out
+    scan_exts = remote_cfg.get("scan_extensions") or []
+    if scan_exts:
+        files = utils.list_files_recursive(project_root, extensions=tuple(scan_exts))
+    else:
+        files = utils.list_files_recursive(project_root)
 
-def _iter_candidate_files(project_root: Path):
-    """
-    Итератор по файлам, которые нужно рассматривать для переименования:
-    - всё в папках изображений/файлов
-    - все *.css и *.js в проекте (включая /css и /js)
-    """
-    root = Path(project_root)
-    yielded = set()
+    urls: set[str] = set()
+    for file_path in files:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = file_path.read_text(encoding="utf-8-sig")
+            except Exception:
+                continue
+        except Exception:
+            continue
 
-    # Медиа-папки
-    for d in _ASSET_DIRS:
-        base = root / d
-        if base.exists():
-            for p in base.rglob("*.*"):
-                if p.is_file():
-                    rp = p.resolve()
-                    if rp not in yielded:
-                        yielded.add(rp)
-                        yield p
+        for link in _iter_links(text, link_patterns):
+            if "til" not in link.lower():
+                continue
+            parsed = urllib.parse.urlsplit(link if not link.startswith("//") else f"https:{link}")
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            urls.add(link)
 
-    # Все CSS/JS по всему проекту
-    for pattern in ("*.css", "*.js"):
-        for p in root.rglob(pattern):
-            if p.is_file():
-                rp = p.resolve()
-                if rp not in yielded:
-                    yielded.add(rp)
-                    yield p
+    downloaded = 0
+    for url in sorted(urls):
+        target = _resolve_download_target(url, rules)
+        if target is None:
+            continue
+        folder, filename = target
+        destination_dir = project_root / folder
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination_path = destination_dir / filename
+        if destination_path.exists():
+            continue
+        try:
+            payload = _fetch_url(url)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+            logger.warn(f"[assets] Не удалось скачать {url}: {exc}")
+            continue
+        except Exception as exc:  # pragma: no cover - сетевые сбои
+            logger.warn(f"[assets] Неожиданная ошибка скачивания {url}: {exc}")
+            continue
 
-def rename_and_cleanup_assets(project_root: Path, stats: dict):
-    """
-    Переименовывает ассеты по правилу til* → ai*, учитывая исключения и списки удаления.
-    Также переименовывает *.css и *.js файлы (именно имена файлов), и формирует rename_map.
-    Возвращает:
-      rename_map — {старый_относит_путь: новый_относит_путь}
-      stats — {"renamed": int, "removed": int}
-    """
-    patterns, rules_images, rules_service = _load_configs(project_root)
-    til_to_ai_rx = _compile_til_to_ai_regex(patterns)
-    exclude = _excluded_from_rename(rules_service)
-    del_after_rename, del_as_is = _delete_lists(rules_images)
+        try:
+            destination_path.write_bytes(payload)
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка записи {destination_path}: {exc}")
+            continue
 
-    rename_map: dict[str, str] = {}
-    renamed_count = 0
-    removed_count = 0
+        downloaded += 1
+        logger.info(
+            f"🌐 Загружен ресурс: {url} → {utils.relpath(destination_path, project_root)}"
+        )
 
-    root = Path(project_root)
+    return downloaded
 
-    for path in _iter_candidate_files(root):
-        rel_old = str(path.relative_to(root)).replace("\\", "/")
+
+def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> AssetResult:
+    project_root = Path(project_root)
+    patterns_cfg = loader.patterns()
+    images_cfg = loader.images()
+    service_cfg = loader.service_files()
+
+    downloaded = _download_remote_assets(project_root, loader)
+
+    regex_pattern = (
+        patterns_cfg.get("assets", {}).get("til_to_ai_filename")
+        if isinstance(patterns_cfg.get("assets"), dict)
+        else None
+    )
+    til_regex = re.compile(str(regex_pattern or r"\btil"), re.IGNORECASE)
+
+    exclude_from_rename = _collect_lowercase_names(service_cfg, "exclude_from_rename", "files")
+    delete_after_rename = _collect_lowercase_names(images_cfg, "delete_physical_files", "after_rename")
+    delete_immediately = _collect_lowercase_names(images_cfg, "delete_physical_files", "as_is")
+    delete_service = _collect_lowercase_names(service_cfg, "scripts_to_delete", "after_rename")
+
+    resource_cfg = service_cfg.get("resource_copy", {})
+    resource_rules: list[ResourceCopyRule] = []
+    resource_lookup: dict[str, ResourceCopyRule] = {}
+    resource_name_lookup: dict[str, ResourceCopyRule] = {}
+    resources_dir = loader.base_dir / "resources"
+    for entry in resource_cfg.get("files", []) if isinstance(resource_cfg, dict) else []:
+        if not isinstance(entry, dict):
+            continue
+        source_name = str(entry.get("source", "")).strip()
+        destination_name = str(entry.get("destination", entry.get("target", ""))).strip()
+        if not source_name or not destination_name:
+            continue
+        originals_values = entry.get("originals", [])
+        originals: list[str] = []
+        if isinstance(originals_values, (list, tuple)):
+            for original in originals_values:
+                if not isinstance(original, str):
+                    continue
+                normalized = _normalize_config_path(original)
+                if not normalized:
+                    continue
+                originals.append(normalized)
+        destination = _normalize_config_path(destination_name) or Path(destination_name).name
+        rule = ResourceCopyRule(
+            source=resources_dir / source_name,
+            destination=destination,
+            originals=originals,
+        )
+        resource_rules.append(rule)
+        for original in originals:
+            resource_lookup[original.lower()] = rule
+            resource_name_lookup[Path(original).name.lower()] = rule
+
+    def _handle_resource_replacement(path: Path, relative: str) -> bool:
+        normalized_relative = _normalize_config_path(relative)
+        rule = resource_lookup.get(normalized_relative.lower()) or resource_name_lookup.get(
+            path.name.lower()
+        )
+        if not rule:
+            return False
+        try:
+            path.unlink()
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка удаления {path}: {exc}")
+            return False
+        rule.applied = True
+        stats.removed += 1
+        rename_map[normalized_relative or path.name] = rule.destination
+        logger.info(
+            f"🧩 Заменён ресурс: {normalized_relative or path.name} → {rule.destination}"
+        )
+        return True
+
+    rename_map: Dict[str, str] = {}
+    stats = AssetStats(downloaded=downloaded)
+
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
+
         name_lower = path.name.lower()
+        relative_path = utils.relpath(path, project_root)
 
-        # 0) немедленное удаление "как есть"
-        if name_lower in del_as_is:
+        if _handle_resource_replacement(path, relative_path):
+            continue
+
+        if name_lower in delete_immediately or name_lower in delete_service:
             try:
                 path.unlink()
-                removed_count += 1
+                stats.removed += 1
                 logger.info(f"🗑 Удалён (as_is): {path.name}")
-            except Exception as e:
-                logger.err(f"[assets] Ошибка удаления {path}: {e}")
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка удаления {path}: {exc}")
             continue
 
-        # 1) исключения из переименования
-        if name_lower in exclude:
+        if name_lower in exclude_from_rename:
             continue
 
-        # 2) применяем til* → ai* на ИМЕНИ файла
-        stem, ext = path.stem, path.suffix
-        new_stem = til_to_ai_rx.sub("ai", stem, count=1)  # только первый префикс
-        new_name = _sanitize_filename(new_stem + ext)
+        new_name = path.name
+        match = til_regex.search(path.stem)
+        if match:
+            new_name = _sanitize(til_regex.sub("ai", path.stem, count=1) + path.suffix)
 
         if new_name != path.name:
             new_path = path.with_name(new_name)
             try:
-                path.rename(new_path)
-                renamed_count += 1
-                rel_new = str(new_path.relative_to(root)).replace("\\", "/")
-                rename_map[rel_old] = rel_new
-                logger.info(f"🔄 Переименован: {path.name} → {new_name}")
-                path = new_path
-                name_lower = new_name.lower()
-                rel_old = rel_new
-            except Exception as e:
-                logger.err(f"[assets] Ошибка переименования {path}: {e}")
+                old_rel = utils.relpath(path, project_root)
+                path = path.rename(new_path)
+                new_rel = utils.relpath(new_path, project_root)
+                rename_map[old_rel] = new_rel
+                stats.renamed += 1
+                logger.info(f"🔄 Переименован: {old_rel} → {new_rel}")
+                name_lower = new_path.name.lower()
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка переименования {path}: {exc}")
+                continue
 
-        # 3) удаление «после переименования»
-        if name_lower in del_after_rename:
+        if name_lower in delete_after_rename or name_lower in delete_service:
             try:
                 path.unlink()
-                removed_count += 1
+                stats.removed += 1
                 logger.info(f"🗑 Удалён (after_rename): {path.name}")
-            except Exception as e:
-                logger.err(f"[assets] Ошибка удаления {path}: {e}")
-            continue
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка удаления {path}: {exc}")
 
-    # 4) placeholder 1px.png
-    placeholder = root / "images" / "1px.png"
-    if not file_exists(placeholder):
+    placeholder = project_root / "images" / "1px.png"
+    if not placeholder.exists():
+        placeholder.parent.mkdir(parents=True, exist_ok=True)
+        placeholder.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
+            b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
+
+    mapping_cfg = service_cfg.get("rename_map_output", {})
+    mapping_name = mapping_cfg.get("filename", "rename_map.json")
+    mapping_location = str(mapping_cfg.get("location", "logs")).strip()
+    if mapping_location.lower() == "logs":
+        mapping_dir = logger.get_logs_dir()
+    else:
+        mapping_dir = project_root / mapping_location
+    mapping_path = mapping_dir / mapping_name
+
+    legacy_mapping = project_root / "rename_map.json"
+    if legacy_mapping.exists():
         try:
-            placeholder.parent.mkdir(parents=True, exist_ok=True)
-            with open(placeholder, "wb") as f:
-                f.write(_ONEPX_PNG)
-            logger.info(f"🧩 Добавлен placeholder: {placeholder}")
-        except Exception as e:
-            logger.err(f"[assets] Ошибка при создании placeholder: {e}")
+            legacy_mapping.unlink()
+        except Exception as exc:
+            logger.warn(f"[assets] Не удалось удалить устаревший rename_map.json: {exc}")
 
-    stats["renamed"] = renamed_count
-    stats["removed"] = removed_count
-    logger.info(f"📦 Ассеты обработаны: переименовано {renamed_count}, удалено {removed_count}")
-    return rename_map, stats
+    for rule in resource_rules:
+        destination_path = project_root / rule.destination
+        try:
+            if not rule.source.exists():
+                logger.warn(
+                    f"[assets] Ресурс для копирования не найден: {rule.source}"  # pragma: no cover
+                )
+            else:
+                utils.safe_copy(rule.source, destination_path)
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка копирования {rule.source} → {destination_path}: {exc}")
+        for original in rule.originals:
+            rename_map.setdefault(original, rule.destination)
+
+    try:
+        utils.safe_write(
+            mapping_path,
+            json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
+        )
+        relative_mapping = utils.relpath(mapping_path, logger.get_logs_dir())
+        logger.ok(
+            f"💾 Таблица маппинга сохранена: {relative_mapping} ({len(rename_map)} элементов)"
+        )
+    except Exception as exc:
+        logger.err(f"[assets] Ошибка сохранения {mapping_path.name}: {exc}")
+
+    logger.info(
+        f"📦 Ассеты обработаны: переименовано {stats.renamed}, удалено {stats.removed}"
+    )
+    if stats.downloaded:
+        logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded}")
+    return AssetResult(rename_map=rename_map, stats=stats)

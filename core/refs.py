@@ -1,219 +1,302 @@
-# -*- coding: utf-8 -*-
-"""
-refs.py — маршрутизация, корректировка ссылок и распаковка Detilda v4.5 LTS unified
-Теперь собирает статистику исправленных и битых ссылок.
-"""
+"""Reference update utilities for project files."""
+from __future__ import annotations
 
 import re
-import zipfile
 from pathlib import Path
+from typing import Dict, Iterable, Tuple
+
 from core import logger, utils
+from core.config_loader import ConfigLoader
+from core.htaccess import collect_routes
 
-_STATIC_DIRS = ("css/", "js/", "images/", "files/")
-
-
-# === 🔹 Распаковка архива ===
-def unpack_archive(archive_path: Path) -> Path | None:
-    """
-    Распаковывает ZIP-архив в _workdir с сохранением структуры.
-    Возвращает путь к корневой папке проекта.
-    """
-    workdir = archive_path.parent
-    logger.info("📦 Распаковка архива...")
-
-    try:
-        with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            root_folders = list({Path(name).parts[0] for name in zip_ref.namelist()})
-            if len(root_folders) == 1:
-                root_folder = root_folders[0]
-                logger.info(f"Обнаружена единственная корневая папка: '{root_folder}'. Распаковка с сохранением структуры...")
-            else:
-                root_folder = archive_path.stem
-                logger.info(f"Несколько корней — используется '{root_folder}'.")
-
-            zip_ref.extractall(workdir)
-            project_root = workdir / root_folder
-
-        logger.info(f"→ Распаковка завершена: {project_root}")
-        return project_root
-
-    except Exception as e:
-        logger.err(f"💥 Ошибка распаковки архива: {e}")
-        return None
+__all__ = ["update_all_refs_in_project"]
 
 
-# === 🔹 Определение корневой папки ===
-def detect_project_root(base_dir: Path) -> Path | None:
-    """
-    Определяет корневую папку проекта (где лежат страницы HTML или htaccess).
-    """
-    base_dir = Path(base_dir)
-    if not base_dir.exists():
-        logger.err(f"⚠️ Каталог не найден: {base_dir}")
-        return None
-
-    for p in base_dir.rglob("*"):
-        if p.is_file() and (p.name.lower() in ("htaccess", ".htaccess") or p.suffix.lower() == ".html"):
-            return p.parent
-
-    logger.warn("⚠️ Не удалось определить корневую папку проекта (нет htaccess или HTML)")
-    return base_dir
+def _should_skip(url: str, ignore_prefixes: Iterable[str]) -> bool:
+    return any(url.startswith(prefix) for prefix in ignore_prefixes)
 
 
-# === 🔹 Разбор htaccess маршрутов ===
-def _parse_htaccess_routes(project_root: Path) -> dict:
-    """Читает htaccess и извлекает RewriteRule (alias → файл)."""
-    routes = {}
-    for name in [".htaccess", "htaccess"]:
-        ht = project_root / name
-        if ht.exists():
-            try:
-                text = utils.safe_read(ht)
-            except Exception:
-                continue
-
-            for m in re.finditer(r"RewriteRule\s+\^([^\$\s]+)\$?\s+([^\s]+\.html)", text, re.I):
-                alias, target = m.groups()
-                alias = "/" + alias.strip("/")
-                routes[alias] = target
-                logger.debug(f"[htaccess] {alias} → {target}")
-
-            m = re.search(r"DirectoryIndex\s+([^\s]+\.html)", text, re.I)
-            if m:
-                routes["/"] = m.group(1).strip()
-                logger.debug(f"[htaccess] / → {routes['/']} (DirectoryIndex)")
-            break
-    return routes
+def _replace_static_prefix(url: str) -> str:
+    for prefix in ("css/", "js/", "images/", "files/"):
+        if url.startswith("/" + prefix):
+            return url[1:]
+    return url
 
 
-# === 🔹 Исправление абсолютных ссылок с подсчётом ===
-def _fix_absolute_links(html_text: str, route_map: dict, rename_map: dict, project_root: Path):
-    """Меняет href="/xxx" и src="/xxx" с учётом route_map, rename_map и существования файлов."""
+def _compile_replace_rules(rules: Iterable[object]) -> list[tuple[re.Pattern[str], str]]:
+    compiled: list[tuple[re.Pattern[str], str]] = []
+    for rule in rules:
+        if isinstance(rule, dict):
+            pattern = rule.get("pattern")
+            replacement = str(rule.get("replacement", ""))
+        elif isinstance(rule, str):
+            pattern = rule
+            replacement = ""
+        else:
+            continue
+        if not isinstance(pattern, str):
+            continue
+        try:
+            compiled.append((re.compile(pattern, re.IGNORECASE), replacement))
+        except re.error:
+            logger.warn(f"[refs] Некорректное правило замены: {pattern}")
+    return compiled
+
+
+def _apply_replace_rules(text: str, rules: Iterable[tuple[re.Pattern[str], str]]) -> tuple[str, int]:
+    total = 0
+    for pattern, replacement in rules:
+        text, count = pattern.subn(replacement, text)
+        total += count
+    return text, total
+
+def _apply_rename_map(text: str, rename_map: Dict[str, str]) -> tuple[str, int]:
+    replacements = 0
+    for old, new in sorted(rename_map.items(), key=lambda item: len(item[0]), reverse=True):
+        if not old:
+            continue
+        escaped = re.escape(old)
+        pattern = re.compile(escaped)
+        text, count = pattern.subn(new, text)
+        replacements += count
+    return text, replacements
+
+
+def _cleanup_broken_markup(text: str) -> str:
+    text = re.sub(
+        r'(<img\\b[^>]*?)\\s+alt="[^"]*"([^>]*?\\sdata-detilda-broken="1")',
+        lambda match: match.group(1) + match.group(2),
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\\sdata-detilda-broken=\"1\"", "", text, flags=re.IGNORECASE)
+    return text
+
+
+def _split_url(url: str) -> tuple[str, str]:
+    for delimiter in ("?", "#"):
+        if delimiter in url:
+            index = url.index(delimiter)
+            return url[:index], url[index:]
+    return url, ""
+
+
+def _update_links_in_html(
+    text: str,
+    routes: Dict[str, str],
+    rename_map: Dict[str, str],
+    project_root: Path,
+    ignore_prefixes: Iterable[str],
+    script_names: Iterable[str],
+    link_rel_values: Iterable[str],
+    replace_patterns: Iterable[str],
+    comment_patterns: Iterable[str],
+) -> Tuple[str, int, int]:
     fixed = 0
     broken = 0
 
-    def repl(m):
+    def repl(match: re.Match[str]) -> str:
         nonlocal fixed, broken
-        attr, url = m.group(1), m.group(2)
+        attr = match.group("attr")
+        quote = match.group("quote") or '"'
+        url = match.group("link")
+        base_url, suffix = _split_url(url)
 
-        # внешние ссылки игнорируем
-        if re.match(r"^https?://", url, flags=re.I):
-            return m.group(0)
-        if not url.startswith("/"):
-            return m.group(0)
+        if _should_skip(url, ignore_prefixes) or base_url.startswith("../"):
+            return match.group(0)
 
-        # маршруты htaccess
-        if url in route_map:
-            new = route_map[url]
-            if new != url:
-                fixed += 1
-                return f'{attr}="{new}"'
-
-        # static: убираем ведущий слэш
-        for root in _STATIC_DIRS:
-            if url.startswith("/" + root):
-                new = url[1:]
-                if new != url:
+        if base_url.startswith("/"):
+            route_key = base_url
+            if route_key in routes:
+                new_url = routes[route_key]
+                if new_url != route_key:
                     fixed += 1
-                return f'{attr}="{new}"'
+                    return f"{attr}={quote}{new_url}{suffix}{quote}"
+            trimmed = _replace_static_prefix(base_url)
+            if trimmed != base_url:
+                fixed += 1
+                return f"{attr}={quote}{trimmed}{suffix}{quote}"
+            relative = base_url.lstrip("/")
+            if relative in rename_map:
+                fixed += 1
+                return f"{attr}={quote}{rename_map[relative]}{suffix}{quote}"
+            target = project_root / relative
+            if not target.exists():
+                broken += 1
+                return f"{attr}={quote}#{quote} data-detilda-broken=\"1\""
+            return match.group(0)
 
-        # проверяем rename_map
-        url_no_slash = url.lstrip("/")
-        if url_no_slash in rename_map:
-            new = rename_map[url_no_slash]
+        if base_url in rename_map:
             fixed += 1
-            return f'{attr}="{new}"'
+            return f"{attr}={quote}{rename_map[base_url]}{suffix}{quote}"
 
-        # проверяем существование файла
-        target = project_root / url_no_slash
-        if not target.exists():
-            broken += 1
+        if base_url and not (
+            base_url.startswith("http://")
+            or base_url.startswith("https://")
+            or base_url.startswith("//")
+        ):
+            candidate = (project_root / base_url).resolve()
+            if not candidate.exists():
+                broken += 1
+                return f"{attr}={quote}#{quote} data-detilda-broken=\"1\""
 
-        return m.group(0)
+        return match.group(0)
 
-    rx1 = re.compile(r'(href|src)\s*=\s*"(.*?)"', re.I)
-    rx2 = re.compile(r"(href|src)\s*=\s*'(.*?)'", re.I)
-    html_text = rx1.sub(repl, html_text)
-    html_text = rx2.sub(repl, html_text)
+    pattern = re.compile(
+        r'(?P<attr>href|src|data-src|data-href|action)\\s*=\\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
+        re.IGNORECASE,
+    )
+    text = pattern.sub(repl, text)
 
-    return html_text, fixed, broken
+    for script in script_names:
+        script_pattern = re.compile(
+            rf"(<script[^>]+{re.escape(script)}[^>]*></script>)",
+            re.IGNORECASE,
+        )
 
+        def _script_replacer(match: re.Match[str]) -> str:
+            nonlocal fixed
+            tag = match.group(1)
+            if "<!--" in tag and "-->" in tag:
+                return tag
+            fixed += 1
+            return f"<!-- {tag} -->"
 
-# === 🔹 Корректировка путей в /files ===
-def _fix_files_relpaths(file_path: Path, html_text: str) -> str:
-    """Корректирует пути в /files/"""
-    if "/files/" not in str(file_path.as_posix()):
-        return html_text
+        text = script_pattern.sub(_script_replacer, text)
 
-    def fix_rel(m):
-        attr, url = m.group(1), m.group(2)
-        if re.match(r"^https?://", url, flags=re.I) or url.startswith("../"):
-            return m.group(0)
-        for root in _STATIC_DIRS:
-            if url.startswith(root):
-                new = "../" + url
-                return f'{attr}="{new}"'
-        return m.group(0)
+    for rel_value in link_rel_values:
+        link_pattern = re.compile(
+            rf"(<link[^>]+rel=\"{re.escape(rel_value)}\"[^>]*>)",
+            re.IGNORECASE,
+        )
 
-    rx1 = re.compile(r'(href|src)\s*=\s*"(.*?)"', re.I)
-    rx2 = re.compile(r"(href|src)\s*=\s*'(.*?)'", re.I)
-    html_text = rx1.sub(fix_rel, html_text)
-    html_text = rx2.sub(fix_rel, html_text)
-    return html_text
+        def _link_replacer(match: re.Match[str]) -> str:
+            nonlocal fixed
+            tag = match.group(1)
+            if "<!--" in tag and "-->" in tag:
+                return tag
+            fixed += 1
+            return f"<!-- {tag} -->"
 
+        text = link_pattern.sub(_link_replacer, text)
 
-# === 🔹 Основная функция обновления ссылок ===
-def update_all_refs_in_project(project_root: str, rename_map: dict, script_dir: str = ".") -> tuple:
-    """
-    Обновляет все ссылки в HTML/CSS/JS и возвращает статистику:
-    (fixed_links, broken_links)
-    """
-    root = Path(project_root)
-    route_map = _parse_htaccess_routes(root)
-    logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(route_map)}")
+    for pattern_str in replace_patterns:
+        try:
+            replace_re = re.compile(pattern_str, re.IGNORECASE)
+        except re.error:
+            logger.warn(f"[refs] Некорректный паттерн замены: {pattern_str}")
+            continue
+        new_text, count = replace_re.subn("images/1px.png", text)
+        if count:
+            fixed += count
+            text = new_text
+
+    for pattern_str in comment_patterns:
+        try:
+            comment_re = re.compile(pattern_str, re.IGNORECASE)
+        except re.error:
+            logger.warn(f"[refs] Некорректный паттерн комментирования: {pattern_str}")
+            continue
+
+        def _comment_replacer(match: re.Match[str]) -> str:
+            nonlocal fixed
+            snippet = match.group(0)
+            if "<!--" in snippet and "-->" in snippet:
+                return snippet
+            fixed += 1
+            return f"<!-- {snippet} -->"
+
+        text = comment_re.sub(_comment_replacer, text)
+
+    text = _cleanup_broken_markup(text)
+    return text, fixed, broken
+
+def update_all_refs_in_project(
+    project_root: Path,
+    rename_map: Dict[str, str],
+    loader: ConfigLoader,
+) -> tuple[int, int]:
+    project_root = Path(project_root)
+    rename_map = dict(rename_map)
+
+    patterns_cfg = loader.patterns()
+    ignore_prefixes = tuple(patterns_cfg.get("ignore_prefixes", []))
+    text_extensions = tuple(patterns_cfg.get("text_extensions", [])) or (
+        ".html",
+        ".htm",
+        ".css",
+        ".js",
+        ".php",
+        ".txt",
+    )
+    replace_rules = _compile_replace_rules(patterns_cfg.get("replace_rules", []))
+
+    images_cfg = loader.images()
+    service_cfg = loader.service_files()
+    script_names = [
+        value
+        for value in service_cfg.get("scripts_to_comment_out_tags", {}).get("filenames", [])
+        if isinstance(value, str)
+    ]
+    link_rel_values = [
+        value
+        for value in images_cfg.get("comment_out_link_tags", {}).get("rel_values", [])
+        if isinstance(value, str)
+    ]
+    replace_patterns = [
+        value
+        for value in images_cfg.get("replace_links_with_1px", {}).get("patterns", [])
+        if isinstance(value, str)
+    ]
+    comment_patterns = [
+        value
+        for value in images_cfg.get("comment_out_links", {}).get("patterns", [])
+        if isinstance(value, str)
+    ]
+
+    routes = collect_routes(project_root, loader)
 
     fixed_total = 0
     broken_total = 0
 
-    for path in root.rglob("*.html"):
+    html_extensions = {".html", ".htm"}
+    for path in utils.list_files_recursive(project_root, extensions=text_extensions):
+        suffix = path.suffix.lower()
         try:
-            s = utils.safe_read(path)
-        except Exception as e:
-            logger.warn(f"[refs] Пропуск {path}: {e}")
+            text = utils.safe_read(path)
+        except Exception as exc:
+            logger.warn(f"[refs] Пропуск {path.name}: {exc}")
             continue
 
-        orig = s
-        s, fixed, broken = _fix_absolute_links(s, route_map, rename_map, root)
-        s = _fix_files_relpaths(path, s)
-        fixed_total += fixed
+        original = text
+        fixed = 0
+        broken = 0
+
+        if suffix in html_extensions:
+            text, fixed, broken = _update_links_in_html(
+                text,
+                routes,
+                rename_map,
+                project_root,
+                ignore_prefixes,
+                script_names,
+                link_rel_values,
+                replace_patterns,
+                comment_patterns,
+            )
+
+        text, rename_replacements = _apply_rename_map(text, rename_map)
+        text, rule_replacements = _apply_replace_rules(text, replace_rules)
+
+        total_changes = fixed + rename_replacements + rule_replacements
+        if total_changes and text != original:
+            utils.safe_write(path, text)
+            logger.info(f"🔗 Обновлены ссылки: {utils.relpath(path, project_root)}")
+
+        fixed_total += fixed + rename_replacements + rule_replacements
         broken_total += broken
 
-        if rename_map:
-            for old_rel, new_rel in rename_map.items():
-                if old_rel in s:
-                    s = s.replace(old_rel, new_rel)
-                    fixed_total += 1
-
-        if s != orig:
-            utils.safe_write(path, s)
-            logger.info(f"🔗 Обновлены ссылки: {path.relative_to(root)}")
-
-    # обновляем CSS/JS
-    if rename_map:
-        for ext in (".css", ".js"):
-            for path in root.rglob(f"*{ext}"):
-                try:
-                    s = utils.safe_read(path)
-                except Exception:
-                    continue
-                orig = s
-                for old_rel, new_rel in rename_map.items():
-                    if old_rel in s:
-                        s = s.replace(old_rel, new_rel)
-                        fixed_total += 1
-                if s != orig:
-                    utils.safe_write(path, s)
-                    logger.info(f"🔗 Обновлены пути в {path.relative_to(root)}")
-
-    logger.info(f"✅ Исправлено ссылок: {fixed_total}, осталось битых: {broken_total}")
+    logger.info(
+        f"✅ Исправлено ссылок: {fixed_total}, осталось битых: {broken_total}"
+    )
     return fixed_total, broken_total
