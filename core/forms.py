@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 from core import logger, utils
@@ -120,10 +121,36 @@ def _resolve_project_root(project_root: Path | Any) -> Path:
     return Path(project_root)
 
 
+def _extract_project_name(project_root: Path) -> str:
+    """Derive project name using robots.txt Host if available."""
+
+    robots_path = project_root / "robots.txt"
+    if robots_path.exists():
+        try:
+            robots_content = robots_path.read_text(encoding="utf-8")
+        except OSError:
+            robots_content = ""
+
+        for raw_line in robots_content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.lower().startswith("host:"):
+                host_value = line.split(":", 1)[1].strip()
+                parsed = urlparse(host_value)
+                host = parsed.netloc or parsed.path
+                host = host.rstrip("/")
+                if host:
+                    return host
+
+    return project_root.name
+
+
 def generate_send_email_php(project_root: Path | Any, email: str) -> Path:
     project_root = _resolve_project_root(project_root)
     target = project_root / "send_email.php"
-    content = _SEND_EMAIL_TEMPLATE.format(project_name=project_root.name, email=email)
+    project_name = _extract_project_name(project_root)
+    content = _SEND_EMAIL_TEMPLATE.format(project_name=project_name, email=email)
     utils.safe_write(target, content)
     logger.info(f"📨 Файл send_email.php создан: {utils.relpath(target, project_root)}")
     generate_form_handler_js(project_root)
