@@ -11,7 +11,7 @@ _TEMPLATE = """<?php
 $project = '{project_name}';
 $email = '{email}';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {{
     $to = $email;
     $subject = 'Запрос с сайта ' . $project;
     $body = "Имя: " . ($_POST['name'] ?? '') . "\n" .
@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "Сообщение: " . ($_POST['message'] ?? '');
     $headers = 'From: ' . $email;
     mail($to, $subject, $body, $headers);
-}
+}}
 ?>
 """
 
