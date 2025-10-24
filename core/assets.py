@@ -7,7 +7,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, Tuple
 
@@ -28,6 +28,23 @@ class AssetStats:
 class AssetResult:
     rename_map: Dict[str, str]
     stats: AssetStats
+
+
+@dataclass
+class ResourceCopyRule:
+    source: Path
+    destination: str
+    originals: list[str] = field(default_factory=list)
+    applied: bool = False
+
+
+def _normalize_config_path(value: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("/"):
+        normalized = normalized[1:]
+    return normalized
 
 
 def _collect_lowercase_names(section: Dict[str, object], *keys: str) -> set[str]:
@@ -186,6 +203,59 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
     delete_immediately = _collect_lowercase_names(images_cfg, "delete_physical_files", "as_is")
     delete_service = _collect_lowercase_names(service_cfg, "scripts_to_delete", "after_rename")
 
+    resource_cfg = service_cfg.get("resource_copy", {})
+    resource_rules: list[ResourceCopyRule] = []
+    resource_lookup: dict[str, ResourceCopyRule] = {}
+    resource_name_lookup: dict[str, ResourceCopyRule] = {}
+    resources_dir = loader.base_dir / "resources"
+    for entry in resource_cfg.get("files", []) if isinstance(resource_cfg, dict) else []:
+        if not isinstance(entry, dict):
+            continue
+        source_name = str(entry.get("source", "")).strip()
+        destination_name = str(entry.get("destination", entry.get("target", ""))).strip()
+        if not source_name or not destination_name:
+            continue
+        originals_values = entry.get("originals", [])
+        originals: list[str] = []
+        if isinstance(originals_values, (list, tuple)):
+            for original in originals_values:
+                if not isinstance(original, str):
+                    continue
+                normalized = _normalize_config_path(original)
+                if not normalized:
+                    continue
+                originals.append(normalized)
+        destination = _normalize_config_path(destination_name) or Path(destination_name).name
+        rule = ResourceCopyRule(
+            source=resources_dir / source_name,
+            destination=destination,
+            originals=originals,
+        )
+        resource_rules.append(rule)
+        for original in originals:
+            resource_lookup[original.lower()] = rule
+            resource_name_lookup[Path(original).name.lower()] = rule
+
+    def _handle_resource_replacement(path: Path, relative: str) -> bool:
+        normalized_relative = _normalize_config_path(relative)
+        rule = resource_lookup.get(normalized_relative.lower()) or resource_name_lookup.get(
+            path.name.lower()
+        )
+        if not rule:
+            return False
+        try:
+            path.unlink()
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка удаления {path}: {exc}")
+            return False
+        rule.applied = True
+        stats.removed += 1
+        rename_map[normalized_relative or path.name] = rule.destination
+        logger.info(
+            f"🧩 Заменён ресурс: {normalized_relative or path.name} → {rule.destination}"
+        )
+        return True
+
     rename_map: Dict[str, str] = {}
     stats = AssetStats(downloaded=downloaded)
 
@@ -194,6 +264,10 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
             continue
 
         name_lower = path.name.lower()
+        relative_path = utils.relpath(path, project_root)
+
+        if _handle_resource_replacement(path, relative_path):
+            continue
 
         if name_lower in delete_immediately or name_lower in delete_service:
             try:
@@ -259,6 +333,20 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
             legacy_mapping.unlink()
         except Exception as exc:
             logger.warn(f"[assets] Не удалось удалить устаревший rename_map.json: {exc}")
+
+    for rule in resource_rules:
+        destination_path = project_root / rule.destination
+        try:
+            if not rule.source.exists():
+                logger.warn(
+                    f"[assets] Ресурс для копирования не найден: {rule.source}"  # pragma: no cover
+                )
+            else:
+                utils.safe_copy(rule.source, destination_path)
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка копирования {rule.source} → {destination_path}: {exc}")
+        for original in rule.originals:
+            rename_map.setdefault(original, rule.destination)
 
     try:
         utils.safe_write(

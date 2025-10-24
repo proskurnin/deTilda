@@ -20,6 +20,10 @@ class ConfigLoader:
 
     # ------------------------------------------------------------------
     @property
+    def base_dir(self) -> Path:
+        return Path(self._base_dir)
+
+    @property
     def config_path(self) -> Path:
         return Path(self._base_dir) / "config" / "config.yaml"
 

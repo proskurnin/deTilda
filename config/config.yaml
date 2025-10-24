@@ -68,7 +68,6 @@ images:
     patterns:
       - "tildacopy.png"
       - "tildacopy_black.png"
-      - "tildafavicon.ico"
       - "aidacopy.png"
       - "aidacopy_black.png"
       - "aidafavicon.ico"
@@ -76,7 +75,6 @@ images:
       - "tilda.ws/img/logo404.png"
   comment_out_link_tags:
     rel_values:
-      - "shortcut icon"
       - "icon"
       - "apple-touch-icon"
       - "apple-touch-icon-precomposed"
@@ -148,3 +146,10 @@ service_files:
   rename_map_output:
     filename: "rename_map.json"
     location: "logs"
+  resource_copy:
+    files:
+      - source: "favicon.ico"
+        destination: "images/favicon.ico"
+        originals:
+          - "images/tildafavicon.ico"
+          - "tildafavicon.ico"
