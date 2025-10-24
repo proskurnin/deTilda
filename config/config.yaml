@@ -120,12 +120,12 @@ service_files:
     after_rename:
       - "aida-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"
-      - "tilda-events-1.0.min.js"
+      - "aida-fallback-1.0.min.js"
   scripts_to_remove_from_project:
     filenames:
       - "aida-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"
-      - "tilda-events-1.0.min.js"
+      - "aida-fallback-1.0.min.js"
   protected_files_in_refs_update:
     files:
       - "form-handler.js"
