@@ -1,11 +1,15 @@
 """Asset rename and cleanup utilities."""
 from __future__ import annotations
 
-import re
+import contextlib
 import json
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable, Iterator, Tuple
 
 from core import logger, utils
 from core.config_loader import ConfigLoader, iter_section_list
@@ -17,6 +21,7 @@ __all__ = ["AssetStats", "rename_and_cleanup_assets"]
 class AssetStats:
     renamed: int = 0
     removed: int = 0
+    downloaded: int = 0
 
 
 @dataclass
@@ -40,11 +45,134 @@ def _sanitize(name: str) -> str:
     return re.sub(r"_+", "_", sanitized)
 
 
+def _iter_links(text: str, link_patterns: Iterable[str]) -> Iterator[str]:
+    for pattern in link_patterns:
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            logger.warn(f"[assets] Некорректный паттерн ссылки: {pattern}")
+            continue
+        for match in regex.finditer(text):
+            link = match.groupdict().get("link")
+            if link:
+                yield link
+
+
+def _resolve_download_target(url: str, rules: Iterable[Dict[str, object]]) -> Tuple[str, str] | None:
+    parsed = urllib.parse.urlsplit(url if not url.startswith("//") else f"https:{url}")
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    filename = Path(urllib.parse.unquote(parsed.path)).name
+    if not filename:
+        return None
+    suffix = Path(filename).suffix.lower()
+    for rule in rules:
+        folder = str(rule.get("folder", "")).strip().strip("/")
+        if not folder:
+            continue
+        extensions = rule.get("extensions")
+        if extensions:
+            exts = {str(ext).lower() for ext in extensions if isinstance(ext, str)}
+            if suffix not in exts:
+                continue
+        return folder, filename
+    return None
+
+
+def _fetch_url(url: str) -> bytes:
+    normalized = url
+    if url.startswith("//"):
+        normalized = f"https:{url}"
+    request = urllib.request.Request(
+        normalized,
+        headers={
+            "User-Agent": "Detilda/1.0",
+            "Accept": "*/*",
+        },
+    )
+    with contextlib.closing(urllib.request.urlopen(request, timeout=15)) as response:  # type: ignore[arg-type]
+        return response.read()
+
+
+def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
+    service_cfg = loader.service_files()
+    remote_cfg = service_cfg.get("remote_assets", {})
+    rules = remote_cfg.get("rules", [])
+    if not rules:
+        return 0
+
+    patterns_cfg = loader.patterns()
+    link_patterns = patterns_cfg.get("links", [])
+    if not link_patterns:
+        return 0
+
+    scan_exts = remote_cfg.get("scan_extensions") or []
+    if scan_exts:
+        files = utils.list_files_recursive(project_root, extensions=tuple(scan_exts))
+    else:
+        files = utils.list_files_recursive(project_root)
+
+    urls: set[str] = set()
+    for file_path in files:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = file_path.read_text(encoding="utf-8-sig")
+            except Exception:
+                continue
+        except Exception:
+            continue
+
+        for link in _iter_links(text, link_patterns):
+            if "til" not in link.lower():
+                continue
+            parsed = urllib.parse.urlsplit(link if not link.startswith("//") else f"https:{link}")
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            urls.add(link)
+
+    downloaded = 0
+    for url in sorted(urls):
+        target = _resolve_download_target(url, rules)
+        if target is None:
+            continue
+        folder, filename = target
+        destination_dir = project_root / folder
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination_path = destination_dir / filename
+        if destination_path.exists():
+            continue
+        try:
+            payload = _fetch_url(url)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+            logger.warn(f"[assets] Не удалось скачать {url}: {exc}")
+            continue
+        except Exception as exc:  # pragma: no cover - сетевые сбои
+            logger.warn(f"[assets] Неожиданная ошибка скачивания {url}: {exc}")
+            continue
+
+        try:
+            destination_path.write_bytes(payload)
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка записи {destination_path}: {exc}")
+            continue
+
+        downloaded += 1
+        logger.info(
+            f"🌐 Загружен ресурс: {url} → {utils.relpath(destination_path, project_root)}"
+        )
+
+    return downloaded
+
+
 def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> AssetResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     images_cfg = loader.images()
     service_cfg = loader.service_files()
+
+    downloaded = _download_remote_assets(project_root, loader)
 
     regex_pattern = (
         patterns_cfg.get("assets", {}).get("til_to_ai_filename")
@@ -59,7 +187,7 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
     delete_service = _collect_lowercase_names(service_cfg, "scripts_to_delete", "after_rename")
 
     rename_map: Dict[str, str] = {}
-    stats = AssetStats()
+    stats = AssetStats(downloaded=downloaded)
 
     for path in sorted(project_root.rglob("*")):
         if not path.is_file():
@@ -116,20 +244,37 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
         )
         logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
 
-    if rename_map:
-        mapping_path = project_root / "rename_map.json"
+    mapping_cfg = service_cfg.get("rename_map_output", {})
+    mapping_name = mapping_cfg.get("filename", "rename_map.json")
+    mapping_location = str(mapping_cfg.get("location", "logs")).strip()
+    if mapping_location.lower() == "logs":
+        mapping_dir = logger.get_logs_dir()
+    else:
+        mapping_dir = project_root / mapping_location
+    mapping_path = mapping_dir / mapping_name
+
+    legacy_mapping = project_root / "rename_map.json"
+    if legacy_mapping.exists():
         try:
-            utils.safe_write(
-                mapping_path,
-                json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
-            )
-            logger.ok(
-                f"💾 Таблица маппинга сохранена: {mapping_path.name} ({len(rename_map)} элементов)"
-            )
+            legacy_mapping.unlink()
         except Exception as exc:
-            logger.err(f"[assets] Ошибка сохранения rename_map.json: {exc}")
+            logger.warn(f"[assets] Не удалось удалить устаревший rename_map.json: {exc}")
+
+    try:
+        utils.safe_write(
+            mapping_path,
+            json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
+        )
+        relative_mapping = utils.relpath(mapping_path, logger.get_logs_dir())
+        logger.ok(
+            f"💾 Таблица маппинга сохранена: {relative_mapping} ({len(rename_map)} элементов)"
+        )
+    except Exception as exc:
+        logger.err(f"[assets] Ошибка сохранения {mapping_path.name}: {exc}")
 
     logger.info(
         f"📦 Ассеты обработаны: переименовано {stats.renamed}, удалено {stats.removed}"
     )
+    if stats.downloaded:
+        logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded}")
     return AssetResult(rename_map=rename_map, stats=stats)

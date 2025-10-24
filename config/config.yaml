@@ -20,7 +20,16 @@ patterns:
   replace_rules:
     - pattern: "(?i)\\btil"
       replacement: "ai"
+    - pattern: "(?i)\\bt-"
+      replacement: "ai-"
   comment_rules: []
+  text_extensions:
+    - ".html"
+    - ".htm"
+    - ".css"
+    - ".js"
+    - ".php"
+    - ".txt"
   ignore_prefixes:
     - "http://"
     - "https://"
@@ -79,6 +88,29 @@ images:
 
 service_files:
   description: "Правила для служебных файлов, скриптов и инструментов пайплайна"
+  remote_assets:
+    scan_extensions:
+      - ".html"
+      - ".htm"
+      - ".css"
+      - ".js"
+      - ".php"
+      - ".txt"
+    rules:
+      - folder: "css"
+        extensions:
+          - ".css"
+      - folder: "js"
+        extensions:
+          - ".js"
+      - folder: "images"
+        extensions:
+          - ".png"
+          - ".jpg"
+          - ".jpeg"
+          - ".gif"
+          - ".svg"
+          - ".ico"
   exclude_from_rename:
     files:
       - "robots.txt"
@@ -113,3 +145,6 @@ service_files:
     files_to_clean_tilda_refs:
       - "robots.txt"
       - "readme.txt"
+  rename_map_output:
+    filename: "rename_map.json"
+    location: "logs"
