@@ -22,6 +22,8 @@ patterns:
       replacement: "ai"
     - pattern: "(?i)\\bt-"
       replacement: "ai-"
+    - pattern: "(?is)<script\\s+src=([\"'])js/form-handler\\.js\\1\\s*></script>"
+      replacement: "<script src=\"js/aida-forms-1.0.min.js\"></script>"
   comment_rules: []
   text_extensions:
     - ".html"
@@ -54,6 +56,7 @@ patterns:
     - "(https?://|//)[^\\s'\"]*tilda\\.ws[^\\s'\"]*"
     - "(https?://|//)[^\\s'\"]*tildacdn\\.com[^\\s'\"]*"
     - "(https?://|//)[^\\s'\"]*tildaapi\\.com[^\\s'\"]*"
+    - "(?is)<script[^>]*>if\(!window\\.mainTracker\)\\s*\{window\\.mainTracker='tilda';\}.*?js/aida-stat-1\\.0\\.min\\.js[^<]*</script>"
 
 images:
   description: "Правила обработки и очистки изображений"
@@ -129,6 +132,7 @@ service_files:
       - "aida-forms-1.0.min.js"
   html_inject_options:
     inject_handler_script: "form-handler.js"
+    inject_forms_script: "aida-forms-1.0.min.js"
     inject_after_marker: "</body>"
   checker_options:
     allow_inline_base64_error: false
