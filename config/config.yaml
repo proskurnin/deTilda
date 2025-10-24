@@ -111,4 +111,5 @@ service_files:
       - ".txt"
   cleaner_options:
     files_to_clean_tilda_refs:
+      - "robots.txt"
       - "readme.txt"
