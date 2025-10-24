@@ -1,6 +1,6 @@
 {
   "name": "Detilda",
-  "version": "4.4.0-LTS",
+  "version": "v4.5.0 LTS unified",
   "release_date": "2025-10-24",
   "description": "Offline Tilda cleanup and re-packaging automation tool.",
   "authors": [
