@@ -1,215 +1,135 @@
-# -*- coding: utf-8 -*-
-"""
-assets.py — обработка ассетов Detilda v4.6.1 config-driven
-Правила из config/patterns.yaml, rules_images.json, rules_service_files.json:
- - til* → ai* (регистронезависимо, по границе слова) — применяется к изображениям, файлам, CSS и JS
- - исключения для переименования
- - списки физических удалений: as_is (до) и after_rename (после)
-Также создаём валидный images/1px.png (1×1 прозрачный).
-"""
+"""Asset rename and cleanup utilities."""
+from __future__ import annotations
 
-import json
 import re
+import json
+from dataclasses import dataclass
 from pathlib import Path
-from core import logger
-from core.utils import file_exists, safe_read
+from typing import Dict
 
-# Где ищем ассеты (деревья с медиа)
-_ASSET_DIRS = ("images", "img", "files", "media")
-# Где обычно лежат стили/скрипты
-_CODE_DIRS = ("css", "js")
+from core import logger, utils
+from core.config_loader import ConfigLoader, iter_section_list
 
-# Валидный 1×1 PNG (прозрачный)
-_ONEPX_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
-    b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
-)
+__all__ = ["AssetStats", "rename_and_cleanup_assets"]
 
-def _project_base_dir(project_root: Path) -> Path:
-    return project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent
 
-def _load_yaml(path: Path) -> dict:
-    try:
-        import yaml  # type: ignore
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        data = {}
-        current = None
-        for line in safe_read(path).splitlines():
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            if ":" in s and not s.startswith("-"):
-                k, v = s.split(":", 1)
-                k = k.strip()
-                v = v.strip().strip("'").strip('"')
-                if v == "":
-                    data[k] = []
-                    current = k
-                else:
-                    data[k] = v
-                    current = k
-            elif s.startswith("-") and current:
-                item = s[1:].strip().strip("'").strip('"')
-                data.setdefault(current, []).append(item)
-        return data
+@dataclass
+class AssetStats:
+    renamed: int = 0
+    removed: int = 0
 
-def _load_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.warn(f"[assets] Не удалось прочитать JSON: {path}")
-        return {}
 
-def _load_configs(project_root: Path) -> tuple[dict, dict, dict]:
-    base_dir = _project_base_dir(project_root)
-    cfg_dir = base_dir / "config"
-    patterns = _load_yaml(cfg_dir / "patterns.yaml")
-    rules_images = _load_json(cfg_dir / "rules_images.json")
-    rules_service = _load_json(cfg_dir / "rules_service_files.json")
-    return patterns, rules_images, rules_service
+@dataclass
+class AssetResult:
+    rename_map: Dict[str, str]
+    stats: AssetStats
 
-def _compile_til_to_ai_regex(patterns: dict) -> re.Pattern:
-    # В YAML: assets.til_to_ai_filename, по умолчанию \btil
-    p = None
-    try:
-        p = patterns.get("assets", {}).get("til_to_ai_filename", r"\btil")
-    except Exception:
-        p = r"\btil"
-    return re.compile(p, re.IGNORECASE)
 
-def _excluded_from_rename(rules_service: dict) -> set[str]:
-    try:
-        items = rules_service.get("exclude_from_rename", {}).get("files", []) or []
-        return {s.lower() for s in items}
-    except Exception:
-        return set()
+def _collect_lowercase_names(section: Dict[str, object], *keys: str) -> set[str]:
+    return {name.lower() for name in iter_section_list(section, *keys)}
 
-def _delete_lists(rules_images: dict) -> tuple[set[str], set[str]]:
-    try:
-        after_rename = set((rules_images.get("delete_physical_files", {}).get("after_rename", []) or []))
-        as_is = set((rules_images.get("delete_physical_files", {}).get("as_is", []) or []))
-        return {s.lower() for s in after_rename}, {s.lower() for s in as_is}
-    except Exception:
-        return set(), set()
 
-def _sanitize_filename(name: str) -> str:
-    out = (name.replace(" ", "_")
-               .replace("(", "")
-               .replace(")", "")
-               .replace(",", "")
-               .replace("&", "and"))
-    out = re.sub(r"_+", "_", out)
-    return out
+def _sanitize(name: str) -> str:
+    sanitized = (
+        name.replace(" ", "_")
+        .replace("(", "")
+        .replace(")", "")
+        .replace(",", "")
+        .replace("&", "and")
+    )
+    return re.sub(r"_+", "_", sanitized)
 
-def _iter_candidate_files(project_root: Path):
-    """
-    Итератор по файлам, которые нужно рассматривать для переименования:
-    - всё в папках изображений/файлов
-    - все *.css и *.js в проекте (включая /css и /js)
-    """
-    root = Path(project_root)
-    yielded = set()
 
-    # Медиа-папки
-    for d in _ASSET_DIRS:
-        base = root / d
-        if base.exists():
-            for p in base.rglob("*.*"):
-                if p.is_file():
-                    rp = p.resolve()
-                    if rp not in yielded:
-                        yielded.add(rp)
-                        yield p
+def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> AssetResult:
+    project_root = Path(project_root)
+    patterns_cfg = loader.patterns()
+    images_cfg = loader.images()
+    service_cfg = loader.service_files()
 
-    # Все CSS/JS по всему проекту
-    for pattern in ("*.css", "*.js"):
-        for p in root.rglob(pattern):
-            if p.is_file():
-                rp = p.resolve()
-                if rp not in yielded:
-                    yielded.add(rp)
-                    yield p
+    regex_pattern = (
+        patterns_cfg.get("assets", {}).get("til_to_ai_filename")
+        if isinstance(patterns_cfg.get("assets"), dict)
+        else None
+    )
+    til_regex = re.compile(str(regex_pattern or r"\btil"), re.IGNORECASE)
 
-def rename_and_cleanup_assets(project_root: Path, stats: dict):
-    """
-    Переименовывает ассеты по правилу til* → ai*, учитывая исключения и списки удаления.
-    Также переименовывает *.css и *.js файлы (именно имена файлов), и формирует rename_map.
-    Возвращает:
-      rename_map — {старый_относит_путь: новый_относит_путь}
-      stats — {"renamed": int, "removed": int}
-    """
-    patterns, rules_images, rules_service = _load_configs(project_root)
-    til_to_ai_rx = _compile_til_to_ai_regex(patterns)
-    exclude = _excluded_from_rename(rules_service)
-    del_after_rename, del_as_is = _delete_lists(rules_images)
+    exclude_from_rename = _collect_lowercase_names(service_cfg, "exclude_from_rename", "files")
+    delete_after_rename = _collect_lowercase_names(images_cfg, "delete_physical_files", "after_rename")
+    delete_immediately = _collect_lowercase_names(images_cfg, "delete_physical_files", "as_is")
+    delete_service = _collect_lowercase_names(service_cfg, "scripts_to_delete", "after_rename")
 
-    rename_map: dict[str, str] = {}
-    renamed_count = 0
-    removed_count = 0
+    rename_map: Dict[str, str] = {}
+    stats = AssetStats()
 
-    root = Path(project_root)
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
 
-    for path in _iter_candidate_files(root):
-        rel_old = str(path.relative_to(root)).replace("\\", "/")
         name_lower = path.name.lower()
 
-        # 0) немедленное удаление "как есть"
-        if name_lower in del_as_is:
+        if name_lower in delete_immediately or name_lower in delete_service:
             try:
                 path.unlink()
-                removed_count += 1
+                stats.removed += 1
                 logger.info(f"🗑 Удалён (as_is): {path.name}")
-            except Exception as e:
-                logger.err(f"[assets] Ошибка удаления {path}: {e}")
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка удаления {path}: {exc}")
             continue
 
-        # 1) исключения из переименования
-        if name_lower in exclude:
+        if name_lower in exclude_from_rename:
             continue
 
-        # 2) применяем til* → ai* на ИМЕНИ файла
-        stem, ext = path.stem, path.suffix
-        new_stem = til_to_ai_rx.sub("ai", stem, count=1)  # только первый префикс
-        new_name = _sanitize_filename(new_stem + ext)
+        new_name = path.name
+        match = til_regex.search(path.stem)
+        if match:
+            new_name = _sanitize(til_regex.sub("ai", path.stem, count=1) + path.suffix)
 
         if new_name != path.name:
             new_path = path.with_name(new_name)
             try:
-                path.rename(new_path)
-                renamed_count += 1
-                rel_new = str(new_path.relative_to(root)).replace("\\", "/")
-                rename_map[rel_old] = rel_new
-                logger.info(f"🔄 Переименован: {path.name} → {new_name}")
-                path = new_path
-                name_lower = new_name.lower()
-                rel_old = rel_new
-            except Exception as e:
-                logger.err(f"[assets] Ошибка переименования {path}: {e}")
+                old_rel = utils.relpath(path, project_root)
+                path = path.rename(new_path)
+                new_rel = utils.relpath(new_path, project_root)
+                rename_map[old_rel] = new_rel
+                stats.renamed += 1
+                logger.info(f"🔄 Переименован: {old_rel} → {new_rel}")
+                name_lower = new_path.name.lower()
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка переименования {path}: {exc}")
+                continue
 
-        # 3) удаление «после переименования»
-        if name_lower in del_after_rename:
+        if name_lower in delete_after_rename or name_lower in delete_service:
             try:
                 path.unlink()
-                removed_count += 1
+                stats.removed += 1
                 logger.info(f"🗑 Удалён (after_rename): {path.name}")
-            except Exception as e:
-                logger.err(f"[assets] Ошибка удаления {path}: {e}")
-            continue
+            except Exception as exc:
+                logger.err(f"[assets] Ошибка удаления {path}: {exc}")
 
-    # 4) placeholder 1px.png
-    placeholder = root / "images" / "1px.png"
-    if not file_exists(placeholder):
+    placeholder = project_root / "images" / "1px.png"
+    if not placeholder.exists():
+        placeholder.parent.mkdir(parents=True, exist_ok=True)
+        placeholder.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
+            b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
+
+    if rename_map:
+        mapping_path = project_root / "rename_map.json"
         try:
-            placeholder.parent.mkdir(parents=True, exist_ok=True)
-            with open(placeholder, "wb") as f:
-                f.write(_ONEPX_PNG)
-            logger.info(f"🧩 Добавлен placeholder: {placeholder}")
-        except Exception as e:
-            logger.err(f"[assets] Ошибка при создании placeholder: {e}")
+            utils.safe_write(
+                mapping_path,
+                json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
+            )
+            logger.ok(
+                f"💾 Таблица маппинга сохранена: {mapping_path.name} ({len(rename_map)} элементов)"
+            )
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка сохранения rename_map.json: {exc}")
 
-    stats["renamed"] = renamed_count
-    stats["removed"] = removed_count
-    logger.info(f"📦 Ассеты обработаны: переименовано {renamed_count}, удалено {removed_count}")
-    return rename_map, stats
+    logger.info(
+        f"📦 Ассеты обработаны: переименовано {stats.renamed}, удалено {stats.removed}"
+    )
+    return AssetResult(rename_map=rename_map, stats=stats)
