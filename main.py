@@ -65,7 +65,7 @@ def main() -> None:
             broken_links=0,
         )
 
-        forms.generate_send_email_php(project_root, email)
+        forms.generate_form_assets(project_root, email)
         inject.inject_form_scripts(project_root, loader)
 
         fixed_links, broken_links = refs.update_all_refs_in_project(
