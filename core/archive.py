@@ -73,7 +73,7 @@ def unzip_archive(archive_path: str, workdir: str) -> str:
 
 # === Прямая отладка ===
 if __name__ == "__main__":
-    test_archive = "./_workdir/project5059034.zip"
+    test_archive = "./_workdir/project5059034_1760998414.zip"
     test_workdir = "./_workdir"
     try:
         result = unzip_archive(test_archive, test_workdir)

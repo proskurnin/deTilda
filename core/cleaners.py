@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """Cleaning helpers used by the refactored pipeline."""
 from __future__ import annotations
+"""
+cleaners.py — полная реконфигурация проекта после экспорта из Tilda
+Detilda v4.9 unified: правила берутся из config/config.yaml.
+"""
 
 import json
 import re

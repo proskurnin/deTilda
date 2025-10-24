@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """Asset processing primitives used by the refactored pipeline."""
 from __future__ import annotations
+"""
+assets.py — обработка ассетов Detilda v4.9 unified
+Использует единый config/config.yaml:
+ - patterns.assets.til_to_ai_filename — регулярка для переименования til* → ai*
+ - images.delete_physical_files — списки файлов на удаление
+ - service_files.exclude_from_rename — исключения из переименования
+Также создаёт валидный images/1px.png (1×1 прозрачный).
+"""
 
 import re
 from dataclasses import dataclass
