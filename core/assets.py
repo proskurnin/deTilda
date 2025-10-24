@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-assets.py — обработка ассетов Detilda v4.6.1 config-driven
-Правила из config/patterns.yaml, rules_images.json, rules_service_files.json:
- - til* → ai* (регистронезависимо, по границе слова) — применяется к изображениям, файлам, CSS и JS
- - исключения для переименования
- - списки физических удалений: as_is (до) и after_rename (после)
-Также создаём валидный images/1px.png (1×1 прозрачный).
+assets.py — обработка ассетов Detilda v4.9 unified
+Использует единый config/config.yaml:
+ - patterns.assets.til_to_ai_filename — регулярка для переименования til* → ai*
+ - images.delete_physical_files — списки файлов на удаление
+ - service_files.exclude_from_rename — исключения из переименования
+Также создаёт валидный images/1px.png (1×1 прозрачный).
 """
 
-import json
 import re
 from pathlib import Path
-from core import logger
-from core.utils import file_exists, safe_read
+from core import logger, config_loader
+from core.utils import file_exists
 
 # Где ищем ассеты (деревья с медиа)
 _ASSET_DIRS = ("images", "img", "files", "media")
@@ -29,45 +28,11 @@ _ONEPX_PNG = (
 def _project_base_dir(project_root: Path) -> Path:
     return project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent
 
-def _load_yaml(path: Path) -> dict:
-    try:
-        import yaml  # type: ignore
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        data = {}
-        current = None
-        for line in safe_read(path).splitlines():
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            if ":" in s and not s.startswith("-"):
-                k, v = s.split(":", 1)
-                k = k.strip()
-                v = v.strip().strip("'").strip('"')
-                if v == "":
-                    data[k] = []
-                    current = k
-                else:
-                    data[k] = v
-                    current = k
-            elif s.startswith("-") and current:
-                item = s[1:].strip().strip("'").strip('"')
-                data.setdefault(current, []).append(item)
-        return data
-
-def _load_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.warn(f"[assets] Не удалось прочитать JSON: {path}")
-        return {}
-
 def _load_configs(project_root: Path) -> tuple[dict, dict, dict]:
     base_dir = _project_base_dir(project_root)
-    cfg_dir = base_dir / "config"
-    patterns = _load_yaml(cfg_dir / "patterns.yaml")
-    rules_images = _load_json(cfg_dir / "rules_images.json")
-    rules_service = _load_json(cfg_dir / "rules_service_files.json")
+    patterns = config_loader.get_patterns_config(base_dir)
+    rules_images = config_loader.get_rules_images(base_dir)
+    rules_service = config_loader.get_rules_service_files(base_dir)
     return patterns, rules_images, rules_service
 
 def _compile_til_to_ai_regex(patterns: dict) -> re.Pattern:

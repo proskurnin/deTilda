@@ -1,47 +1,40 @@
 # -*- coding: utf-8 -*-
 """
-config_loader.py — модуль загрузки конфигурационных файлов Detilda v4.2 LTS
-Загружает и кэширует YAML/JSON конфиги из папки config/, обеспечивает
-совместимость путей для работы со строками и pathlib.Path.
+config_loader.py — модуль загрузки конфигурационных файлов Detilda v4.9 unified
+Загружает единый YAML-конфиг из папки config/, кэширует его и предоставляет
+функции доступа к основным разделам (patterns, images, service_files).
 """
 
-import os
-import json
-import yaml
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Any, Dict
+
+import yaml
+
 from core import logger
 
 
-# === Кэш, чтобы не грузить конфиги повторно ===
-_CACHE = {}
+# === Путь по умолчанию и кэш, чтобы не грузить конфиги повторно ===
+_DEFAULT_SCRIPT_DIR = Path(__file__).resolve().parent.parent
+_CONFIG_FILENAME = "config.yaml"
+_CACHE: Dict[Path, Dict[str, Any]] = {}
 
 
 # === Универсальная функция загрузки YAML ===
-def _load_yaml(path: Path):
+def _load_yaml(path: Path) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+            if not isinstance(data, dict):
+                logger.err(f"[config_loader] Некорректный формат YAML: {path}")
+                return {}
+            return data
     except FileNotFoundError:
         logger.err(f"[config_loader] Файл не найден: {path}")
         return {}
     except Exception as e:
         logger.err(f"[config_loader] Ошибка при чтении YAML {path}: {e}")
-        return {}
-
-
-# === Универсальная функция загрузки JSON ===
-def _load_json(path: Path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.err(f"[config_loader] Файл не найден: {path}")
-        return {}
-    except json.JSONDecodeError as e:
-        logger.err(f"[config_loader] Ошибка JSON-декодирования в {path}: {e}")
-        return {}
-    except Exception as e:
-        logger.err(f"[config_loader] Ошибка при чтении JSON {path}: {e}")
         return {}
 
 
@@ -65,10 +58,16 @@ def _compile_regex(cfg):
             _compile_regex(val)
 
 
-# === Универсальная функция загрузки конфигов с кэшированием ===
-def _get_config(script_dir: str | Path, filename: str, is_yaml: bool = True):
-    script_dir = Path(script_dir)
-    config_path = script_dir / "config" / filename
+# === Вспомогательные функции ===
+def _resolve_base_dir(script_dir: str | Path | None) -> Path:
+    if script_dir is None:
+        return _DEFAULT_SCRIPT_DIR
+    return Path(script_dir)
+
+
+def _get_config(script_dir: str | Path | None, filename: str) -> Dict[str, Any]:
+    base_dir = _resolve_base_dir(script_dir)
+    config_path = base_dir / "config" / filename
 
     if config_path in _CACHE:
         return _CACHE[config_path]
@@ -77,39 +76,56 @@ def _get_config(script_dir: str | Path, filename: str, is_yaml: bool = True):
         logger.err(f"[config_loader] Конфиг не найден: {config_path}")
         return {}
 
-    cfg = _load_yaml(config_path) if is_yaml else _load_json(config_path)
+    cfg = _load_yaml(config_path)
     _compile_regex(cfg)
     _CACHE[config_path] = cfg
     return cfg
 
 
 # === Публичные функции ===
-def get_patterns_config(script_dir: str | Path):
-    """Загружает patterns.yaml"""
-    return _get_config(script_dir, "patterns.yaml", is_yaml=True)
+def get_master_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    """Возвращает полный конфиг config.yaml."""
+    return _get_config(script_dir, _CONFIG_FILENAME)
 
 
-def get_rules_images(script_dir: str | Path):
-    """Загружает rules_images.json"""
-    return _get_config(script_dir, "rules_images.json", is_yaml=False)
+def _get_section(script_dir: str | Path | None, section: str) -> Dict[str, Any]:
+    cfg = get_master_config(script_dir)
+    data = cfg.get(section, {}) if isinstance(cfg, dict) else {}
+    if isinstance(data, dict):
+        _compile_regex(data)
+        return data
+    logger.warn(f"[config_loader] Секция '{section}' имеет некорректный формат")
+    return {}
 
 
-def get_rules_service_files(script_dir: str | Path):
-    """Загружает rules_service_files.json"""
-    return _get_config(script_dir, "rules_service_files.json", is_yaml=False)
+def get_patterns_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    """Возвращает секцию patterns из config.yaml."""
+    return _get_section(script_dir, "patterns")
+
+
+def get_rules_images(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    """Возвращает секцию images из config.yaml."""
+    return _get_section(script_dir, "images")
+
+
+def get_rules_service_files(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    """Возвращает секцию service_files из config.yaml."""
+    return _get_section(script_dir, "service_files")
 
 
 # === Для отладки ===
 if __name__ == "__main__":
     test_dir = Path(__file__).resolve().parent.parent
     try:
+        master = get_master_config(test_dir)
         patterns = get_patterns_config(test_dir)
         images = get_rules_images(test_dir)
         service = get_rules_service_files(test_dir)
 
-        logger.info("✅ Конфиги успешно загружены:")
-        logger.info(f"  • patterns.yaml: {len(patterns)} ключей")
-        logger.info(f"  • rules_images.json: {len(images)} ключей")
-        logger.info(f"  • rules_service_files.json: {len(service)} ключей")
+        logger.info("✅ Конфиг успешно загружен:")
+        logger.info(f"  • config.yaml: {len(master)} разделов")
+        logger.info(f"  • patterns: {len(patterns)} ключей")
+        logger.info(f"  • images: {len(images)} ключей")
+        logger.info(f"  • service_files: {len(service)} ключей")
     except Exception as e:
         logger.err(f"💥 Ошибка при тестовой загрузке конфигов: {e}")

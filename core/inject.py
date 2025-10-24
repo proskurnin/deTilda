@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-inject.py — внедрение JS-обработчиков в HTML-файлы Detilda v4.2 LTS
-Добавляет form-handler.js и aida-forms-1.0.min.js после </body>,
-а также комментирует устаревшие тильдовские теги <script>.
+inject.py — внедрение JS-обработчиков в HTML-файлы Detilda v4.9 unified
+Правила берутся из config/config.yaml → service_files.html_inject_options
+и service_files.scripts_to_comment_out_tags.
 """
+
+from __future__ import annotations
 
 import os
 import re
@@ -11,12 +13,11 @@ from pathlib import Path
 from core import logger, config_loader, utils
 
 
-def inject_scripts_and_handlers(project_root: str, script_dir: str):
+def inject_scripts_and_handlers(project_root: str, script_dir: str | Path | None = None):
     """
     Основная функция внедрения JS-скриптов в HTML.
-    Использует параметры из rules_service_files.json → html_inject_options.
+    Использует параметры из config/config.yaml → service_files.html_inject_options.
     """
-    script_dir = Path(script_dir)
     project_root = Path(project_root)
 
     cfg_service = config_loader.get_rules_service_files(script_dir)

@@ -1,17 +1,39 @@
 # -*- coding: utf-8 -*-
 """
 cleaners.py — полная реконфигурация проекта после экспорта из Tilda
-Detilda v4.8 LTS
+Detilda v4.9 unified: правила берутся из config/config.yaml.
 """
 
 import json
 import os
 import re
 from pathlib import Path
-from core import logger
+from core import logger, config_loader
 
 
 # === Вспомогательные функции ===
+
+def _project_base_dir(project_root: Path) -> Path:
+    """Возвращает корень репозитория с конфигурацией."""
+    return project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent
+
+
+def _collect_delete_patterns(images_cfg: dict) -> list[str]:
+    targets = []
+    block = images_cfg.get("delete_physical_files", {}) if isinstance(images_cfg, dict) else {}
+    for key in ("after_rename", "as_is"):
+        items = block.get(key, []) if isinstance(block, dict) else []
+        targets.extend(str(item) for item in (items or []))
+    return targets
+
+
+def _collect_service_deletions(service_cfg: dict) -> list[str]:
+    targets = []
+    block = service_cfg.get("scripts_to_delete", {}) if isinstance(service_cfg, dict) else {}
+    items = block.get("after_rename", []) if isinstance(block, dict) else []
+    targets.extend(str(item) for item in (items or []))
+    return targets
+
 
 def _load_rules(project_root: Path) -> dict:
     """
@@ -19,17 +41,15 @@ def _load_rules(project_root: Path) -> dict:
     """
     rules = {"images": [], "service": []}
     try:
-        img_rules = project_root / "rules_images.json"
-        svc_rules = project_root / "rules_service_files.json"
+        base_dir = _project_base_dir(project_root)
+        images_cfg = config_loader.get_rules_images(base_dir)
+        service_cfg = config_loader.get_rules_service_files(base_dir)
 
-        if img_rules.exists():
-            rules["images"] = json.loads(img_rules.read_text(encoding="utf-8"))
-            logger.info(f"⚙️ Загружены правила изображений: {len(rules['images'])}")
+        rules["images"] = _collect_delete_patterns(images_cfg)
+        rules["service"] = _collect_service_deletions(service_cfg)
 
-        if svc_rules.exists():
-            rules["service"] = json.loads(svc_rules.read_text(encoding="utf-8"))
-            logger.info(f"⚙️ Загружены правила сервисных файлов: {len(rules['service'])}")
-
+        logger.info(f"⚙️ Загружены правила удаления изображений: {len(rules['images'])}")
+        logger.info(f"⚙️ Загружены правила удаления сервисных файлов: {len(rules['service'])}")
     except Exception as e:
         logger.err(f"[cleaners] Ошибка загрузки правил: {e}")
     return rules
