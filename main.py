@@ -2,6 +2,7 @@
 """CLI entry point orchestrating the Detilda pipeline."""
 from __future__ import annotations
 
+from time import time as _now
 from pathlib import Path
 
 from core import archive, assets, checker, cleaners, forms, inject, logger, refs, report
@@ -46,7 +47,7 @@ def main() -> None:
     logger.attach_to_project(project_root)
     loader = ConfigLoader(Path(__file__).resolve().parent)
 
-    start = time.time()
+    start = _now()
     try:
         asset_result = assets.rename_and_cleanup_assets(project_root, loader)
         report.generate_intermediate_report(
@@ -73,7 +74,7 @@ def main() -> None:
 
         link_check = checker.check_links(project_root, loader)
 
-        exec_time = time.time() - start
+        exec_time = _now() - start
         report.generate_final_report(
             project_root=project_root,
             renamed_count=asset_result.stats.renamed,
