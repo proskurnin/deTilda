@@ -131,7 +131,6 @@ service_files:
   protected_files_in_refs_update:
     files:
       - "form-handler.js"
-      - "aida-forms-1.0.min.js"
   html_inject_options:
     inject_handler_script: "form-handler.js"
     inject_after_marker: "</body>"
