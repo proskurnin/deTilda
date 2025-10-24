@@ -5,7 +5,18 @@ from __future__ import annotations
 from time import time as _now
 from pathlib import Path
 
-from core import archive, assets, checker, cleaners, forms, inject, logger, refs, report
+from core import (
+    archive,
+    assets,
+    checker,
+    cleaners,
+    forms,
+    inject,
+    logger,
+    refs,
+    report,
+    script_cleaner,
+)
 from core.config_loader import ConfigLoader
 from core.utils import ensure_dir, get_elapsed_time, load_manifest
 
@@ -50,6 +61,7 @@ def main() -> None:
     start = _now()
     try:
         asset_result = assets.rename_and_cleanup_assets(project_root, loader)
+        script_cleaner.remove_disallowed_scripts(project_root, loader)
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=0,
