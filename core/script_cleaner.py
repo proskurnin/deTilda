@@ -21,6 +21,21 @@ def _collect_script_names(loader: ConfigLoader) -> list[str]:
     return names
 
 
+def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
+    patterns: list[re.Pattern[str]] = []
+    for name in script_names:
+        if not name:
+            continue
+        escaped = re.escape(name)
+        pattern = re.compile(
+            rf"<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])"
+            rf"[^'\"<>]*{escaped}[^'\"<>]*\\1[^>]*>\\s*</script>",
+            re.IGNORECASE,
+        )
+        patterns.append(pattern)
+    return patterns
+
+
 def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
     """Remove script tags that reference disallowed filenames.
 
@@ -42,13 +57,7 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
         ".txt",
     )
 
-    script_patterns = [
-        re.compile(
-            rf"<script[^>]*{re.escape(name)}[^>]*></script>",
-            re.IGNORECASE,
-        )
-        for name in script_names
-    ]
+    script_patterns = _compile_script_patterns(script_names)
 
     removed_tags = 0
     updated_files = 0

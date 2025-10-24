@@ -43,15 +43,12 @@ def inject_form_scripts(project_root: Path, loader: ConfigLoader) -> int:
             return text + tag, True
 
         content, added_handler = _ensure_script(content, handler)
-        content, added_forms = _ensure_script(content, "aida-forms-1.0.min.js")
 
         if content != original:
             utils.safe_write(path, content)
             processed += 1
             if added_handler:
                 logger.info(f"🧩 Добавлен скрипт {handler} в {path.name}")
-            if added_forms:
-                logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
 
     if processed:
         logger.info(
