@@ -1,17 +1,24 @@
 # -*- coding: utf-8 -*-
-"""
-forms.py — генерация PHP-формы и внедрение JS-скриптов (Detilda v4.4 LTS)
-"""
+"""Form helpers."""
+
+from __future__ import annotations
 
 from pathlib import Path
+
 from core import logger
-import re
+from core.project import ProjectContext
 
 
-def generate_send_email_php(project_root: Path, recipient_email: str) -> None:
-    """
-    Создаёт send_email.php в корне проекта с учётом переданного e-mail.
-    """
+def _resolve_project_root(project: Path | ProjectContext) -> Path:
+    if isinstance(project, ProjectContext):
+        return project.project_root
+    return Path(project)
+
+
+def generate_send_email_php(project: Path | ProjectContext, recipient_email: str) -> None:
+    """Создаёт send_email.php в корне проекта с учётом переданного e-mail."""
+
+    project_root = _resolve_project_root(project)
     target = project_root / "send_email.php"
 
     php_code = f"""<?php
@@ -88,46 +95,3 @@ exit;
         logger.info(f"📨 Файл send_email.php создан: {target}")
     except Exception as e:
         logger.err(f"[forms] Ошибка записи send_email.php: {e}")
-
-
-def inject_form_scripts(project_root: Path) -> int:
-    """
-    Внедряет form-handler.js и AIDA forms во все HTML-файлы.
-    Возвращает количество изменённых файлов.
-    """
-    injected = 0
-    html_files = list(project_root.rglob("*.html"))
-
-    for file_path in html_files:
-        try:
-            content = file_path.read_text(encoding="utf-8", errors="ignore")
-
-            # Удаляем старые тильдовские скрипты
-            content = re.sub(r'<script[^>]+tilda[^>]*></script>', '', content, flags=re.I)
-
-            # Проверяем, добавлен ли уже form-handler.js
-            if "form-handler.js" not in content:
-                script_block = '\n<script src="js/form-handler.js"></script>\n'
-                if "</body>" in content:
-                    content = content.replace("</body>", script_block + "</body>")
-                else:
-                    content += script_block
-                injected += 1
-                logger.info(f"🧩 Добавлен скрипт form-handler.js в {file_path.name}")
-
-            # Проверяем наличие AIDA forms
-            if "aida-forms" not in content.lower():
-                aida_block = '\n<script src="js/aida-forms-1.0.min.js"></script>\n'
-                if "</body>" in content:
-                    content = content.replace("</body>", aida_block + "</body>")
-                else:
-                    content += aida_block
-                injected += 1
-                logger.info(f"🧩 Добавлен AIDA forms в {file_path.name}")
-
-            file_path.write_text(content, encoding="utf-8")
-
-        except Exception as e:
-            logger.err(f"[inject] Ошибка обработки {file_path}: {e}")
-
-    return injected

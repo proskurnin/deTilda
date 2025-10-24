@@ -1,0 +1,114 @@
+# Detilda unified configuration
+#
+# Секции файла:
+#   patterns       — регулярные выражения для поиска и очистки ссылок и текстов.
+#   images         — правила обработки изображений и иконок.
+#   service_files  — правила для служебных файлов и общие настройки пайплайна.
+# Комментарии в секциях описывают назначение каждого блока.
+
+meta:
+  version: "1.0"
+  description: "Единый конфигурационный файл Detilda"
+
+patterns:
+  description: "Регулярные выражения и правила текстовой очистки"
+  links:
+    - "(?i)\\b(?:src|href|action)\\s*=\\s*[\"''](?P<link>[^\"'']+)[\"'']"
+    - "(?i)\\burl\\(([\"'']?)(?P<link>[^) \"'']+)\\1\\)"
+    - "(?i)\\bsrcset\\s*=\\s*[\"''](?P<link>[^\"'']+)[\"'']"
+    - "(?i)\\bdata-src\\s*=\\s*[\"''](?P<link>[^\"'']+)[\"'']"
+  replace_rules:
+    - pattern: "(?i)\\btil"
+      replacement: "ai"
+  comment_rules: []
+  ignore_prefixes:
+    - "http://"
+    - "https://"
+    - "//"
+    - "data:"
+    - "mailto:"
+    - "tel:"
+    - "#"
+  robots_cleanup_patterns:
+    - "(?im)^\\s*Disallow:\\s*/tilda/(?:form|rec|click|scroll|popup|cart|product|event).*\\n?"
+    - "(?im)^\\s*Disallow:\\s*/\\*_escaped_fragment_\\*/\\s*\\n?"
+  readme_cleanup_patterns:
+    - "(?im)^.*Published on Tilda\\.cc.*\\n?"
+    - pattern: "(?i)\\btilda\\b"
+      replacement: "site"
+  htaccess_patterns:
+    rewrite_rule: "(?im)^[ \\t]*RewriteRule[ \\t]+\\^/?([a-z0-9\\-\\_\\/]+)\\??\\$[ \\t]+([^\\s\\[]+)"
+    redirect: "(?im)^[ \\t]*Redirect(?:Permanent|[ \\t]+3\\d{2})?[ \\t]+(/[^\\s]+)[ \\t]+([^\\s]+)"
+  assets:
+    til_to_ai_filename: "\\btil"
+  tilda_remnants_patterns:
+    - "(https?://|//)[^\\s'\"]*tilda\\.ws[^\\s'\"]*"
+    - "(https?://|//)[^\\s'\"]*tildacdn\\.com[^\\s'\"]*"
+    - "(https?://|//)[^\\s'\"]*tildaapi\\.com[^\\s'\"]*"
+
+images:
+  description: "Правила обработки и очистки изображений"
+  delete_physical_files:
+    after_rename:
+      - "aidacopy.png"
+      - "aidacopy_black.png"
+      - "aidafavicon.ico"
+    as_is:
+      - "logo404.png"
+  comment_out_links:
+    patterns:
+      - "tildacopy.png"
+      - "tildacopy_black.png"
+      - "tildafavicon.ico"
+      - "aidacopy.png"
+      - "aidacopy_black.png"
+      - "aidafavicon.ico"
+      - "logo404.png"
+      - "tilda.ws/img/logo404.png"
+  comment_out_link_tags:
+    rel_values:
+      - "shortcut icon"
+      - "icon"
+      - "apple-touch-icon"
+      - "apple-touch-icon-precomposed"
+  replace_links_with_1px:
+    patterns:
+      - "tilda.ws/img/logo404.png"
+      - "tildacopy.png"
+      - "tildacopy_black.png"
+
+service_files:
+  description: "Правила для служебных файлов, скриптов и инструментов пайплайна"
+  exclude_from_rename:
+    files:
+      - "robots.txt"
+      - "sitemap.xml"
+      - "send_email.php"
+      - ".htaccess"
+      - "htaccess"
+  scripts_to_delete:
+    after_rename:
+      - "aida-stat-1.0.min.js"
+  scripts_to_comment_out_tags:
+    filenames:
+      - "tilda-stat-1.0.min.js"
+      - "aida-stat-1.0.min.js"
+  protected_files_in_refs_update:
+    files:
+      - "form-handler.js"
+      - "aida-forms-1.0.min.js"
+  html_inject_options:
+    inject_handler_script: "form-handler.js"
+    inject_after_marker: "</body>"
+  checker_options:
+    allow_inline_base64_error: false
+    extensions_to_check:
+      - ".html"
+      - ".htm"
+      - ".css"
+      - ".js"
+      - ".php"
+      - ".txt"
+  cleaner_options:
+    files_to_clean_tilda_refs:
+      - "readme.txt"
