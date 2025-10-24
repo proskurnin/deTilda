@@ -1,12 +1,38 @@
 """Report generation utilities."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
+from typing import Final
 
 from core import logger, utils
 
 __all__ = ["generate_intermediate_report", "generate_final_report"]
+
+_REPORTS_ENABLED: bool | None = None
+_ENV_DISABLE_REPORTS: Final[str] = "DETILDA_DISABLE_REPORTS"
+
+
+def _reports_enabled() -> bool:
+    global _REPORTS_ENABLED
+    if _REPORTS_ENABLED is not None:
+        return _REPORTS_ENABLED
+
+    manifest = utils.load_manifest()
+    features = manifest.get("features", {}) if isinstance(manifest, dict) else {}
+    enabled = True
+    if isinstance(features, dict):
+        enabled = bool(features.get("reports", True))
+
+    env_override = os.getenv(_ENV_DISABLE_REPORTS)
+    if env_override is not None:
+        enabled = False
+
+    _REPORTS_ENABLED = enabled
+    if not _REPORTS_ENABLED:
+        logger.info("[report] Генерация отчётов отключена")
+    return _REPORTS_ENABLED
 
 
 def _report_path(suffix: str) -> Path:
@@ -21,6 +47,12 @@ def generate_intermediate_report(
     fixed_links: int,
     broken_links: int,
 ) -> None:
+    if not _reports_enabled():
+        logger.debug(
+            "[report] Пропуск промежуточного отчёта (генерация отключена)"
+        )
+        return
+
     report_path = _report_path("detilda_report")
     text = (
         "=== Detilda v4.5.0 LTS unified — Промежуточный отчёт ===\n"
@@ -47,6 +79,10 @@ def generate_final_report(
     broken_links_left: int,
     exec_time: float,
 ) -> None:
+    if not _reports_enabled():
+        logger.debug("[report] Пропуск финального отчёта (генерация отключена)")
+        return
+
     report_path = _report_path("final_report")
     status = "✅ Успех" if broken_links_left == 0 else "⚠️ Есть проблемы"
     text = (

@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -96,6 +97,19 @@ def _resolve_download_target(url: str, rules: Iterable[Dict[str, object]]) -> Tu
     return None
 
 
+_SSL_FALLBACK_CONTEXT: ssl.SSLContext | None = None
+
+
+def _get_unverified_context() -> ssl.SSLContext:
+    global _SSL_FALLBACK_CONTEXT
+    if _SSL_FALLBACK_CONTEXT is None:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        _SSL_FALLBACK_CONTEXT = context
+    return _SSL_FALLBACK_CONTEXT
+
+
 def _fetch_url(url: str) -> bytes:
     normalized = url
     if url.startswith("//"):
@@ -107,8 +121,38 @@ def _fetch_url(url: str) -> bytes:
             "Accept": "*/*",
         },
     )
-    with contextlib.closing(urllib.request.urlopen(request, timeout=15)) as response:  # type: ignore[arg-type]
-        return response.read()
+    try:
+        with contextlib.closing(
+            urllib.request.urlopen(request, timeout=15)  # type: ignore[arg-type]
+        ) as response:
+            return response.read()
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, ssl.SSLError):
+            logger.warn(
+                f"[assets] SSL-проверка не удалась для {normalized}, повтор с отключённой проверкой"
+            )
+            with contextlib.closing(
+                urllib.request.urlopen(  # type: ignore[arg-type]
+                    request,
+                    timeout=15,
+                    context=_get_unverified_context(),
+                )
+            ) as response:
+                return response.read()
+        raise
+    except ssl.SSLError:
+        logger.warn(
+            f"[assets] SSL-проверка не удалась для {normalized}, повтор с отключённой проверкой"
+        )
+        with contextlib.closing(
+            urllib.request.urlopen(  # type: ignore[arg-type]
+                request,
+                timeout=15,
+                context=_get_unverified_context(),
+            )
+        ) as response:
+            return response.read()
 
 
 def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:

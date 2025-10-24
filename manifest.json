@@ -17,7 +17,7 @@
     "htaccess_parser": true,
     "broken_link_fix": true,
     "form_autogen": true,
-    "reports": true,
+    "reports": false,
     "logs": true
   },
   "paths": {
