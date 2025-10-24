@@ -1,0 +1,54 @@
+{
+  "_comment": "Правила для служебных файлов и общие настройки",
+
+  "exclude_from_rename": {
+    "_comment": "Файлы, которые НЕ переименовывать, даже если имя начинается с 'til'",
+    "files": [
+      "robots.txt",
+      "sitemap.xml",
+      "send_email.php",
+      ".htaccess",
+      "htaccess"
+    ]
+  },
+
+  "scripts_to_delete": {
+    "_comment": "Скрипты, которые нужно физически удалить (после возможного переименования)",
+    "after_rename": [
+      "aida-stat-1.0.min.js"
+    ]
+  },
+
+  "scripts_to_comment_out_tags": {
+    "_comment": "Теги <script>, ссылающиеся на эти файлы, будут закомментированы",
+    "filenames": [
+      "tilda-stat-1.0.min.js",
+      "aida-stat-1.0.min.js"
+    ]
+  },
+
+  "protected_files_in_refs_update": {
+    "_comment": "Файлы, содержимое которых НЕ изменять при обновлении ссылок",
+    "files": [
+      "form-handler.js",
+      "aida-forms-1.0.min.js"
+    ]
+  },
+
+  "html_inject_options": {
+    "_comment": "Настройки для внедрения скриптов в HTML",
+    "inject_handler_script": "form-handler.js",
+    "inject_after_marker": "</body>"
+  },
+
+  "checker_options": {
+    "_comment": "Настройки для проверки ссылок",
+    "allow_inline_base64_error": false,
+    "extensions_to_check": [".html", ".htm", ".css", ".js", ".php", ".txt"]
+  },
+
+  "cleaner_options": {
+    "_comment": "Настройки для очистки файлов",
+    "files_to_clean_tilda_refs": ["readme.txt"]
+  }
+}

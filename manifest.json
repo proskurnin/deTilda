@@ -1,0 +1,49 @@
+{
+  "name": "Detilda",
+  "version": "4.4.0-LTS",
+  "release_date": "2025-10-24",
+  "description": "Offline Tilda cleanup and re-packaging automation tool.",
+  "authors": [
+    "Roman Proskurnin"
+  ],
+  "maintainer": "Roman Proskurnin",
+  "license": "MIT",
+  "entry_point": "main.py",
+  "python": ">=3.10",
+  "features": {
+    "archive_unpack": true,
+    "assets_cleanup": true,
+    "html_sanitizer": true,
+    "htaccess_parser": true,
+    "broken_link_fix": true,
+    "form_autogen": true,
+    "reports": true,
+    "logs": true
+  },
+  "paths": {
+    "workdir": "_workdir",
+    "logs": "logs",
+    "config": "config",
+    "core": "core"
+  },
+  "log_format": "[{time}] {level} {message}",
+  "report_format": "text",
+  "default_email": "r@prororo.com",
+  "build": {
+    "package_name": "detilda_v4.4_LTS.zip",
+    "include": [
+      "main.py",
+      "manifest.json",
+      "core/*.py",
+      "config/*.json",
+      "config/*.yaml"
+    ],
+    "exclude": [
+      "_workdir/*",
+      "logs/*",
+      "*.log",
+      "*.tmp",
+      "__pycache__/*"
+    ]
+  }
+}
