@@ -1,82 +1,58 @@
-# -*- coding: utf-8 -*-
-"""
-archive.py — модуль распаковки архива Detilda v4.2 LTS
-Отвечает за корректную распаковку .zip в _workdir и определение корневой папки проекта.
-"""
+"""Archive extraction helpers."""
+from __future__ import annotations
 
-import os
-import zipfile
 import shutil
+import zipfile
+from pathlib import Path
+
 from core import logger
 
+__all__ = ["unpack_archive"]
 
-def unzip_archive(archive_path: str, workdir: str) -> str:
-    """
-    Распаковывает архив .zip в рабочую директорию и возвращает путь к корневой папке проекта.
-    Если внутри архива единственная папка — извлекает её структуру как есть.
-    """
-    if not os.path.exists(archive_path):
-        raise FileNotFoundError(f"Архив не найден: {archive_path}")
 
-    extract_dir = os.path.join(workdir, "_unzipped_tmp")
-    if os.path.exists(extract_dir):
-        shutil.rmtree(extract_dir)
-    os.makedirs(extract_dir, exist_ok=True)
+def unpack_archive(archive_path: Path) -> Path | None:
+    """Extract *archive_path* into the parent directory and return project root."""
 
-    logger.info(f"→ Распаковка архива: {os.path.basename(archive_path)}")
+    archive_path = Path(archive_path)
+    if not archive_path.exists():
+        logger.err(f"Архив не найден: {archive_path}")
+        return None
+
+    workdir = archive_path.parent
+    logger.info("📦 Распаковка архива...")
 
     try:
-        with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
-    except zipfile.BadZipFile:
-        raise RuntimeError(f"Некорректный ZIP-архив: {archive_path}")
+        with zipfile.ZipFile(archive_path, "r") as handle:
+            entries = handle.namelist()
+            roots = {Path(name).parts[0] for name in entries if name}
+            target_root: Path
+            if len(roots) == 1:
+                (root_name,) = roots
+                target_root = workdir / root_name
+                logger.info(
+                    f"Обнаружена единственная корневая папка: '{root_name}'. Распаковка с сохранением структуры..."
+                )
+                if target_root.exists():
+                    shutil.rmtree(target_root)
+                handle.extractall(workdir)
+            else:
+                target_root = workdir / archive_path.stem
+                if target_root.exists():
+                    shutil.rmtree(target_root)
+                tmp_dir = workdir / "_detilda_extract_tmp"
+                if tmp_dir.exists():
+                    shutil.rmtree(tmp_dir)
+                handle.extractall(tmp_dir)
+                target_root.mkdir(parents=True, exist_ok=True)
+                for item in tmp_dir.iterdir():
+                    shutil.move(str(item), target_root / item.name)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+    except zipfile.BadZipFile as exc:
+        logger.err(f"💥 Некорректный ZIP-архив: {exc}")
+        return None
+    except Exception as exc:  # pragma: no cover - defensive branch
+        logger.err(f"💥 Ошибка распаковки архива: {exc}")
+        return None
 
-    # Найдём корневой элемент (обычно это одна папка)
-    root_items = os.listdir(extract_dir)
-    if not root_items:
-        raise RuntimeError("Архив пуст — нечего распаковывать.")
-
-    # Если внутри архива одна папка — используем её как корень
-    if len(root_items) == 1:
-        root_folder = os.path.join(extract_dir, root_items[0])
-        if os.path.isdir(root_folder):
-            project_root = os.path.join(workdir, root_items[0])
-
-            logger.info(
-                f"Обнаружена единственная корневая папка в архиве: '{os.path.basename(root_folder)}'. "
-                "Распаковка с сохранением структуры..."
-            )
-
-            # Если в рабочей папке уже есть проект с тем же именем — удаляем
-            if os.path.exists(project_root):
-                shutil.rmtree(project_root)
-
-            shutil.move(root_folder, project_root)
-            shutil.rmtree(extract_dir, ignore_errors=True)
-            return project_root
-
-    # Если структура сложная (файлы/папки вперемешку)
-    logger.info("Несколько элементов в корне архива. Распаковка напрямую в _workdir...")
-    project_root = os.path.join(workdir, "project_manual_import")
-    if os.path.exists(project_root):
-        shutil.rmtree(project_root)
-
-    os.makedirs(project_root, exist_ok=True)
-    for item in root_items:
-        src = os.path.join(extract_dir, item)
-        dst = os.path.join(project_root, item)
-        shutil.move(src, dst)
-
-    shutil.rmtree(extract_dir, ignore_errors=True)
-    return project_root
-
-
-# === Прямая отладка ===
-if __name__ == "__main__":
-    test_archive = "./_workdir/project5059034_1760998414.zip"
-    test_workdir = "./_workdir"
-    try:
-        result = unzip_archive(test_archive, test_workdir)
-        logger.info(f"✅ Проект распакован в: {result}")
-    except Exception as e:
-        logger.err(f"💥 Ошибка при распаковке: {e}")
+    logger.info(f"→ Распаковка завершена: {target_root}")
+    return target_root

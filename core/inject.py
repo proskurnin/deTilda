@@ -1,79 +1,62 @@
-# -*- coding: utf-8 -*-
-"""HTML injection helpers built on top of the configuration facade."""
+"""Helpers for injecting Detilda form scripts into HTML pages."""
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from core import logger, utils
-from core.project import ProjectContext
+from core.config_loader import ConfigLoader
+
+__all__ = ["inject_form_scripts"]
 
 
-class HtmlInjector:
-    def __init__(self, context: ProjectContext) -> None:
-        self.context = context
-        service_cfg = context.config_loader.service_files
-        self._inject_opts = service_cfg.as_dict().get("html_inject_options", {}) or {}
-        self._scripts_to_comment = list(
-            service_cfg.as_dict()
-            .get("scripts_to_comment_out_tags", {})
-            .get("filenames", [])
-        )
+def _load_options(loader: ConfigLoader) -> tuple[str, str]:
+    service_cfg = loader.service_files()
+    options = service_cfg.get("html_inject_options", {})
+    handler = str(options.get("inject_handler_script", "form-handler.js"))
+    marker = str(options.get("inject_after_marker", "</body>"))
+    return handler, marker
 
-    @property
-    def handler_name(self) -> str:
-        return str(self._inject_opts.get("inject_handler_script", "form-handler.js"))
 
-    @property
-    def injection_marker(self) -> str:
-        return str(self._inject_opts.get("inject_after_marker", "</body>"))
+def inject_form_scripts(project_root: Path, loader: ConfigLoader) -> int:
+    project_root = Path(project_root)
+    handler, marker = _load_options(loader)
+    processed = 0
 
-    def _comment_scripts(self, content: str) -> str:
-        for script in self._scripts_to_comment:
-            pattern = rf"(<script[^>]+{re.escape(script)}[^>]*></script>)"
-            content = re.sub(pattern, r"<!-- \1 -->", content, flags=re.IGNORECASE)
-        return content
+    marker_pattern = re.compile(re.escape(marker), re.IGNORECASE)
 
-    def _inject_block(self, content: str, script_name: str) -> str:
-        marker = self.injection_marker
-        script_tag = f'\n<script src="js/{script_name}"></script>\n'
-        pattern = re.compile(re.escape(marker), re.IGNORECASE)
-        if pattern.search(content):
-            return pattern.sub(script_tag + marker, content)
-        return content + script_tag
+    for path in project_root.rglob("*.html"):
+        try:
+            content = utils.safe_read(path)
+        except Exception as exc:
+            logger.warn(f"[inject] Пропуск {path.name}: {exc}")
+            continue
 
-    def inject(self) -> int:
-        processed = 0
-        handler = self.handler_name
-        marker = self.injection_marker
+        original = content
 
-        for path in self.context.project_root.rglob("*.html"):
-            try:
-                content = utils.safe_read(path)
-            except Exception as exc:
-                logger.warn(f"[inject] Пропуск {path.name}: {exc}")
-                continue
+        def _ensure_script(text: str, script_name: str) -> tuple[str, bool]:
+            tag = f'\n<script src="js/{script_name}"></script>'
+            if script_name in text:
+                return text, False
+            if marker_pattern.search(text):
+                return marker_pattern.sub(tag + marker, text), True
+            return text + tag, True
 
-            original = content
-            content = self._comment_scripts(content)
+        content, added_handler = _ensure_script(content, handler)
+        content, added_forms = _ensure_script(content, "aida-forms-1.0.min.js")
 
-            if handler not in content:
-                content = self._inject_block(content, handler)
+        if content != original:
+            utils.safe_write(path, content)
+            processed += 1
+            if added_handler:
                 logger.info(f"🧩 Добавлен скрипт {handler} в {path.name}")
-
-            if "aida-forms-1.0.min.js" not in content:
-                content = self._inject_block(content, "aida-forms-1.0.min.js")
+            if added_forms:
                 logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
 
-            if content != original:
-                utils.safe_write(path, content)
-                processed += 1
-
+    if processed:
         logger.info(
             f"✓ Внедрение завершено. Обновлено файлов: {processed} (маркер: {marker})."
         )
-        return processed
-
-
-def inject_form_scripts(context: ProjectContext) -> int:
-    injector = HtmlInjector(context)
-    return injector.inject()
+    else:
+        logger.info("✓ Внедрение завершено. Изменений не требуется.")
+    return processed

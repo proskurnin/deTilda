@@ -1,74 +1,94 @@
-# -*- coding: utf-8 -*-
-"""Backwards compatible helpers around :mod:`core.configuration`.
-
-Historically the project exposed a couple of module level functions such as
-``get_patterns_config`` and ``get_rules_images`` that returned raw dictionaries.
-After the refactor the configuration is represented by the
-:class:`~core.configuration.DetildaConfig` class.  To avoid touching every
-consumer at once this module now acts as a thin wrapper that adapts the new
-objects to the legacy interfaces.
-"""
+"""Lightweight access helpers for :mod:`config/config.yaml`."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Iterator
 
-from core.configuration import ConfigRepository, ConfigSection, DetildaConfig, get_repository
+import yaml
 
+from core import logger
 
-def _resolve_base_dir(script_dir: str | Path | None) -> Path:
-    if script_dir is None:
-        return Path(__file__).resolve().parent.parent
-    return Path(script_dir)
-
-
-def _section_as_dict(section: ConfigSection) -> Dict[str, Any]:
-    return section.as_dict()
-
-
-def get_master_config(script_dir: str | Path | None = None) -> DetildaConfig:
-    base_dir = _resolve_base_dir(script_dir)
-    repository = get_repository(base_dir)
-    return repository.load()
-
-
-def get_patterns_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    repo = get_repository(_resolve_base_dir(script_dir))
-    return _section_as_dict(repo.patterns())
-
-
-def get_rules_images(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    repo = get_repository(_resolve_base_dir(script_dir))
-    return _section_as_dict(repo.images())
-
-
-def get_rules_service_files(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    repo = get_repository(_resolve_base_dir(script_dir))
-    return _section_as_dict(repo.service_files())
+_DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class ConfigLoader:
-    """Object oriented facade used by the refactored subsystems."""
+    """Loads and caches the unified ``config.yaml`` file."""
 
-    def __init__(self, script_dir: Path | None = None) -> None:
-        self._repository = get_repository(_resolve_base_dir(script_dir))
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._base_dir = base_dir or _DEFAULT_BASE_DIR
+        self._cache: Dict[str, Any] | None = None
 
+    # ------------------------------------------------------------------
     @property
-    def repository(self) -> ConfigRepository:
-        return self._repository
+    def config_path(self) -> Path:
+        return Path(self._base_dir) / "config" / "config.yaml"
 
-    @property
-    def config(self) -> DetildaConfig:
-        return self._repository.load()
+    def _load(self) -> Dict[str, Any]:
+        if self._cache is not None:
+            return self._cache
+        path = self.config_path
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if not isinstance(data, dict):
+                raise ValueError("config.yaml должен содержать словарь")
+        except FileNotFoundError:
+            logger.err(f"[config_loader] Не найден файл конфигурации: {path}")
+            data = {}
+        except Exception as exc:  # pragma: no cover - defensive branch
+            logger.err(f"[config_loader] Ошибка чтения {path}: {exc}")
+            data = {}
+        self._cache = data
+        return data
 
-    @property
-    def patterns(self) -> ConfigSection:
-        return self._repository.patterns()
+    def as_dict(self) -> Dict[str, Any]:
+        return dict(self._load())
 
-    @property
-    def images(self) -> ConfigSection:
-        return self._repository.images()
+    # ------------------------------------------------------------------
+    def patterns(self) -> Dict[str, Any]:
+        return dict(self._load().get("patterns", {}))
 
-    @property
-    def service_files(self) -> ConfigSection:
-        return self._repository.service_files()
+    def images(self) -> Dict[str, Any]:
+        return dict(self._load().get("images", {}))
+
+    def service_files(self) -> Dict[str, Any]:
+        return dict(self._load().get("service_files", {}))
+
+
+# ----------------------------------------------------------------------------
+# Backwards compatible module level helpers
+# ----------------------------------------------------------------------------
+_loader = ConfigLoader()
+
+
+def get_master_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    loader = ConfigLoader(Path(script_dir) if script_dir else None)
+    return loader.as_dict()
+
+
+def get_patterns_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    loader = ConfigLoader(Path(script_dir) if script_dir else None)
+    return loader.patterns()
+
+
+def get_rules_images(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    loader = ConfigLoader(Path(script_dir) if script_dir else None)
+    return loader.images()
+
+
+def get_rules_service_files(script_dir: str | Path | None = None) -> Dict[str, Any]:
+    loader = ConfigLoader(Path(script_dir) if script_dir else None)
+    return loader.service_files()
+
+
+def iter_section_list(section: Dict[str, Any], *keys: str) -> Iterator[str]:
+    current: Any = section
+    for key in keys:
+        if not isinstance(current, dict):
+            return iter(())
+        current = current.get(key)
+    values: Iterable[Any]
+    if isinstance(current, list):
+        values = current
+    else:
+        values = []
+    return [value for value in values if isinstance(value, str)]
