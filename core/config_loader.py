@@ -1,131 +1,74 @@
 # -*- coding: utf-8 -*-
-"""
-config_loader.py — модуль загрузки конфигурационных файлов Detilda v4.9 unified
-Загружает единый YAML-конфиг из папки config/, кэширует его и предоставляет
-функции доступа к основным разделам (patterns, images, service_files).
-"""
+"""Backwards compatible helpers around :mod:`core.configuration`.
 
+Historically the project exposed a couple of module level functions such as
+``get_patterns_config`` and ``get_rules_images`` that returned raw dictionaries.
+After the refactor the configuration is represented by the
+:class:`~core.configuration.DetildaConfig` class.  To avoid touching every
+consumer at once this module now acts as a thin wrapper that adapts the new
+objects to the legacy interfaces.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
-
-from core import logger
+from core.configuration import ConfigRepository, ConfigSection, DetildaConfig, get_repository
 
 
-# === Путь по умолчанию и кэш, чтобы не грузить конфиги повторно ===
-_DEFAULT_SCRIPT_DIR = Path(__file__).resolve().parent.parent
-_CONFIG_FILENAME = "config.yaml"
-_CACHE: Dict[Path, Dict[str, Any]] = {}
-
-
-# === Универсальная функция загрузки YAML ===
-def _load_yaml(path: Path) -> Dict[str, Any]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-            if not isinstance(data, dict):
-                logger.err(f"[config_loader] Некорректный формат YAML: {path}")
-                return {}
-            return data
-    except FileNotFoundError:
-        logger.err(f"[config_loader] Файл не найден: {path}")
-        return {}
-    except Exception as e:
-        logger.err(f"[config_loader] Ошибка при чтении YAML {path}: {e}")
-        return {}
-
-
-# === Компиляция регулярных выражений, если нужно ===
-def _compile_regex(cfg):
-    import re
-    for key, val in cfg.items():
-        if isinstance(val, str):
-            try:
-                re.compile(val)
-            except re.error:
-                pass
-        elif isinstance(val, list):
-            for i, v in enumerate(val):
-                if isinstance(v, str):
-                    try:
-                        re.compile(v)
-                    except re.error:
-                        pass
-        elif isinstance(val, dict):
-            _compile_regex(val)
-
-
-# === Вспомогательные функции ===
 def _resolve_base_dir(script_dir: str | Path | None) -> Path:
     if script_dir is None:
-        return _DEFAULT_SCRIPT_DIR
+        return Path(__file__).resolve().parent.parent
     return Path(script_dir)
 
 
-def _get_config(script_dir: str | Path | None, filename: str) -> Dict[str, Any]:
+def _section_as_dict(section: ConfigSection) -> Dict[str, Any]:
+    return section.as_dict()
+
+
+def get_master_config(script_dir: str | Path | None = None) -> DetildaConfig:
     base_dir = _resolve_base_dir(script_dir)
-    config_path = base_dir / "config" / filename
-
-    if config_path in _CACHE:
-        return _CACHE[config_path]
-
-    if not config_path.exists():
-        logger.err(f"[config_loader] Конфиг не найден: {config_path}")
-        return {}
-
-    cfg = _load_yaml(config_path)
-    _compile_regex(cfg)
-    _CACHE[config_path] = cfg
-    return cfg
-
-
-# === Публичные функции ===
-def get_master_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    """Возвращает полный конфиг config.yaml."""
-    return _get_config(script_dir, _CONFIG_FILENAME)
-
-
-def _get_section(script_dir: str | Path | None, section: str) -> Dict[str, Any]:
-    cfg = get_master_config(script_dir)
-    data = cfg.get(section, {}) if isinstance(cfg, dict) else {}
-    if isinstance(data, dict):
-        _compile_regex(data)
-        return data
-    logger.warn(f"[config_loader] Секция '{section}' имеет некорректный формат")
-    return {}
+    repository = get_repository(base_dir)
+    return repository.load()
 
 
 def get_patterns_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    """Возвращает секцию patterns из config.yaml."""
-    return _get_section(script_dir, "patterns")
+    repo = get_repository(_resolve_base_dir(script_dir))
+    return _section_as_dict(repo.patterns())
 
 
 def get_rules_images(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    """Возвращает секцию images из config.yaml."""
-    return _get_section(script_dir, "images")
+    repo = get_repository(_resolve_base_dir(script_dir))
+    return _section_as_dict(repo.images())
 
 
 def get_rules_service_files(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    """Возвращает секцию service_files из config.yaml."""
-    return _get_section(script_dir, "service_files")
+    repo = get_repository(_resolve_base_dir(script_dir))
+    return _section_as_dict(repo.service_files())
 
 
-# === Для отладки ===
-if __name__ == "__main__":
-    test_dir = Path(__file__).resolve().parent.parent
-    try:
-        master = get_master_config(test_dir)
-        patterns = get_patterns_config(test_dir)
-        images = get_rules_images(test_dir)
-        service = get_rules_service_files(test_dir)
+class ConfigLoader:
+    """Object oriented facade used by the refactored subsystems."""
 
-        logger.info("✅ Конфиг успешно загружен:")
-        logger.info(f"  • config.yaml: {len(master)} разделов")
-        logger.info(f"  • patterns: {len(patterns)} ключей")
-        logger.info(f"  • images: {len(images)} ключей")
-        logger.info(f"  • service_files: {len(service)} ключей")
-    except Exception as e:
-        logger.err(f"💥 Ошибка при тестовой загрузке конфигов: {e}")
+    def __init__(self, script_dir: Path | None = None) -> None:
+        self._repository = get_repository(_resolve_base_dir(script_dir))
+
+    @property
+    def repository(self) -> ConfigRepository:
+        return self._repository
+
+    @property
+    def config(self) -> DetildaConfig:
+        return self._repository.load()
+
+    @property
+    def patterns(self) -> ConfigSection:
+        return self._repository.patterns()
+
+    @property
+    def images(self) -> ConfigSection:
+        return self._repository.images()
+
+    @property
+    def service_files(self) -> ConfigSection:
+        return self._repository.service_files()

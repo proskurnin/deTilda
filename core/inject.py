@@ -1,87 +1,79 @@
 # -*- coding: utf-8 -*-
-"""
-inject.py — внедрение JS-обработчиков в HTML-файлы Detilda v4.9 unified
-Правила берутся из config/config.yaml → service_files.html_inject_options
-и service_files.scripts_to_comment_out_tags.
-"""
-
+"""HTML injection helpers built on top of the configuration facade."""
 from __future__ import annotations
 
-import os
 import re
-from pathlib import Path
-from core import logger, config_loader, utils
+
+from core import logger, utils
+from core.project import ProjectContext
 
 
-def inject_scripts_and_handlers(project_root: str, script_dir: str | Path | None = None):
-    """
-    Основная функция внедрения JS-скриптов в HTML.
-    Использует параметры из config/config.yaml → service_files.html_inject_options.
-    """
-    project_root = Path(project_root)
+class HtmlInjector:
+    def __init__(self, context: ProjectContext) -> None:
+        self.context = context
+        service_cfg = context.config_loader.service_files
+        self._inject_opts = service_cfg.as_dict().get("html_inject_options", {}) or {}
+        self._scripts_to_comment = list(
+            service_cfg.as_dict()
+            .get("scripts_to_comment_out_tags", {})
+            .get("filenames", [])
+        )
 
-    cfg_service = config_loader.get_rules_service_files(script_dir)
-    inject_opts = cfg_service.get("html_inject_options", {})
-    scripts_to_comment = cfg_service.get("scripts_to_comment_out_tags", {}).get("filenames", [])
+    @property
+    def handler_name(self) -> str:
+        return str(self._inject_opts.get("inject_handler_script", "form-handler.js"))
 
-    inject_script_name = inject_opts.get("inject_handler_script", "form-handler.js")
-    inject_after_marker = inject_opts.get("inject_after_marker", "</body>")
+    @property
+    def injection_marker(self) -> str:
+        return str(self._inject_opts.get("inject_after_marker", "</body>"))
 
-    logger.info("→ Внедрение form-handler.js и очистка старых скриптов...")
+    def _comment_scripts(self, content: str) -> str:
+        for script in self._scripts_to_comment:
+            pattern = rf"(<script[^>]+{re.escape(script)}[^>]*></script>)"
+            content = re.sub(pattern, r"<!-- \1 -->", content, flags=re.IGNORECASE)
+        return content
 
-    processed = 0
-    modified = 0
+    def _inject_block(self, content: str, script_name: str) -> str:
+        marker = self.injection_marker
+        script_tag = f'\n<script src="js/{script_name}"></script>\n'
+        pattern = re.compile(re.escape(marker), re.IGNORECASE)
+        if pattern.search(content):
+            return pattern.sub(script_tag + marker, content)
+        return content + script_tag
 
-    for path in project_root.rglob("*.html"):
-        try:
-            content = utils.safe_read(path)
-        except Exception as e:
-            logger.warn(f"[inject] Пропуск {path.name}: {e}")
-            continue
+    def inject(self) -> int:
+        processed = 0
+        handler = self.handler_name
+        marker = self.injection_marker
 
-        new_content = content
+        for path in self.context.project_root.rglob("*.html"):
+            try:
+                content = utils.safe_read(path)
+            except Exception as exc:
+                logger.warn(f"[inject] Пропуск {path.name}: {exc}")
+                continue
 
-        # --- Удаление старых тильдовских скриптов ---
-        for bad_script in scripts_to_comment:
-            pattern = rf'(<script[^>]+{re.escape(bad_script)}[^>]*><\/script>)'
-            new_content = re.sub(pattern, r"<!-- \1 -->", new_content, flags=re.IGNORECASE)
+            original = content
+            content = self._comment_scripts(content)
 
-        # --- Проверяем, есть ли уже наш обработчик ---
-        if inject_script_name not in new_content:
-            inject_tag = f'\n<script src="js/{inject_script_name}"></script>\n'
-            pattern_marker = re.compile(re.escape(inject_after_marker), re.IGNORECASE)
-            if pattern_marker.search(new_content):
-                new_content = pattern_marker.sub(inject_tag + inject_after_marker, new_content)
-                logger.info(f"🧩 Добавлен скрипт {inject_script_name} в {path.name}")
-                modified += 1
-            else:
-                # если </body> не найден — добавляем в конец
-                new_content += inject_tag
-                logger.warn(f"[inject] В {path.name} не найден </body> — скрипт добавлен в конец.")
-                modified += 1
+            if handler not in content:
+                content = self._inject_block(content, handler)
+                logger.info(f"🧩 Добавлен скрипт {handler} в {path.name}")
 
-        # --- Добавляем AIDA forms (если нет) ---
-        if "aida-forms-1.0.min.js" not in new_content:
-            new_content = new_content.replace(
-                inject_after_marker,
-                f'\n<script src="js/aida-forms-1.0.min.js"></script>\n{inject_after_marker}',
-            )
-            logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
-            modified += 1
+            if "aida-forms-1.0.min.js" not in content:
+                content = self._inject_block(content, "aida-forms-1.0.min.js")
+                logger.info(f"🧩 Добавлен AIDA forms в {path.name}")
 
-        # --- Сохраняем, если изменилось ---
-        if new_content != content:
-            utils.safe_write(path, new_content)
-            processed += 1
+            if content != original:
+                utils.safe_write(path, content)
+                processed += 1
 
-    logger.info(f"✓ Внедрение завершено. Изменено файлов: {processed}, обновлено вставок: {modified}")
+        logger.info(
+            f"✓ Внедрение завершено. Обновлено файлов: {processed} (маркер: {marker})."
+        )
+        return processed
 
 
-# === Прямая отладка ===
-if __name__ == "__main__":
-    test_project = "./_workdir/project5059034"
-    test_script_dir = "."
-    try:
-        inject_scripts_and_handlers(test_project, test_script_dir)
-    except Exception as e:
-        logger.err(f"💥 Ошибка в inject.py: {e}")
+def inject_form_scripts(context: ProjectContext) -> int:
+    injector = HtmlInjector(context)
+    return injector.inject()
