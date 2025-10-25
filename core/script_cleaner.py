@@ -59,8 +59,8 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
 
         # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
         base_pattern = re.compile(
-            rf"<script\b[^>]*>[^<]*?(?:(?!</script>).)*?{escaped}(?:(?!</script>).)*?</script>",
-            re.IGNORECASE | re.DOTALL,
+            rf"<script\b[^>]*>[\s\S]*?{escaped}[\s\S]*?</script>",
+            re.IGNORECASE,
         )
         patterns.append(base_pattern)
 
@@ -68,17 +68,17 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
         # ищем по типичным маркерам даже без имени файла
         if "aida" in name.lower():
             aida_pattern = re.compile(
-                r"<script\b[^>]*>[^<]*?(mainTracker\s*=\s*['\"]aida['\"]|aidastatscript)"
-                r"(?:(?!</script>).)*?</script>",
-                re.IGNORECASE | re.DOTALL,
+                r"<script\b[^>]*>[\s\S]*?(mainTracker\s*=\s*['\"]aida['\"]|aidastatscript)"
+                r"[\s\S]*?</script>",
+                re.IGNORECASE,
             )
             patterns.append(aida_pattern)
 
         if "tilda" in name.lower():
             tilda_pattern = re.compile(
-                r"<script\b[^>]*>[^<]*?(tilda[-_]stat|tildastat|Tilda\.)"
-                r"(?:(?!</script>).)*?</script>",
-                re.IGNORECASE | re.DOTALL,
+                r"<script\b[^>]*>[\s\S]*?(tilda[-_]stat|tildastat|Tilda\.)"
+                r"[\s\S]*?</script>",
+                re.IGNORECASE,
             )
             patterns.append(tilda_pattern)
 
