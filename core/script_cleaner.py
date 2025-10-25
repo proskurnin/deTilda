@@ -58,11 +58,19 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
         escaped = re.escape(name)
 
         # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
+        # или оно присутствует в атрибутах (например, src=".../aida-forms-1.0.min.js")
         base_pattern = re.compile(
-            rf"<script\b[^>]*>[\s\S]*?{escaped}[\s\S]*?</script>",
+            rf"<script\b(?=[^>]*{escaped}|[^>]*>[\s\S]*?{escaped})[^>]*>[\s\S]*?</script>",
             re.IGNORECASE,
         )
         patterns.append(base_pattern)
+
+        # На случай самозакрывающихся тегов (<script ... />) c запрещённым именем
+        self_closing_pattern = re.compile(
+            rf"<script\b[^>]*{escaped}[^>]*/>",
+            re.IGNORECASE,
+        )
+        patterns.append(self_closing_pattern)
 
         # Дополнительно: если это известный трекер (aida/tilda/stat)
         # ищем по типичным маркерам даже без имени файла
