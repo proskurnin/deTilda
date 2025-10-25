@@ -119,6 +119,7 @@ service_files:
   scripts_to_delete:
     after_rename:
       - "aida-stat-1.0.min.js"
+      - "tilda-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"
       - "aida-fallback-1.0.min.js"
       - "aida-events-1.0.min.js"
