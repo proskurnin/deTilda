@@ -60,14 +60,18 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
         # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
         # или оно присутствует в атрибутах (например, src=".../aida-forms-1.0.min.js")
         base_pattern = re.compile(
-            rf"<script\b(?=[^>]*{escaped}|[^>]*>[\s\S]*?{escaped})[^>]*>[\s\S]*?</script>",
+            r"<script\b(?=[^>]*"
+            + escaped
+            + r"|[^>]*>[\s\S]*?"
+            + escaped
+            + r")[^>]*>[\s\S]*?</script>",
             re.IGNORECASE,
         )
         patterns.append(base_pattern)
 
         # На случай самозакрывающихся тегов (<script ... />) c запрещённым именем
         self_closing_pattern = re.compile(
-            rf"<script\b[^>]*{escaped}[^>]*/>",
+            r"<script\b[^>]*" + escaped + r"[^>]*/>",
             re.IGNORECASE,
         )
         patterns.append(self_closing_pattern)
