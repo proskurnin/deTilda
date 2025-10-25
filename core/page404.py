@@ -11,10 +11,13 @@ __all__ = ["update_404_page"]
 
 _TITLE_PATTERN = re.compile(r"(<title\b[^>]*>)(.*?)(</title>)", re.IGNORECASE | re.DOTALL)
 _AIDA_LINK_PATTERN = re.compile(
-    r"<a\b[^>]*href=[\"']https://aida\.cc[\"'][^>]*>.*?</a>",
+    r"<a\b[^>]*href=[\"']https?://[^\"']*\.cc[\"'][^>]*>.*?</a\s*>",
     re.IGNORECASE | re.DOTALL,
 )
-_SCRIPT_PATTERN = re.compile(r"<script\b[^>]*>[\s\S]*?</script>", re.IGNORECASE)
+_SCRIPT_PATTERN = re.compile(
+    r"<script\b[^>]*?>[\s\S]*?</script\s*>",
+    re.IGNORECASE,
+)
 
 
 def update_404_page(project_root: Path) -> bool:
@@ -24,7 +27,10 @@ def update_404_page(project_root: Path) -> bool:
     page_path = project_root / "404.html"
 
     if not page_path.exists():
+        logger.info("📄 404.html не найден — шаг пропущен.")
         return False
+
+    logger.info("🧾 Обработка страницы 404.html")
 
     try:
         original = utils.safe_read(page_path)
@@ -55,11 +61,22 @@ def update_404_page(project_root: Path) -> bool:
         if inserted:
             changed = True
 
-    text, anchor_count = _AIDA_LINK_PATTERN.subn(
-        "<h1>404</h1><p>Page not found, oooops...</p>", text
-    )
+    message_block = "<h1>404</h1><p>Page not found, oooops...</p>"
+
+    text, anchor_count = _AIDA_LINK_PATTERN.subn(message_block, text)
     if anchor_count:
         changed = True
+
+    if message_block not in text:
+        text, message_inserted = re.subn(
+            r"(<body\b[^>]*>)",
+            rf"\1{message_block}",
+            text,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if message_inserted:
+            changed = True
 
     text, script_count = _SCRIPT_PATTERN.subn("", text)
     if script_count:
@@ -70,4 +87,5 @@ def update_404_page(project_root: Path) -> bool:
         logger.info("🛠 Обновлена страница 404.html")
         return True
 
+    logger.info("📄 Страница 404.html уже соответствует требованиям.")
     return False
