@@ -10,15 +10,41 @@ from core.config_loader import ConfigLoader
 __all__ = ["remove_disallowed_scripts"]
 
 
-def _collect_script_names(loader: ConfigLoader) -> list[str]:
+def _collect_script_rules(loader: ConfigLoader) -> tuple[list[str], list[re.Pattern[str]]]:
+    """Return script names and additional regex patterns from the config."""
+
     service_cfg = loader.service_files()
     removal_cfg = service_cfg.get("scripts_to_remove_from_project", {})
+
     names: list[str] = []
-    if isinstance(removal_cfg, dict):
-        for value in removal_cfg.get("filenames", []):
-            if isinstance(value, str) and value.strip():
-                names.append(value.strip())
-    return names
+    patterns: list[re.Pattern[str]] = []
+
+    if not isinstance(removal_cfg, dict):
+        return names, patterns
+
+    # Collect filenames (we will treat them as substrings when compiling regexes).
+    for value in removal_cfg.get("filenames", []):
+        if isinstance(value, str) and value.strip():
+            names.append(value.strip())
+
+    # Allow optional raw regex patterns in config for edge cases.
+    for raw_pattern in removal_cfg.get("patterns", []):
+        if not isinstance(raw_pattern, str) or not raw_pattern.strip():
+            continue
+        try:
+            compiled = re.compile(raw_pattern.strip(), re.IGNORECASE)
+        except re.error as exc:
+            logger.warn(
+                "[script_cleaner] Некорректный паттерн в конфиге scripts_to_remove_from_project: "
+                f"{raw_pattern!r} ({exc})"
+            )
+            continue
+        patterns.append(compiled)
+
+    # Preserve ordering but remove duplicates to avoid redundant regex replacements.
+    deduped_names = list(dict.fromkeys(names))
+
+    return deduped_names, patterns
 
 
 # def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
@@ -43,13 +69,15 @@ def _collect_script_names(loader: ConfigLoader) -> list[str]:
 #     return patterns
 
 
-def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
+def _compile_script_patterns(
+    script_names: list[str], extra_patterns: list[re.Pattern[str]]
+) -> list[re.Pattern[str]]:
     """
     Создаёт набор регулярных выражений для поиска и удаления <script>-блоков,
     содержащих указанные имена файлов или сигнатуры трекеров.
     Поддерживает минифицированные, инлайн и многострочные скрипты.
     """
-    patterns: list[re.Pattern[str]] = []
+    patterns: list[re.Pattern[str]] = list(extra_patterns)
 
     for name in script_names:
         if not name:
@@ -60,11 +88,7 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
         # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
         # или оно присутствует в атрибутах (например, src=".../aida-forms-1.0.min.js")
         base_pattern = re.compile(
-            r"<script\b(?=[^>]*"
-            + escaped
-            + r"|[^>]*>[\s\S]*?"
-            + escaped
-            + r")[^>]*>[\s\S]*?</script>",
+            rf"<script\b(?=[^>]*{escaped}|[^>]*>[\s\S]*?{escaped})[^>]*>[\s\S]*?</script>",
             re.IGNORECASE,
         )
         patterns.append(base_pattern)
@@ -113,8 +137,9 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
     """
 
     project_root = Path(project_root)
-    script_names = _collect_script_names(loader)
-    if not script_names:
+    script_names, extra_patterns = _collect_script_rules(loader)
+    if not script_names and not extra_patterns:
+        logger.info("[script_cleaner] Список скриптов для удаления пуст — пропуск шага.")
         return 0
 
     patterns_cfg = loader.patterns()
@@ -127,10 +152,30 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
         ".txt",
     )
 
-    script_patterns = _compile_script_patterns(script_names)
+    logger.info(
+        f"[script_cleaner] Используем конфиг: {loader.config_path}"
+    )
+    logger.info(
+        "[script_cleaner] Файловые расширения для проверки: "
+        + ", ".join(text_extensions)
+    )
+    logger.info(
+        "[script_cleaner] Скрипты для удаления (из config.yaml): "
+        + (", ".join(script_names) if script_names else "—")
+    )
+    if extra_patterns:
+        logger.info(
+            f"[script_cleaner] Доп. паттерны для удаления: {len(extra_patterns)}"
+        )
+
+    script_patterns = _compile_script_patterns(script_names, extra_patterns)
+    logger.debug(
+        f"[script_cleaner] Скомпилировано регулярных выражений: {len(script_patterns)}"
+    )
 
     removed_tags = 0
     updated_files = 0
+    lowered_names = [name.lower() for name in script_names]
 
     for path in utils.list_files_recursive(project_root, extensions=text_extensions):
         try:
@@ -145,6 +190,19 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
             text, count = pattern.subn("", text)
             if count:
                 removed_in_file += count
+
+        if not removed_in_file and script_names:
+            lowered_text = original.lower()
+            matched_names = [
+                name
+                for name, lowered in zip(script_names, lowered_names)
+                if lowered in lowered_text
+            ]
+            if matched_names:
+                logger.debug(
+                    "[script_cleaner] Найдены упоминания скриптов, но паттерн не сработал: "
+                    f"{matched_names} в {utils.relpath(path, project_root)}"
+                )
 
         if removed_in_file and text != original:
             utils.safe_write(path, text)
