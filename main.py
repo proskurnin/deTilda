@@ -13,6 +13,7 @@ from core import (
     forms,
     inject,
     logger,
+    page404,
     refs,
     report,
     script_cleaner,
@@ -62,6 +63,7 @@ def main() -> None:
     try:
         asset_result = assets.rename_and_cleanup_assets(project_root, loader)
         script_cleaner.remove_disallowed_scripts(project_root, loader)
+        page404.update_404_page(project_root)
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=0,
