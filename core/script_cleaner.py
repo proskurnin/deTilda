@@ -21,26 +21,69 @@ def _collect_script_names(loader: ConfigLoader) -> list[str]:
     return names
 
 
+# def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
+#     patterns: list[re.Pattern[str]] = []
+#     for name in script_names:
+#         if not name:
+#             continue
+#         escaped = re.escape(name)
+#         pattern = re.compile(
+#             "".join(
+#                 [
+#                     r"<script\b",  # opening tag start
+#                     r"(?:(?!</script>).)*?",  # attributes or inline content before the match
+#                     escaped,  # disallowed script reference
+#                     r"(?:(?!</script>).)*?",  # rest of attributes or inline content
+#                     r"</script>",
+#                 ]
+#             ),
+#             re.IGNORECASE | re.DOTALL,
+#         )
+#         patterns.append(pattern)
+#     return patterns
+
+
 def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
+    """
+    Создаёт набор регулярных выражений для поиска и удаления <script>-блоков,
+    содержащих указанные имена файлов или сигнатуры трекеров.
+    Поддерживает минифицированные, инлайн и многострочные скрипты.
+    """
     patterns: list[re.Pattern[str]] = []
+
     for name in script_names:
         if not name:
             continue
+
         escaped = re.escape(name)
-        pattern = re.compile(
-            "".join(
-                [
-                    r"<script\b",  # opening tag start
-                    r"(?:(?!</script>).)*?",  # attributes or inline content before the match
-                    escaped,  # disallowed script reference
-                    r"(?:(?!</script>).)*?",  # rest of attributes or inline content
-                    r"</script>",
-                ]
-            ),
+
+        # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
+        base_pattern = re.compile(
+            rf"<script\b[^>]*>[^<]*?(?:(?!</script>).)*?{escaped}(?:(?!</script>).)*?</script>",
             re.IGNORECASE | re.DOTALL,
         )
-        patterns.append(pattern)
+        patterns.append(base_pattern)
+
+        # Дополнительно: если это известный трекер (aida/tilda/stat)
+        # ищем по типичным маркерам даже без имени файла
+        if "aida" in name.lower():
+            aida_pattern = re.compile(
+                r"<script\b[^>]*>[^<]*?(mainTracker\s*=\s*['\"]aida['\"]|aidastatscript)"
+                r"(?:(?!</script>).)*?</script>",
+                re.IGNORECASE | re.DOTALL,
+            )
+            patterns.append(aida_pattern)
+
+        if "tilda" in name.lower():
+            tilda_pattern = re.compile(
+                r"<script\b[^>]*>[^<]*?(tilda[-_]stat|tildastat|Tilda\.)"
+                r"(?:(?!</script>).)*?</script>",
+                re.IGNORECASE | re.DOTALL,
+            )
+            patterns.append(tilda_pattern)
+
     return patterns
+
 
 
 def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
