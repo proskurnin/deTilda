@@ -82,6 +82,14 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
             )
             patterns.append(tilda_pattern)
 
+    # Удаляем блоки, начинающиеся с маркера "<!-- Stat -->" и следующим за ним скриптом
+    patterns.append(
+        re.compile(
+            r"<!--\s*Stat\s*-->[\s\r\n]*<script\b[\s\S]*?</script>",
+            re.IGNORECASE,
+        )
+    )
+
     return patterns
 
 
