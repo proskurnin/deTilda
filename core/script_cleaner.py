@@ -28,9 +28,9 @@ def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
             continue
         escaped = re.escape(name)
         pattern = re.compile(
-            rf"<script\\b[^>]*>"  # opening tag
-            rf"(?:(?!<\\/script>).)*{escaped}(?:(?!<\\/script>).)*"  # script content
-            rf"<\\/script>",
+            rf"<script\b[^>]*>"  # opening tag
+            rf"(?:(?!</script>).)*{escaped}(?:(?!</script>).)*"  # script content
+            rf"</script>",
             re.IGNORECASE | re.DOTALL,
         )
         patterns.append(pattern)
