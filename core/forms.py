@@ -10,97 +10,74 @@ from core import logger, utils
 __all__ = ["generate_send_email_php", "generate_form_handler_js"]
 
 _SEND_EMAIL_TEMPLATE = """<?php
-$project = '{project_name}';
-$email = '{email}';
-
-header('Content-Type: application/json; charset=utf-8');
+declare(strict_types=1);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {{
     http_response_code(405);
-    echo json_encode(['ok' => false, 'error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo 'Method Not Allowed';
     exit;
 }}
 
-$to = $email;
-$subject = 'Запрос с сайта ' . $project;
+// ----------------- SETTINGS ----------------- //
+$recipient_email = "{email}"; // <-- your email here
+$subject         = "New request from " . ($_SERVER['HTTP_HOST'] ?? 'website');
+// -------------------------------------------- //
 
-$safe_post = [];
-foreach ($_POST as $key => $value) {{
-    if (is_array($value)) {{
-        $value = implode(', ', $value);
-    }}
-    $safe_post[$key] = trim((string) $value);
+function p(string $k, string $d=''): string {{ return isset($_POST[$k]) ? trim((string)$_POST[$k]) : $d; }}
+
+$ignored = ['redirect','redirect2parent','g-recaptcha-response','csrf_token'];
+$lines   = [];
+$lines[] = 'Form submission from ' . ($_SERVER['HTTP_HOST'] ?? 'website');
+$lines[] = 'Date: ' . date('Y-m-d H:i:s');
+$lines[] = str_repeat('-', 40);
+foreach ($_POST as $k => $v) {{
+    if (in_array($k, $ignored, true)) continue;
+    if (is_array($v)) $v = implode(', ', $v);
+    $lines[] = $k . ': ' . $v;
+}}
+$lines[] = str_repeat('-', 40);
+$message = implode("\n", $lines);
+
+$email = p('Email');
+$name  = strip_tags(p('Name', 'Not specified'));
+
+$encoded_subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+$fromHost = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$replyTo  = (filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : ('no-reply@' . $fromHost));
+$headers  = "MIME-Version: 1.0\n";
+$headers .= "Content-Type: text/plain; charset=UTF-8\n";
+$headers .= "From: no-reply@" . $fromHost . "\n";
+$headers .= "Reply-To: " . $replyTo . "\n";
+
+$sent_ok = @mail($recipient_email, $encoded_subject, $message, $headers);
+
+// Определяем URL возврата (PRG)
+$back = (!empty($_POST['redirect'])) ? (string)$_POST['redirect']
+      : (!empty($_POST['redirect2parent']) ? (string)$_POST['redirect2parent']
+      : (isset($_SERVER['HTTP_REFERER']) ? (string)$_SERVER['HTTP_REFERER'] : '/'));
+
+$parsed = parse_url($back);
+$currentHost = $_SERVER['HTTP_HOST'] ?? '';
+if (isset($parsed['host']) && $parsed['host'] !== '' && $parsed['host'] !== $currentHost) {{
+    $back = '/';
 }}
 
-$name = $safe_post['name']
-    ?? $safe_post['Name']
-    ?? $safe_post['fullname']
-    ?? $safe_post['FullName']
-    ?? '';
-$phone = $safe_post['phone']
-    ?? $safe_post['Phone']
-    ?? $safe_post['tel']
-    ?? $safe_post['Телефон']
-    ?? '';
-$email_from = $safe_post['email']
-    ?? $safe_post['Email']
-    ?? $safe_post['mail']
-    ?? '';
-$message = $safe_post['message']
-    ?? $safe_post['Message']
-    ?? $safe_post['comment']
-    ?? $safe_post['Комментарий']
-    ?? '';
-
-$body_lines = [];
-if ($name !== '') {{
-    $body_lines[] = 'Имя: ' . $name;
-}}
-if ($phone !== '') {{
-    $body_lines[] = 'Телефон: ' . $phone;
-}}
-if ($email_from !== '') {{
-    $body_lines[] = 'Email: ' . $email_from;
-}}
-if ($message !== '') {{
-    $body_lines[] = 'Сообщение: ' . $message;
+$hash = '';
+if (strpos($back, '#') !== false) {{
+    list($base, $frag) = explode('#', $back, 2);
+    $back = $base;
+    $hash = '#' . $frag;
 }}
 
-foreach ($safe_post as $key => $value) {{
-    if (in_array($key, ['name', 'Name', 'fullname', 'FullName', 'phone', 'Phone', 'tel', 'Телефон', 'email', 'Email', 'mail', 'message', 'Message', 'comment', 'Комментарий'], true)) {{
-        continue;
-    }}
-    $body_lines[] = $key . ': ' . $value;
+if ($hash === '' || $hash === null) {{
+    $hash = '#popup:myform';
 }}
 
-if (!$body_lines) {{
-    $body_lines[] = 'Форма отправлена, но данные отсутствуют.';
-}}
+$sep  = (strpos($back, '?') === false) ? '?' : '&';
+$back = $back . $sep . 'sent=' . ($sent_ok ? '1' : '0') . $hash;
 
-$body_lines[] = '';
-$body_lines[] = '---';
-$body_lines[] = 'Отправлено: ' . date('Y-m-d H:i:s');
-
-$body = implode("\n", $body_lines);
-
-$headers = [];
-$headers[] = 'From: ' . $email;
-if ($email_from !== '') {{
-    $headers[] = 'Reply-To: ' . $email_from;
-}}
-$headers[] = 'Content-Type: text/plain; charset=utf-8';
-$headers[] = 'X-Mailer: PHP/' . phpversion();
-
-$sent = mail($to, $subject, $body, implode("\r\n", $headers));
-
-if ($sent) {{
-    http_response_code(200);
-    echo json_encode(['ok' => true, 'message' => 'Сообщение успешно отправлено'], JSON_UNESCAPED_UNICODE);
-    exit;
-}}
-
-http_response_code(500);
-echo json_encode(['ok' => false, 'error' => 'Не удалось отправить письмо'], JSON_UNESCAPED_UNICODE);
+header('Location: ' . $back, true, 303);
 exit;
 ?>
 """
@@ -308,8 +285,7 @@ def _extract_project_name(project_root: Path) -> str:
 def generate_send_email_php(project_root: Path | Any, email: str) -> Path:
     project_root = _resolve_project_root(project_root)
     target = project_root / "send_email.php"
-    project_name = _extract_project_name(project_root)
-    content = _SEND_EMAIL_TEMPLATE.format(project_name=project_name, email=email)
+    content = _SEND_EMAIL_TEMPLATE.format(email=email)
     utils.safe_write(target, content)
     logger.info(f"📨 Файл send_email.php создан: {utils.relpath(target, project_root)}")
     generate_form_handler_js(project_root)
