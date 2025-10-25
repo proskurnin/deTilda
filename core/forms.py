@@ -13,16 +13,95 @@ _SEND_EMAIL_TEMPLATE = """<?php
 $project = '{project_name}';
 $email = '{email}';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {{
-    $to = $email;
-    $subject = 'Запрос с сайта ' . $project;
-    $body = "Имя: " . ($_POST['name'] ?? '') . "\n" .
-            "Телефон: " . ($_POST['phone'] ?? '') . "\n" .
-            "Email: " . ($_POST['email'] ?? '') . "\n" .
-            "Сообщение: " . ($_POST['message'] ?? '');
-    $headers = 'From: ' . $email;
-    mail($to, $subject, $body, $headers);
+header('Content-Type: application/json; charset=utf-8');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {{
+    http_response_code(405);
+    echo json_encode(['ok' => false, 'error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+    exit;
 }}
+
+$to = $email;
+$subject = 'Запрос с сайта ' . $project;
+
+$safe_post = [];
+foreach ($_POST as $key => $value) {{
+    if (is_array($value)) {{
+        $value = implode(', ', $value);
+    }}
+    $safe_post[$key] = trim((string) $value);
+}}
+
+$name = $safe_post['name']
+    ?? $safe_post['Name']
+    ?? $safe_post['fullname']
+    ?? $safe_post['FullName']
+    ?? '';
+$phone = $safe_post['phone']
+    ?? $safe_post['Phone']
+    ?? $safe_post['tel']
+    ?? $safe_post['Телефон']
+    ?? '';
+$email_from = $safe_post['email']
+    ?? $safe_post['Email']
+    ?? $safe_post['mail']
+    ?? '';
+$message = $safe_post['message']
+    ?? $safe_post['Message']
+    ?? $safe_post['comment']
+    ?? $safe_post['Комментарий']
+    ?? '';
+
+$body_lines = [];
+if ($name !== '') {{
+    $body_lines[] = 'Имя: ' . $name;
+}}
+if ($phone !== '') {{
+    $body_lines[] = 'Телефон: ' . $phone;
+}}
+if ($email_from !== '') {{
+    $body_lines[] = 'Email: ' . $email_from;
+}}
+if ($message !== '') {{
+    $body_lines[] = 'Сообщение: ' . $message;
+}}
+
+foreach ($safe_post as $key => $value) {{
+    if (in_array($key, ['name', 'Name', 'fullname', 'FullName', 'phone', 'Phone', 'tel', 'Телефон', 'email', 'Email', 'mail', 'message', 'Message', 'comment', 'Комментарий'], true)) {{
+        continue;
+    }}
+    $body_lines[] = $key . ': ' . $value;
+}}
+
+if (!$body_lines) {{
+    $body_lines[] = 'Форма отправлена, но данные отсутствуют.';
+}}
+
+$body_lines[] = '';
+$body_lines[] = '---';
+$body_lines[] = 'Отправлено: ' . date('Y-m-d H:i:s');
+
+$body = implode("\n", $body_lines);
+
+$headers = [];
+$headers[] = 'From: ' . $email;
+if ($email_from !== '') {{
+    $headers[] = 'Reply-To: ' . $email_from;
+}}
+$headers[] = 'Content-Type: text/plain; charset=utf-8';
+$headers[] = 'X-Mailer: PHP/' . phpversion();
+
+$sent = mail($to, $subject, $body, implode("\r\n", $headers));
+
+if ($sent) {{
+    http_response_code(200);
+    echo json_encode(['ok' => true, 'message' => 'Сообщение успешно отправлено'], JSON_UNESCAPED_UNICODE);
+    exit;
+}}
+
+http_response_code(500);
+echo json_encode(['ok' => false, 'error' => 'Не удалось отправить письмо'], JSON_UNESCAPED_UNICODE);
+exit;
 ?>
 """
 
@@ -30,6 +109,20 @@ _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
 (function(){
   function qs(s, root){ return (root||document).querySelector(s); }
   function qsa(s, root){ return Array.prototype.slice.call((root||document).querySelectorAll(s)); }
+  function matches(el, selector){
+    if(!el || !selector) return false;
+    var proto = Element.prototype;
+    var fn = proto.matches || proto.matchesSelector || proto.webkitMatchesSelector || proto.mozMatchesSelector || proto.msMatchesSelector;
+    if(!fn) return false;
+    return fn.call(el, selector);
+  }
+  function closest(el, selector){
+    while(el && el !== document){
+      if(matches(el, selector)) return el;
+      el = el.parentElement || el.parentNode;
+    }
+    return null;
+  }
   function popup(text, ok){
     var id = 'aida-form-popup';
     var el = document.getElementById(id);
@@ -53,6 +146,34 @@ _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
     setTimeout(function(){ el.style.display='none'; }, 3500);
   }
 
+  function unlockPage(){
+    var body = document.body;
+    if(body && body.classList){
+      body.classList.remove('t-body_popupshowed', 't-body_popupfixed', 't-lock');
+      body.style.overflow = '';
+      body.style.position = '';
+    }
+    if(document.documentElement && document.documentElement.classList){
+      document.documentElement.classList.remove('t-lock');
+    }
+  }
+
+  function hideFormPopup(form){
+    var popupEl = closest(form, '.t-popup');
+    if(popupEl && popupEl.classList){
+      popupEl.classList.remove('t-popup_show', 't-popup_opened');
+      if(popupEl.style){
+        popupEl.style.display = 'none';
+        popupEl.style.opacity = '0';
+      }
+      var bg = qs('.t-popup__bg', popupEl);
+      if(bg && bg.style){
+        bg.style.display = 'none';
+      }
+    }
+    unlockPage();
+  }
+
   function onSubmit(e){
     var f = e.target;
     if(!f || f.tagName !== 'FORM') return;
@@ -72,7 +193,7 @@ _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
 
     var fd = new FormData(f);
     var action = f.getAttribute('action') || 'send_email.php';
-    fetch(action, { method:'POST', body: fd, credentials: 'same-origin' })
+    fetch(action, { method:'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(resp){
         var ok = resp.status >=200 && resp.status < 400; // 303 редирект это < 400
 
@@ -87,9 +208,47 @@ _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
             return;
         }
 
-        // Fallback popup
-        popup(ok ? 'Заявка отправлена' : 'Ошибка отправки', ok);
-        if(ok) f.reset();
+        var message = ok ? 'Заявка отправлена' : 'Ошибка отправки';
+
+        return resp.text().then(function(bodyText){
+          if(bodyText){
+            try {
+              var payload = JSON.parse(bodyText);
+              if(typeof payload.ok === 'boolean'){
+                ok = !!payload.ok;
+              }
+              if(payload.message){
+                message = payload.message;
+              } else if(payload.error && !ok){
+                message = payload.error;
+              }
+            } catch(parseErr){
+              // ignore invalid json
+            }
+          }
+
+          popup(message, ok);
+          if(ok){
+            hideFormPopup(f);
+            if(typeof f.reset === 'function'){
+              f.reset();
+            }
+          }
+
+          try {
+            var successEvent;
+            if (typeof window.CustomEvent === 'function') {
+              successEvent = new CustomEvent('detilda:form-sent', { detail: { form: f, ok: ok } });
+            } else {
+              successEvent = document.createEvent('CustomEvent');
+              successEvent.initCustomEvent('detilda:form-sent', true, true, { form: f, ok: ok });
+            }
+            document.dispatchEvent(successEvent);
+          } catch(eventErr) {
+            // старые браузеры без CustomEvent
+          }
+        });
+
       })
       .catch(function(){
         popup('Ошибка сети', false);
