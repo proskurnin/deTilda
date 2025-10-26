@@ -59,3 +59,32 @@ def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
     assert "..\\job.html" in nested_text
 
     assert rename_map["Job.HTML"] == "job.html"
+
+
+def test_case_normalization_lowercases_links_without_matching_files(tmp_path: Path) -> None:
+    project_root = tmp_path
+    rename_map: dict[str, str] = {}
+    stats = AssetStats()
+    patterns_cfg = {"text_extensions": [".html"]}
+    service_cfg = {
+        "pipeline_stages": {
+            "normalize_case": {
+                "enabled": True,
+                "extensions": [".html"],
+            }
+        }
+    }
+
+    (project_root / "main.html").write_text(
+        '<a href="/Job"></a><a href="./Sub/Job"></a><a href="..\\Job"></a>',
+        encoding="utf-8",
+    )
+
+    _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
+
+    main_text = (project_root / "main.html").read_text(encoding="utf-8")
+    assert '/job' in main_text
+    assert './sub/job' in main_text
+    assert '..\\job' in main_text
+    assert stats.renamed == 0
+    assert rename_map == {}
