@@ -30,7 +30,7 @@
   "report_format": "text",
   "default_email": "r@prororo.com",
   "build": {
-    "package_name": "detilda_v4.4_LTS.zip",
+    "package_name": "detilda_v4.5.0_LTS_unified.zip",
     "include": [
       "main.py",
       "manifest.json",
