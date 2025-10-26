@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
+from core.htaccess import collect_routes, get_route_info
 
 __all__ = ["LinkCheckerResult", "check_links"]
 
@@ -52,6 +53,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     link_patterns = patterns_cfg.get("links", [])
 
     result = LinkCheckerResult()
+    collect_routes(project_root, loader)
 
     for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:
@@ -59,9 +61,12 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
         except Exception:
             continue
         for link in _iter_links(text, link_patterns):
-            normalized_link = _strip_cache_busting_param(link)
-            if normalized_link.startswith("/"):
-                candidate = project_root / normalized_link.lstrip("/")
+            if link.startswith("/"):
+                route_info = get_route_info(link)
+                if route_info and route_info.exists and route_info.path is not None:
+                    candidate = route_info.path
+                else:
+                    candidate = project_root / link.lstrip("/")
             else:
                 candidate = (file_path.parent / normalized_link).resolve()
             if any(normalized_link.startswith(prefix) for prefix in ignore_prefixes):
