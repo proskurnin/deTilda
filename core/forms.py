@@ -6,6 +6,13 @@ from urllib.parse import urlparse
 from typing import Any
 
 from core import logger, utils
+from core.module_versions import register_module_version
+
+register_module_version(
+    __name__,
+    "v4.6 Stable",
+    "Добавлена регистрация версий модулей для отслеживания эволюции форм.",
+)
 
 __all__ = ["generate_send_email_php", "generate_form_handler_js"]
 

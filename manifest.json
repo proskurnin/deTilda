@@ -1,6 +1,6 @@
 {
   "name": "Detilda",
-  "version": "v4.5.0 LTS unified",
+  "version": "v4.6 Stable",
   "release_date": "2025-10-24",
   "description": "Offline Tilda cleanup and re-packaging automation tool.",
   "authors": [
@@ -30,7 +30,7 @@
   "report_format": "text",
   "default_email": "r@prororo.com",
   "build": {
-    "package_name": "detilda_v4.5.0_LTS_unified.zip",
+    "package_name": "detilda_v4.6_Stable.zip",
     "include": [
       "main.py",
       "manifest.json",
