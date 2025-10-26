@@ -46,6 +46,19 @@ def _strip_cache_busting_param(link: str) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, sanitized_query, ""))
 
 
+def _get_effective_base_directory(file_path: Path) -> Path:
+    """Return a directory to use as a base for resolving relative links."""
+
+    stem = file_path.stem
+    if stem.endswith("body"):
+        base_name = stem[:-4]
+        if base_name:
+            parent = file_path.parent
+            if parent.name.casefold() == base_name.casefold():
+                return parent.parent
+    return file_path.parent
+
+
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
@@ -60,6 +73,8 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
             text = utils.safe_read(file_path)
         except Exception:
             continue
+        base_directory = _get_effective_base_directory(file_path)
+
         for link in _iter_links(text, link_patterns):
             normalized_link = _strip_cache_busting_param(link)
             if not normalized_link:
@@ -78,7 +93,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                 else:
                     candidate = project_root / (link_path or normalized_link).lstrip("/")
             else:
-                candidate = (file_path.parent / (link_path or normalized_link)).resolve()
+                candidate = (base_directory / (link_path or normalized_link)).resolve()
             result.checked += 1
             if not candidate.exists():
                 result.broken += 1
