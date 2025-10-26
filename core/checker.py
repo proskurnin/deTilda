@@ -61,16 +61,24 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
         except Exception:
             continue
         for link in _iter_links(text, link_patterns):
+            normalized_link = _strip_cache_busting_param(link)
+            if not normalized_link:
+                continue
+
+            link_parts = urlsplit(normalized_link)
+            link_path = link_parts.path
+
+            if any(normalized_link.startswith(prefix) for prefix in ignore_prefixes):
+                continue
+
             if link.startswith("/"):
-                route_info = get_route_info(link)
+                route_info = get_route_info(link_path or normalized_link)
                 if route_info and route_info.exists and route_info.path is not None:
                     candidate = route_info.path
                 else:
-                    candidate = project_root / link.lstrip("/")
+                    candidate = project_root / (link_path or normalized_link).lstrip("/")
             else:
-                candidate = (file_path.parent / normalized_link).resolve()
-            if any(normalized_link.startswith(prefix) for prefix in ignore_prefixes):
-                continue
+                candidate = (file_path.parent / (link_path or normalized_link)).resolve()
             result.checked += 1
             if not candidate.exists():
                 result.broken += 1
