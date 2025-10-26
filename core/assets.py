@@ -10,10 +10,14 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Tuple
+from typing import TYPE_CHECKING, Dict, Iterable, Iterator, Tuple
+from uuid import uuid4
 
 from core import logger, utils
 from core.config_loader import ConfigLoader, iter_section_list
+
+if TYPE_CHECKING:  # pragma: no cover - type checking helper
+    from core.project import ProjectContext
 
 __all__ = ["AssetStats", "rename_and_cleanup_assets"]
 
@@ -227,7 +231,185 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
     return downloaded
 
 
-def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> AssetResult:
+def _normalize_case_enabled(service_cfg: Dict[str, object]) -> tuple[bool, set[str]]:
+    normalize_cfg: Dict[str, object] = {}
+    pipeline_cfg = service_cfg.get("pipeline_stages")
+    if isinstance(pipeline_cfg, dict):
+        raw_cfg = pipeline_cfg.get("normalize_case")
+        if isinstance(raw_cfg, dict):
+            normalize_cfg = raw_cfg
+        elif isinstance(raw_cfg, bool):
+            normalize_cfg = {"enabled": raw_cfg}
+
+    enabled = normalize_cfg.get("enabled")
+    if enabled is None:
+        enabled = True
+    else:
+        enabled = bool(enabled)
+
+    extensions = {
+        str(ext).lower()
+        for ext in normalize_cfg.get("extensions", [])
+        if isinstance(ext, str)
+    }
+    if not extensions:
+        extensions = {".html", ".htm", ".css", ".js", ".php", ".txt"}
+
+    return enabled, extensions
+
+
+def _rename_with_case_handling(path: Path, destination: Path) -> Path | None:
+    """Rename *path* to *destination*, handling case-only updates safely."""
+
+    if path == destination:
+        return destination
+
+    if destination.exists() and destination != path:
+        try:
+            if destination.samefile(path):
+                temp_path = path.with_name(
+                    f"__detilda_tmp__{uuid4().hex}{path.suffix}"
+                )
+                path.rename(temp_path)
+                temp_path.rename(destination)
+                return destination
+        except (OSError, FileNotFoundError):
+            pass
+        return None
+
+    try:
+        path.rename(destination)
+        return destination
+    except OSError:
+        temp_path = path.with_name(f"__detilda_tmp__{uuid4().hex}{path.suffix}")
+        try:
+            path.rename(temp_path)
+            temp_path.rename(destination)
+            return destination
+        except OSError:
+            if temp_path.exists():
+                with contextlib.suppress(Exception):
+                    temp_path.rename(path)
+            return None
+
+
+def _apply_case_normalization(
+    project_root: Path,
+    rename_map: Dict[str, str],
+    stats: AssetStats,
+    patterns_cfg: Dict[str, object],
+    service_cfg: Dict[str, object],
+) -> None:
+    enabled, extensions = _normalize_case_enabled(service_cfg)
+    if not enabled:
+        logger.info("[assets] Нормализация регистра файлов отключена в конфиге")
+        return
+
+    text_extensions = tuple(
+        str(ext).lower()
+        for ext in patterns_cfg.get("text_extensions", [])
+        if isinstance(ext, str)
+    )
+    if not text_extensions:
+        text_extensions = (".html", ".htm", ".css", ".js", ".php", ".txt")
+
+    case_updates: Dict[str, str] = {}
+
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix not in extensions:
+            continue
+
+        lower_name = path.name.lower()
+        if lower_name == path.name:
+            continue
+
+        old_rel = utils.relpath(path, project_root)
+        old_name = path.name
+        new_path = path.with_name(lower_name)
+        renamed = _rename_with_case_handling(path, new_path)
+        if renamed is None:
+            logger.warn(
+                f"[assets] Пропуск нормализации регистра из-за конфликта: {old_rel}"
+            )
+            continue
+
+        new_rel = utils.relpath(new_path, project_root)
+
+        rename_map[old_rel] = new_rel
+        rename_map[old_name] = new_path.name
+        for key, value in list(rename_map.items()):
+            if value == old_rel:
+                rename_map[key] = new_rel
+            elif value == old_name:
+                rename_map[key] = new_path.name
+
+        case_updates[old_rel] = new_rel
+        case_updates[old_name] = new_path.name
+        if "/" in old_rel:
+            windows_old = old_rel.replace("/", "\\")
+            windows_new = new_rel.replace("/", "\\")
+            rename_map[windows_old] = windows_new
+            case_updates[windows_old] = windows_new
+            for key, value in list(rename_map.items()):
+                if value == windows_old:
+                    rename_map[key] = windows_new
+
+        stats.renamed += 1
+        logger.info(
+            f"🔡 Приведено к нижнему регистру: {old_rel} → {new_rel}"
+        )
+
+    if not case_updates:
+        return
+
+    replacements = {
+        old: new
+        for old, new in case_updates.items()
+        if isinstance(old, str)
+        and isinstance(new, str)
+        and old != new
+    }
+    if not replacements:
+        return
+
+    for file_path in utils.list_files_recursive(project_root, extensions=text_extensions):
+        try:
+            original_text = utils.safe_read(file_path)
+        except Exception as exc:
+            logger.warn(f"[assets] Пропуск обновления ссылок в {file_path.name}: {exc}")
+            continue
+
+        new_text = original_text
+        changed = False
+        for old, new in replacements.items():
+            if old not in new_text:
+                continue
+            new_text = new_text.replace(old, new)
+            changed = True
+
+        if changed and new_text != original_text:
+            utils.safe_write(file_path, new_text)
+            logger.info(
+                f"🔡 Обновлены ссылки (нижний регистр): {utils.relpath(file_path, project_root)}"
+            )
+
+
+def rename_and_cleanup_assets(
+    project_root: Path | "ProjectContext",
+    loader: ConfigLoader | None = None,
+) -> AssetResult:
+    context: ProjectContext | None = None
+    if hasattr(project_root, "project_root") and not isinstance(project_root, Path):
+        context = project_root  # type: ignore[assignment]
+        project_root = context.project_root
+        loader = context.config_loader
+
+    if loader is None:
+        raise ValueError("ConfigLoader не передан")
+
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     images_cfg = loader.images()
@@ -393,6 +575,8 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
                     f"[assets] Не удалось удалить устаревший rename_map.json: {exc}"
                 )
 
+    _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
+
     for rule in resource_rules:
         destination_path = project_root / rule.destination
         try:
@@ -424,4 +608,8 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
     )
     if stats.downloaded:
         logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded}")
+
+    if context is not None:
+        context.update_rename_map(rename_map)
+
     return AssetResult(rename_map=rename_map, stats=stats)

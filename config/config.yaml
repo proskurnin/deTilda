@@ -144,6 +144,16 @@ service_files:
       - ".js"
       - ".php"
       - ".txt"
+  pipeline_stages:
+    normalize_case:
+      enabled: true
+      extensions:
+        - ".html"
+        - ".htm"
+        - ".css"
+        - ".js"
+        - ".php"
+        - ".txt"
   cleaner_options:
     files_to_clean_tilda_refs:
       - "robots.txt"
