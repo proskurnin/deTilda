@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Iterator
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
@@ -69,64 +70,59 @@ def _collect_script_rules(loader: ConfigLoader) -> tuple[list[str], list[re.Patt
 #     return patterns
 
 
-def _compile_script_patterns(
-    script_names: list[str], extra_patterns: list[re.Pattern[str]]
-) -> list[re.Pattern[str]]:
-    """
-    Создаёт набор регулярных выражений для поиска и удаления <script>-блоков,
-    содержащих указанные имена файлов или сигнатуры трекеров.
-    Поддерживает минифицированные, инлайн и многострочные скрипты.
-    """
-    patterns: list[re.Pattern[str]] = list(extra_patterns)
+_SCRIPT_OPEN_RE = re.compile(r"<script\b", re.IGNORECASE)
+_SCRIPT_CLOSE_RE = re.compile(r"</script\s*>", re.IGNORECASE)
+_SRC_ATTR_RE = re.compile(
+    r"\bsrc\s*=\s*(?:" +
+    r'"([^"\\>]*)"' +
+    r"|'([^'\\>]*)'" +
+    r"|([^>\s]+))",
+    re.IGNORECASE,
+)
 
-    for name in script_names:
-        if not name:
+
+def _normalize_src(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    # Отбрасываем параметры и якори, оставляем только имя файла.
+    normalized = value.split("#", 1)[0].split("?", 1)[0]
+    normalized = normalized.replace("\\", "/")
+    return normalized.rsplit("/", 1)[-1].lower()
+
+
+def _iter_script_blocks(text: str) -> Iterator[tuple[int, int, str, str]]:
+    """Итерируется по срезам <script>...</script> в тексте."""
+
+    pos = 0
+    while True:
+        match = _SCRIPT_OPEN_RE.search(text, pos)
+        if not match:
+            break
+
+        start = match.start()
+        tag_start = match.end()
+        tag_close_index = text.find(">", tag_start)
+        if tag_close_index == -1:
+            break
+
+        tag_close = tag_close_index + 1
+        start_tag = text[start:tag_close]
+        # Самозакрывающийся тег (<script ... />)
+        if start_tag.rstrip().endswith("/>"):
+            yield start, tag_close, start_tag, start_tag
+            pos = tag_close
             continue
 
-        escaped = re.escape(name)
+        end_match = _SCRIPT_CLOSE_RE.search(text, tag_close)
+        if not end_match:
+            pos = tag_close
+            continue
 
-        # Основной шаблон: удаляет весь <script>...</script>, если внутри встречается имя
-        # или оно присутствует в атрибутах (например, src=".../aida-forms-1.0.min.js")
-        base_pattern = re.compile(
-            rf"<script\b(?=[^>]*{escaped}|[^>]*>[\s\S]*?{escaped})[^>]*>[\s\S]*?</script>",
-            re.IGNORECASE,
-        )
-        patterns.append(base_pattern)
-
-        # На случай самозакрывающихся тегов (<script ... />) c запрещённым именем
-        self_closing_pattern = re.compile(
-            r"<script\b[^>]*" + escaped + r"[^>]*/>",
-            re.IGNORECASE,
-        )
-        patterns.append(self_closing_pattern)
-
-        # Дополнительно: если это известный трекер (aida/tilda/stat)
-        # ищем по типичным маркерам даже без имени файла
-        if "aida" in name.lower():
-            aida_pattern = re.compile(
-                r"<script\b[^>]*>[\s\S]*?(mainTracker\s*=\s*['\"]aida['\"]|aidastatscript)"
-                r"[\s\S]*?</script>",
-                re.IGNORECASE,
-            )
-            patterns.append(aida_pattern)
-
-        if "tilda" in name.lower():
-            tilda_pattern = re.compile(
-                r"<script\b[^>]*>[\s\S]*?(tilda[-_]stat|tildastat|Tilda\.)"
-                r"[\s\S]*?</script>",
-                re.IGNORECASE,
-            )
-            patterns.append(tilda_pattern)
-
-    # Удаляем блоки, начинающиеся с маркера "<!-- Stat -->" и следующим за ним скриптом
-    patterns.append(
-        re.compile(
-            r"<!--\s*Stat\s*-->[\s\r\n]*<script\b[\s\S]*?</script>",
-            re.IGNORECASE,
-        )
-    )
-
-    return patterns
+        end = end_match.end()
+        block = text[start:end]
+        yield start, end, block, start_tag
+        pos = end
 
 
 
@@ -168,14 +164,10 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
             f"[script_cleaner] Доп. паттерны для удаления: {len(extra_patterns)}"
         )
 
-    script_patterns = _compile_script_patterns(script_names, extra_patterns)
-    logger.debug(
-        f"[script_cleaner] Скомпилировано регулярных выражений: {len(script_patterns)}"
-    )
-
     removed_tags = 0
     updated_files = 0
     lowered_names = [name.lower() for name in script_names]
+    names_lookup = set(lowered_names)
 
     for path in utils.list_files_recursive(project_root, extensions=text_extensions):
         try:
@@ -186,21 +178,39 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
 
         original = text
         removed_in_file = 0
-        for pattern in script_patterns:
-            text, count = pattern.subn("", text)
-            if count:
-                removed_in_file += count
+        pieces: list[str] = []
+        last_index = 0
 
-        if not removed_in_file and script_names:
+        for start, end, block, start_tag in _iter_script_blocks(original):
+            remove_block = False
+
+            match = _SRC_ATTR_RE.search(start_tag)
+            normalized_src = ""
+            if match:
+                src_value = next((group for group in match.groups() if group), "")
+                normalized_src = _normalize_src(src_value)
+
+            if normalized_src and normalized_src in names_lookup:
+                remove_block = True
+            elif extra_patterns and any(pattern.search(block) for pattern in extra_patterns):
+                remove_block = True
+
+            if remove_block:
+                pieces.append(original[last_index:start])
+                last_index = end
+                removed_in_file += 1
+
+        if removed_in_file:
+            pieces.append(original[last_index:])
+            text = "".join(pieces)
+        elif script_names:
             lowered_text = original.lower()
             matched_names = [
-                name
-                for name, lowered in zip(script_names, lowered_names)
-                if lowered in lowered_text
+                name for name, lowered in zip(script_names, lowered_names) if lowered in lowered_text
             ]
             if matched_names:
                 logger.debug(
-                    "[script_cleaner] Найдены упоминания скриптов, но паттерн не сработал: "
+                    "[script_cleaner] Найдены упоминания скриптов, но src не совпадает: "
                     f"{matched_names} в {utils.relpath(path, project_root)}"
                 )
 
