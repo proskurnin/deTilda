@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
@@ -32,6 +33,19 @@ def _iter_links(text: str, patterns: Iterable[str]) -> Iterable[str]:
                 yield link
 
 
+def _strip_cache_busting_param(link: str) -> str:
+    """Return *link* without the ``t`` query parameter and fragment."""
+
+    split = urlsplit(link)
+    filtered_params = [
+        (key, value)
+        for key, value in parse_qsl(split.query, keep_blank_values=True)
+        if key.lower() != "t"
+    ]
+    sanitized_query = urlencode(filtered_params, doseq=True)
+    return urlunsplit((split.scheme, split.netloc, split.path, sanitized_query, ""))
+
+
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
@@ -54,14 +68,14 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                 else:
                     candidate = project_root / link.lstrip("/")
             else:
-                candidate = (file_path.parent / link).resolve()
-            if any(link.startswith(prefix) for prefix in ignore_prefixes):
+                candidate = (file_path.parent / normalized_link).resolve()
+            if any(normalized_link.startswith(prefix) for prefix in ignore_prefixes):
                 continue
             result.checked += 1
             if not candidate.exists():
                 result.broken += 1
                 logger.warn(
-                    f"[checker] Битая ссылка в {utils.relpath(file_path, project_root)}: {link}"
+                    f"[checker] Битая ссылка в {utils.relpath(file_path, project_root)}: {normalized_link}"
                 )
 
     logger.info(
