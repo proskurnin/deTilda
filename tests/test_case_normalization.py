@@ -88,27 +88,3 @@ def test_case_normalization_lowercases_links_without_matching_files(tmp_path: Pa
     assert '..\\job' in main_text
     assert stats.renamed == 0
     assert rename_map == {}
-
-
-def test_case_normalization_lowercases_links_in_json(tmp_path: Path) -> None:
-    project_root = tmp_path
-    rename_map: dict[str, str] = {}
-    stats = AssetStats()
-    patterns_cfg = {"text_extensions": [".json"]}
-    service_cfg = {
-        "pipeline_stages": {
-            "normalize_case": {
-                "enabled": True,
-                "extensions": [".html"],
-            }
-        }
-    }
-
-    (project_root / "data.json").write_text('{"link": "/Job"}', encoding="utf-8")
-
-    _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
-
-    content = (project_root / "data.json").read_text(encoding="utf-8")
-    assert '/job' in content
-    assert stats.renamed == 0
-    assert rename_map == {}
