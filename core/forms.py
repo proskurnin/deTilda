@@ -169,7 +169,54 @@ _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
     }
 
     var fd = new FormData(f);
-    var action = f.getAttribute('action') || 'send_email.php';
+    var attr = f.getAttribute('action');
+    var fallbackAction = 'send_email.php';
+    var action = attr ? attr.trim() : '';
+    var remoteHosts = [
+      'forms.tildacdn.com',
+      'forms.tildacdn.pro',
+      'forms.tilda.ws',
+      'forms.tilda.cc',
+      'forms.tilda.network',
+      'forms.tilda.ru',
+      'forms.aladeco.com'
+    ];
+    var remotePrefixes = [
+      'forms.tilda.',
+      'forms.tildacdn.',
+      'forms.aladeco.'
+    ];
+
+    if(!action){
+      action = fallbackAction;
+    } else {
+      try {
+        var parsed = new URL(action, window.location.href);
+        var host = (parsed.host || '').toLowerCase();
+        var isRemote = false;
+
+        for(var i=0; i<remoteHosts.length; i++){
+          if(host === remoteHosts[i]){
+            isRemote = true;
+            break;
+          }
+        }
+
+        if(!isRemote){
+          for(var j=0; j<remotePrefixes.length; j++){
+            if(host.indexOf(remotePrefixes[j]) === 0){
+              isRemote = true;
+              break;
+            }
+          }
+        }
+
+        action = isRemote ? fallbackAction : parsed.href;
+      } catch(parseError){
+        action = fallbackAction;
+      }
+    }
+
     fetch(action, { method:'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(resp){
         var ok = resp.status >=200 && resp.status < 400; // 303 редирект это < 400
