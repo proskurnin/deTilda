@@ -375,6 +375,18 @@ def _apply_case_normalization(
     if not replacements:
         return
 
+    replacement_patterns: list[tuple[str, str, re.Pattern[str]]] = []
+    for old, new in replacements.items():
+        if not old:
+            continue
+        pattern = re.compile(
+            rf"(?P<prefix>(?:\./|\.\./|\.\\|..\\|/|\\)*){re.escape(old)}"
+        )
+        replacement_patterns.append((old, new, pattern))
+
+    if not replacement_patterns:
+        return
+
     for file_path in utils.list_files_recursive(project_root, extensions=text_extensions):
         try:
             original_text = utils.safe_read(file_path)
@@ -384,11 +396,16 @@ def _apply_case_normalization(
 
         new_text = original_text
         changed = False
-        for old, new in replacements.items():
+        for old, new, pattern in replacement_patterns:
             if old not in new_text:
                 continue
-            new_text = new_text.replace(old, new)
-            changed = True
+
+            def _replacement(match: re.Match[str], *, _new=new) -> str:
+                return f"{match.group('prefix')}{_new}"
+
+            new_text, count = pattern.subn(_replacement, new_text)
+            if count:
+                changed = True
 
         if changed and new_text != original_text:
             utils.safe_write(file_path, new_text)
