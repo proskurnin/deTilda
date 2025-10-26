@@ -213,10 +213,13 @@ def _update_links_in_html(
 def update_all_refs_in_project(
     project_root: Path,
     rename_map: Dict[str, str],
-    loader: ConfigLoader,
+    loader: ConfigLoader | None = None,
 ) -> tuple[int, int]:
     project_root = Path(project_root)
     rename_map = dict(rename_map)
+
+    if loader is None:
+        loader = ConfigLoader()
 
     patterns_cfg = loader.patterns()
     ignore_prefixes = tuple(patterns_cfg.get("ignore_prefixes", []))
