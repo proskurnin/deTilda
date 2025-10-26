@@ -68,6 +68,11 @@ def _sanitize(name: str) -> str:
     return re.sub(r"_+", "_", sanitized)
 
 
+_RELATIVE_LINK_LOWERCASE_PATTERN = re.compile(
+    r"(?<!:)(?P<prefix>(?:\./|\.\./|/|\\)+)(?P<path>[A-Za-z0-9._\-\\/]+)"
+)
+
+
 def _iter_links(text: str, link_patterns: Iterable[str]) -> Iterator[str]:
     for pattern in link_patterns:
         try:
@@ -79,6 +84,18 @@ def _iter_links(text: str, link_patterns: Iterable[str]) -> Iterator[str]:
             link = match.groupdict().get("link")
             if link:
                 yield link
+
+
+def _lowercase_relative_links(text: str) -> tuple[str, bool]:
+    def _replacement(match: re.Match[str]) -> str:
+        path = match.group("path")
+        lower_path = path.lower()
+        if lower_path == path:
+            return match.group(0)
+        return f"{match.group('prefix')}{lower_path}"
+
+    new_text, count = _RELATIVE_LINK_LOWERCASE_PATTERN.subn(_replacement, text)
+    return new_text, bool(count)
 
 
 def _resolve_download_target(url: str, rules: Iterable[Dict[str, object]]) -> Tuple[str, str] | None:
@@ -312,7 +329,21 @@ def _apply_case_normalization(
         if isinstance(ext, str)
     )
     if not text_extensions:
-        text_extensions = (".html", ".htm", ".css", ".js", ".php", ".txt")
+        text_extensions = (
+            ".html",
+            ".htm",
+            ".css",
+            ".js",
+            ".php",
+            ".txt",
+            ".json",
+            ".xml",
+            ".yml",
+            ".yaml",
+            ".md",
+            ".markdown",
+            ".svg",
+        )
 
     case_updates: Dict[str, str] = {}
 
@@ -363,9 +394,6 @@ def _apply_case_normalization(
             f"🔡 Приведено к нижнему регистру: {old_rel} → {new_rel}"
         )
 
-    if not case_updates:
-        return
-
     replacements = {
         old: new
         for old, new in case_updates.items()
@@ -388,8 +416,6 @@ def _apply_case_normalization(
             ):
                 extra_replacements.setdefault(old_root, new_root)
         replacements.update(extra_replacements)
-    if not replacements:
-        return
 
     replacement_patterns: list[tuple[str, str, re.Pattern[str]]] = []
     for old, new in replacements.items():
@@ -400,8 +426,7 @@ def _apply_case_normalization(
         )
         replacement_patterns.append((old, new, pattern))
 
-    if not replacement_patterns:
-        return
+    links_updated = False
 
     for file_path in utils.list_files_recursive(project_root, extensions=text_extensions):
         try:
@@ -423,10 +448,25 @@ def _apply_case_normalization(
             if count:
                 changed = True
 
+        new_text, lowered = _lowercase_relative_links(new_text)
+        if lowered:
+            changed = True
+
         if changed and new_text != original_text:
             utils.safe_write(file_path, new_text)
+            links_updated = True
             logger.info(
                 f"🔡 Обновлены ссылки (нижний регистр): {utils.relpath(file_path, project_root)}"
+            )
+
+    if not links_updated:
+        if replacement_patterns:
+            logger.info(
+                "🔡 Ссылки (нижний регистр) уже соответствуют именам файлов, изменений не потребовалось"
+            )
+        else:
+            logger.info(
+                "🔡 Нормализация урлов (приведение к нижнему регистру) не потребовалась"
             )
 
 

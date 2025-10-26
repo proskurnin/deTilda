@@ -30,6 +30,13 @@ patterns:
     - ".js"
     - ".php"
     - ".txt"
+    - ".json"
+    - ".xml"
+    - ".yml"
+    - ".yaml"
+    - ".md"
+    - ".markdown"
+    - ".svg"
   ignore_prefixes:
     - "http://"
     - "https://"
