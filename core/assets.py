@@ -329,7 +329,21 @@ def _apply_case_normalization(
         if isinstance(ext, str)
     )
     if not text_extensions:
-        text_extensions = (".html", ".htm", ".css", ".js", ".php", ".txt")
+        text_extensions = (
+            ".html",
+            ".htm",
+            ".css",
+            ".js",
+            ".php",
+            ".txt",
+            ".json",
+            ".xml",
+            ".yml",
+            ".yaml",
+            ".md",
+            ".markdown",
+            ".svg",
+        )
 
     case_updates: Dict[str, str] = {}
 
