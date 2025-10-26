@@ -125,6 +125,10 @@ service_files:
       - "aida-events-1.0.min.js"
   scripts_to_remove_from_project:
     filenames:
+      - "tilda-stat-1.0.min.js"
+      - "tilda-forms-1.0.min.js"
+      - "tilda-fallback-1.0.min.js"
+      - "tilda-events-1.0.min.js"
       - "aida-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"
       - "aida-fallback-1.0.min.js"
