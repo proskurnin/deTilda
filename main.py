@@ -31,21 +31,12 @@ def _prompt(prompt: str) -> str:
         return ""
 
 
-def main() -> None:
-    manifest = load_manifest()
-    version = manifest.get("version", VERSION)
-    workdir = ensure_dir(Path(manifest.get("paths", {}).get("workdir", "_workdir")))
-
-    print(f"=== Detilda {version} ===")
-    print(f"Рабочая папка: {workdir.resolve()}")
-
-    archive_name = _prompt("Введите имя архива в ./_workdir (например, projectXXXX.zip): ").strip()
-    if not archive_name:
-        print("❌ Имя архива не указано — завершение работы.")
-        return
-
-    email = _prompt("Введите e-mail для отправки формы (по умолчанию r@prororo.com): ").strip() or "r@prororo.com"
-
+def _process_archive(
+    archive_name: str,
+    workdir: Path,
+    email: str,
+    version: str,
+) -> None:
     archive_path = workdir / archive_name
     if not archive_path.exists():
         print(f"❌ Архив не найден: {archive_path}")
@@ -125,6 +116,38 @@ def main() -> None:
         logger.ok(f"🎯 Detilda {version} — завершено успешно.")
     finally:
         logger.close()
+
+
+def main() -> None:
+    manifest = load_manifest()
+    version = manifest.get("version", VERSION)
+    workdir = ensure_dir(Path(manifest.get("paths", {}).get("workdir", "_workdir")))
+
+    print(f"=== Detilda {version} ===")
+    print(f"Рабочая папка: {workdir.resolve()}")
+
+    archive_prompt = (
+        "Введите имя архива в ./_workdir (например, projectXXXX.zip). "
+        "Можно перечислить несколько через запятую: "
+    )
+    archive_input = _prompt(archive_prompt).strip()
+    if not archive_input:
+        print("❌ Имя архива не указано — завершение работы.")
+        return
+
+    archive_names = [name.strip() for name in archive_input.split(",") if name.strip()]
+    if not archive_names:
+        print("❌ Имя архива не указано — завершение работы.")
+        return
+
+    email = _prompt("Введите e-mail для отправки формы (по умолчанию r@prororo.com): ").strip() or "r@prororo.com"
+
+    for index, archive_name in enumerate(archive_names, start=1):
+        if len(archive_names) > 1:
+            print("======================================")
+            print(f"▶️  {index}/{len(archive_names)}: обработка архива {archive_name}")
+
+        _process_archive(archive_name, workdir, email, version)
 
 
 if __name__ == "__main__":
