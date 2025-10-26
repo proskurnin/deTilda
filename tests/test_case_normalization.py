@@ -32,7 +32,7 @@ def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
 
     (project_root / "Job.HTML").write_text("content", encoding="utf-8")
     (project_root / "main.html").write_text(
-        '<a href="./Job.HTML"></a><a href="/Job.HTML"></a>',
+        '<a href="./Job.HTML"></a><a href="/Job.HTML"></a><a href="/Job"></a>',
         encoding="utf-8",
     )
 
@@ -52,6 +52,7 @@ def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
     main_text = (project_root / "main.html").read_text(encoding="utf-8")
     assert "./job.html" in main_text
     assert "/job.html" in main_text
+    assert "/job" in main_text
 
     nested_text = (pages_dir / "index.html").read_text(encoding="utf-8")
     assert "../job.html" in nested_text

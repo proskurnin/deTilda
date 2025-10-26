@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import ssl
 import urllib.error
@@ -372,6 +373,21 @@ def _apply_case_normalization(
         and isinstance(new, str)
         and old != new
     }
+    if replacements:
+        extra_replacements: Dict[str, str] = {}
+        for old, new in replacements.items():
+            old_root, old_ext = os.path.splitext(old)
+            new_root, new_ext = os.path.splitext(new)
+            if (
+                old_ext
+                and new_ext
+                and old_ext.lower() == new_ext.lower()
+                and old_root
+                and new_root
+                and old_root != new_root
+            ):
+                extra_replacements.setdefault(old_root, new_root)
+        replacements.update(extra_replacements)
     if not replacements:
         return
 
