@@ -185,6 +185,9 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
         for start, end, block, start_tag in _iter_script_blocks(original):
             remove_block = False
 
+            prefix = original[last_index:start]
+            match_comment = _STAT_COMMENT_TAIL_RE.search(prefix) if prefix else None
+
             match = _SRC_ATTR_RE.search(start_tag)
             normalized_src = ""
             if match:
@@ -195,13 +198,12 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
                 remove_block = True
             elif extra_patterns and any(pattern.search(block) for pattern in extra_patterns):
                 remove_block = True
+            elif match_comment:
+                remove_block = True
 
             if remove_block:
-                prefix = original[last_index:start]
-                if prefix:
-                    match_comment = _STAT_COMMENT_TAIL_RE.search(prefix)
-                    if match_comment:
-                        prefix = prefix[: match_comment.start()]
+                if match_comment:
+                    prefix = prefix[: match_comment.start()]
                 pieces.append(prefix)
                 last_index = end
                 removed_in_file += 1
