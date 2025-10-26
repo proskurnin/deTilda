@@ -46,6 +46,51 @@ def _strip_cache_busting_param(link: str) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, sanitized_query, ""))
 
 
+def _get_effective_base_directory(file_path: Path, project_root: Path) -> Path:
+    """Return a directory to use as a base for resolving relative links."""
+
+    stem = file_path.stem
+    if not stem.endswith("body"):
+        return file_path.parent
+
+    base_name = stem[:-4]
+    if not base_name:
+        return file_path.parent
+
+    project_root = project_root.resolve()
+    current_dir = file_path.parent.resolve()
+
+    candidate_filenames: list[str] = []
+    suffix = file_path.suffix
+    if suffix and suffix.lower().startswith(".htm"):
+        candidate_filenames.append(base_name + suffix)
+    for alt_suffix in (".html", ".htm"):
+        candidate = base_name + alt_suffix
+        if candidate not in candidate_filenames:
+            candidate_filenames.append(candidate)
+
+    while True:
+        try:
+            current_dir.relative_to(project_root)
+        except ValueError:
+            break
+
+        for candidate_name in candidate_filenames:
+            candidate_path = current_dir / candidate_name
+            if candidate_path.is_file():
+                return candidate_path.parent
+
+        for match in current_dir.glob(f"{base_name}.htm*"):
+            if match.is_file():
+                return match.parent
+
+        if current_dir == project_root:
+            break
+        current_dir = current_dir.parent
+
+    return file_path.parent
+
+
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
@@ -60,6 +105,8 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
             text = utils.safe_read(file_path)
         except Exception:
             continue
+        base_directory = _get_effective_base_directory(file_path, project_root)
+
         for link in _iter_links(text, link_patterns):
             normalized_link = _strip_cache_busting_param(link)
             if not normalized_link:
@@ -78,7 +125,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                 else:
                     candidate = project_root / (link_path or normalized_link).lstrip("/")
             else:
-                candidate = (file_path.parent / (link_path or normalized_link)).resolve()
+                candidate = (base_directory / (link_path or normalized_link)).resolve()
             result.checked += 1
             if not candidate.exists():
                 result.broken += 1
