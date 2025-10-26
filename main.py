@@ -61,9 +61,12 @@ def main() -> None:
 
     start = _now()
     try:
-        asset_result = assets.rename_and_cleanup_assets(project_root, loader)
-        script_cleaner.remove_disallowed_scripts(project_root, loader)
-        page404.update_404_page(project_root)
+        with logger.module_scope("assets"):
+            asset_result = assets.rename_and_cleanup_assets(project_root, loader)
+
+        with logger.module_scope("page404"):
+            page404.update_404_page(project_root)
+
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=0,
@@ -71,7 +74,9 @@ def main() -> None:
             broken_links=0,
         )
 
-        clean_stats = cleaners.clean_text_files(project_root, loader)
+        with logger.module_scope("cleaners"):
+            clean_stats = cleaners.clean_text_files(project_root, loader)
+
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=clean_stats.updated,
@@ -79,24 +84,33 @@ def main() -> None:
             broken_links=0,
         )
 
-        forms.generate_send_email_php(project_root, email)
-        inject.inject_form_scripts(project_root, loader)
+        with logger.module_scope("forms"):
+            forms.generate_send_email_php(project_root, email)
 
-        fixed_links, broken_links = refs.update_all_refs_in_project(
-            project_root, asset_result.rename_map, loader
-        )
+        with logger.module_scope("inject"):
+            inject.inject_form_scripts(project_root, loader)
 
-        link_check = checker.check_links(project_root, loader)
+        with logger.module_scope("refs"):
+            fixed_links, broken_links = refs.update_all_refs_in_project(
+                project_root, asset_result.rename_map, loader
+            )
+
+        with logger.module_scope("script_cleaner"):
+            script_cleaner.remove_disallowed_scripts(project_root, loader)
+
+        with logger.module_scope("checker"):
+            link_check = checker.check_links(project_root, loader)
 
         exec_time = _now() - start
-        report.generate_final_report(
-            project_root=project_root,
-            renamed_count=asset_result.stats.renamed,
-            warnings=link_check.broken,
-            broken_links_fixed=fixed_links,
-            broken_links_left=broken_links + link_check.broken,
-            exec_time=exec_time,
-        )
+        with logger.module_scope("report"):
+            report.generate_final_report(
+                project_root=project_root,
+                renamed_count=asset_result.stats.renamed,
+                warnings=link_check.broken,
+                broken_links_fixed=fixed_links,
+                broken_links_left=broken_links + link_check.broken,
+                exec_time=exec_time,
+            )
 
         logger.info("======================================")
         logger.info(f"🎯  Detilda {version} — обработка завершена")

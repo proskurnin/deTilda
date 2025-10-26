@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import Iterator, Optional, TextIO
 
 __all__ = [
     "attach_to_project",
@@ -14,6 +15,7 @@ __all__ = [
     "get_logs_dir",
     "get_project_name",
     "info",
+    "module_scope",
     "ok",
     "warn",
 ]
@@ -58,6 +60,19 @@ def err(message: str) -> None:
 
 def debug(message: str) -> None:
     _write_line("🐞", message)
+
+
+@contextmanager
+def module_scope(module_name: str) -> Iterator[None]:
+    """Log start and finish messages for a logical application module."""
+
+    start = time.time()
+    info(f"[{module_name}] ▶️ Начало работы")
+    try:
+        yield
+    finally:
+        duration = time.time() - start
+        info(f"[{module_name}] ✅ Завершено за {duration:.2f} сек")
 
 
 def attach_to_project(project_root: Path) -> None:
