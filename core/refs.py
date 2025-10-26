@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
@@ -74,11 +75,26 @@ def _cleanup_broken_markup(text: str) -> str:
 
 
 def _split_url(url: str) -> tuple[str, str]:
-    for delimiter in ("?", "#"):
-        if delimiter in url:
-            index = url.index(delimiter)
-            return url[:index], url[index:]
-    return url, ""
+    """Split *url* into a base path and sanitized suffix."""
+
+    split = urlsplit(url)
+    base_url = urlunsplit((split.scheme, split.netloc, split.path, "", ""))
+
+    suffix = ""
+
+    if split.query:
+        filtered_params = [
+            (key, value)
+            for key, value in parse_qsl(split.query, keep_blank_values=True)
+            if key.lower() != "t"
+        ]
+        if filtered_params:
+            suffix += "?" + urlencode(filtered_params, doseq=True)
+
+    if split.fragment:
+        suffix += f"#{split.fragment}"
+
+    return base_url, suffix
 
 
 def _update_links_in_html(

@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from core import assets, cleaners, forms, inject, logger, refs, report
+from core import assets, cleaners, forms, inject, logger, refs, report, script_cleaner
 from core.project import ProjectContext
 
 
@@ -42,37 +42,48 @@ class DetildaPipeline:
 
             stats = PipelineStats()
 
-            asset_result = assets.rename_and_cleanup_assets(context)
+            with logger.module_scope("assets"):
+                asset_result = assets.rename_and_cleanup_assets(context)
             stats.renamed = asset_result.stats.renamed
             stats.removed = asset_result.stats.removed
             report.generate_intermediate_report(stats.renamed, 0, 0, 0)
 
-            clean_result = cleaners.clean_project_files(context, context.rename_map)
+            with logger.module_scope("cleaners"):
+                clean_result = cleaners.clean_project_files(context, context.rename_map)
             stats.cleaned = clean_result.updated
             stats.removed += clean_result.removed
             report.generate_intermediate_report(stats.renamed, stats.cleaned, 0, 0)
 
-            forms.generate_send_email_php(context, email)
-            inject.inject_form_scripts(context)
+            with logger.module_scope("forms"):
+                forms.generate_send_email_php(context, email)
+            with logger.module_scope("inject"):
+                inject.inject_form_scripts(context)
 
-            fixed_links, broken_links = refs.update_all_refs_in_project(
-                context.project_root, context.rename_map
-            )
+            with logger.module_scope("refs"):
+                fixed_links, broken_links = refs.update_all_refs_in_project(
+                    context.project_root, context.rename_map
+                )
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links
             report.generate_intermediate_report(
                 stats.renamed, stats.cleaned, stats.fixed_links, stats.broken_links
             )
 
+            with logger.module_scope("script_cleaner"):
+                script_cleaner.remove_disallowed_scripts(
+                    context.project_root, context.config_loader
+                )
+
             stats.exec_time = time.time() - start_time
-            report.generate_final_report(
-                project_root=context.project_root,
-                renamed_count=stats.renamed,
-                warnings=stats.warnings,
-                broken_links_fixed=stats.fixed_links,
-                broken_links_left=stats.broken_links,
-                exec_time=stats.exec_time,
-            )
+            with logger.module_scope("report"):
+                report.generate_final_report(
+                    project_root=context.project_root,
+                    renamed_count=stats.renamed,
+                    warnings=stats.warnings,
+                    broken_links_fixed=stats.fixed_links,
+                    broken_links_left=stats.broken_links,
+                    exec_time=stats.exec_time,
+                )
 
             logger.info("======================================")
             logger.info(f"🎯  Detilda {self.version} — обработка завершена")
