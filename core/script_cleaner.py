@@ -79,6 +79,7 @@ _SRC_ATTR_RE = re.compile(
     r"|([^>\s]+))",
     re.IGNORECASE,
 )
+_STAT_COMMENT_TAIL_RE = re.compile(r"(\s*<!--\s*Stat\s*-->\s*)$", re.IGNORECASE)
 
 
 def _normalize_src(value: str) -> str:
@@ -196,7 +197,12 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
                 remove_block = True
 
             if remove_block:
-                pieces.append(original[last_index:start])
+                prefix = original[last_index:start]
+                if prefix:
+                    match_comment = _STAT_COMMENT_TAIL_RE.search(prefix)
+                    if match_comment:
+                        prefix = prefix[: match_comment.start()]
+                pieces.append(prefix)
                 last_index = end
                 removed_in_file += 1
 
