@@ -149,7 +149,7 @@ service_files:
       - "robots.txt"
       - "readme.txt"
   rename_map_output:
-    filename: "rename_map.json"
+    filename: "{project}_rename_map.json"
     location: "logs"
   resource_copy:
     files:

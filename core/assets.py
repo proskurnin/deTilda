@@ -363,7 +363,19 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
         logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
 
     mapping_cfg = service_cfg.get("rename_map_output", {})
-    mapping_name = mapping_cfg.get("filename", "rename_map.json")
+    project_name = logger.get_project_name()
+    mapping_name_template = mapping_cfg.get("filename")
+
+    if mapping_name_template:
+        try:
+            mapping_name = mapping_name_template.format(project=project_name)
+        except Exception:
+            mapping_name = mapping_name_template
+    else:
+        mapping_name = f"{project_name}_rename_map.json"
+
+    if mapping_name == "rename_map.json":
+        mapping_name = f"{project_name}_rename_map.json"
     mapping_location = str(mapping_cfg.get("location", "logs")).strip()
     if mapping_location.lower() == "logs":
         mapping_dir = logger.get_logs_dir()
@@ -371,12 +383,15 @@ def rename_and_cleanup_assets(project_root: Path, loader: ConfigLoader) -> Asset
         mapping_dir = project_root / mapping_location
     mapping_path = mapping_dir / mapping_name
 
-    legacy_mapping = project_root / "rename_map.json"
-    if legacy_mapping.exists():
-        try:
-            legacy_mapping.unlink()
-        except Exception as exc:
-            logger.warn(f"[assets] Не удалось удалить устаревший rename_map.json: {exc}")
+    legacy_candidates = [project_root / "rename_map.json", mapping_dir / "rename_map.json"]
+    for legacy_mapping in legacy_candidates:
+        if legacy_mapping.exists():
+            try:
+                legacy_mapping.unlink()
+            except Exception as exc:
+                logger.warn(
+                    f"[assets] Не удалось удалить устаревший rename_map.json: {exc}"
+                )
 
     for rule in resource_rules:
         destination_path = project_root / rule.destination
