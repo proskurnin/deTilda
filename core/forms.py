@@ -352,7 +352,7 @@ def _extract_project_name(project_root: Path) -> str:
 def generate_send_email_php(project_root: Path | Any, email: str) -> Path:
     project_root = _resolve_project_root(project_root)
     target = project_root / "send_email.php"
-    content = _SEND_EMAIL_TEMPLATE.format(email=email)
+    content = _SEND_EMAIL_TEMPLATE.replace("{email}", email)
     utils.safe_write(target, content)
     logger.info(f"📨 Файл send_email.php создан: {utils.relpath(target, project_root)}")
     generate_form_handler_js(project_root)
