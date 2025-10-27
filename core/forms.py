@@ -57,7 +57,20 @@ $headers .= "Content-Type: text/plain; charset=UTF-8\n";
 $headers .= "From: no-reply@" . $fromHost . "\n";
 $headers .= "Reply-To: " . $replyTo . "\n";
 
+if (function_exists('error_clear_last')) {
+    error_clear_last();
+}
+
 $sent_ok = @mail($recipient_email, $encoded_subject, $message, $headers);
+
+$logTime = date('Y-m-d H:i:s');
+if ($sent_ok) {
+    error_log(sprintf('{%s}{%s}{%s}', $logTime, $recipient_email, $message));
+} else {
+    $lastError = error_get_last();
+    $reason = isset($lastError['message']) ? $lastError['message'] : 'Неизвестная причина';
+    error_log(sprintf('{%s}{%s}{%s}', $logTime, 'Ошибка', $reason));
+}
 
 // Определяем URL возврата (PRG)
 $back = (!empty($_POST['redirect'])) ? (string)$_POST['redirect']
