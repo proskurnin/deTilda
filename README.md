@@ -1,210 +1,123 @@
 # Detilda
 
-Offline automation tool that cleans up, normalizes, and repackages exported [Tilda.cc](https://tilda.cc) projects. Detilda standardizes asset names, removes vendor remnants, patches internal links, and prepares self-hosted archives ready for deployment without the original Tilda infrastructure.
+## Описание продукта
 
-## Key capabilities
+Detilda — офлайн-инструмент автоматизации, который приводит в порядок экспортированные проекты [Tilda.cc](https://tilda.cc) перед развёртыванием на стороннем хостинге. Программа распаковывает архив сайта, нормализует имена файлов и структуру каталогов, удаляет фирменные артефакты Tilda, чинит внутренние ссылки и формирует итоговый отчёт. Конвейер Detilda работает локально, не требует подключения к Tilda и позволяет выпускать само-хостимые сборки, готовые к публикации на любом CDN или файловом сервере.
 
-- **Archive-aware pipeline** – unpacks the provided project archive, runs every stage, and records a detailed summary for each processed site. 【F:main.py†L36-L118】
-- **Asset normalization** – renames resources, enforces lowercase filenames, downloads remote assets, and updates references across HTML, CSS, JS, and JSON. 【F:core/assets.py†L1-L156】【F:core/assets.py†L314-L651】
-- **Text cleanup** – strips Tilda-specific snippets (robots.txt, README, generic leftovers) from service files. 【F:core/cleaners.py†L1-L108】
-- **Form handling** – generates `send_email.php`, injects handler scripts, and protects required assets referenced in forms. 【F:core/forms.py†L1-L82】【F:core/inject.py†L1-L58】
-- **Reference repair** – rewrites links and routes, including `.htaccess` aliases, fixing case mismatches and reporting unresolved entries. 【F:core/refs.py†L1-L200】【F:core/htaccess.py†L1-L120】
-- **Script hygiene** – removes bundled analytics/forms scripts that should not ship with the final package. 【F:core/script_cleaner.py†L1-L160】
-- **Link checker & reporting** – scans the cleaned project for broken links and emits a final summary with statistics in the log output. 【F:core/checker.py†L1-L138】【F:core/report.py†L44-L107】
+### Архитектура и ключевые возможности
 
-## Project layout
+- **Основной конвейер (`main.py`, `core/pipeline.py`)** — управляет стадиями обработки: распаковка архива, нормализация ассетов, очистка сервисных файлов, генерация форм, правка ссылок, удаление скриптов и финальная проверка ссылок. Настройки стадий подаются через единый YAML-конфиг.
+- **Контекст проекта (`core/project.py`, `core/config_loader.py`, `core/configuration.py`)** — описывает рабочие пути, лениво загружает конфигурацию, проверяет корректность параметров и передаёт их в остальные модули.
+- **Распаковка и подготовка (`core/archive.py`, `core/logger.py`)** — извлекает входной ZIP-архив во временную директорию, ведёт журнал выполнения и аккуратно очищает рабочее окружение при ошибках.
+- **Нормализация ассетов (`core/assets.py`)** — приводит имена файлов к нижнему регистру, скачивает удалённые ресурсы, копирует обязательные шаблоны из `resources/`, удаляет служебные файлы Tilda и сохраняет карту переименований для следующих стадий.
+- **Очистка текстов (`core/cleaners.py`, `core/page404.py`)** — удаляет из `robots.txt`, `readme.txt`, `404.html` и других текстовых файлов рекламные и служебные блоки Tilda, заменяя их на готовые шаблоны.
+- **Работа с формами (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** — генерирует PHP-обработчик и фронтенд-скрипт, внедряет подключение скрипта в HTML, подставляя адрес получателя, заданный пользователем.
+- **Правка ссылок и маршрутов (`core/refs.py`, `core/htaccess.py`)** — обновляет ссылки в HTML/CSS/JS/JSON, учитывает переименованные файлы, собирает маршруты из `.htaccess`, проверяет совпадение регистров и сообщает о нерешённых путях.
+- **Гигиена скриптов (`core/script_cleaner.py`)** — удаляет встроенные скрипты аналитики, обработки форм и другие элементы, которые не нужны в итоговой сборке.
+- **Проверка ссылок и отчётность (`core/checker.py`, `core/report.py`)** — проходит по итоговому проекту, находит битые ссылки, формирует промежуточные и финальные отчёты, синхронизируемые с настройками `manifest.json`.
+- **Конфигурация (`config/config.yaml`, `manifest.json`)** — задаёт правила переименования, списки запрещённых файлов, параметры вставки скриптов и флаги включённых функций. Файл `manifest.json` дополнительно хранит версию и описание сборки.
+- **Инструменты и тесты (`tools/sync_manifest.py`, `core/build_sync.py`, `tests/`)** — CLI-утилиты для синхронизации манифеста и pytest-наборы, проверяющие корректность нормализации регистров и обновления манифеста.
 
-```
-core/        Core pipeline modules
-config/      Shared YAML configuration for the cleanup stages
-resources/   Static templates (e.g., for generated PHP form handler)
-tests/       Pytest suites covering assets, manifest sync, and normalization logic
-```
+### Типовой рабочий процесс
 
-The pipeline is orchestrated from `main.py`, which wires the stages together and handles logging and CLI prompts. 【F:main.py†L10-L155】
+1. Пользователь помещает экспортированный архив Tilda в каталог `_workdir/` (создаётся автоматически при первом запуске).
+2. Запускает `python main.py` и указывает имя архива и e-mail получателя для форм.
+3. Detilda распаковывает архив, последовательно выполняет все стадии и пишет подробный лог в консоль и `logs/`.
+4. В конце конвейера готовая сборка остаётся в `_workdir/<имя-архива>/` вместе с отчётами и картой переименований.
 
-## Requirements
+### Модули по каталогам
 
-- Python 3.10 or newer (the project is tested on Python 3.11). 【F:manifest.json†L2-L27】【7c8896†L1-L9】
-- [PyYAML](https://pyyaml.org/) for parsing `config/config.yaml`. 【F:core/config_loader.py†L1-L47】
+- `core/`
+  - `archive.py` — отвечает за распаковку архивов и подготовку рабочей директории.
+  - `assets.py` — нормализует структуру ассетов, переименовывает и скачивает ресурсы.
+  - `build_sync.py` — синхронизирует сведения о сборке с `manifest.json`.
+  - `checker.py` — запускает проверку ссылок и фиксирует ошибки.
+  - `cleaners.py` — удаляет шаблонные артефакты Tilda из текстовых файлов.
+  - `configuration.py` — предоставляет типизированные обёртки над YAML-конфигом.
+  - `config_loader.py` — лениво читает `config/config.yaml` и кэширует секции.
+  - `forms.py` — создаёт обработчик почтовых форм и подключаемые ресурсы.
+  - `htaccess.py` — парсит `.htaccess`, извлекает маршруты и редиректы.
+  - `inject.py` — вставляет ссылки на фронтенд-скрипты обработчика форм.
+  - `logger.py` — настраивает формат логов, уровни и запись в файл.
+  - `page404.py` — нормализует страницу 404 и удаляет лишние блоки.
+  - `pipeline.py` — описывает стадии конвейера и последовательность выполнения.
+  - `project.py` — хранит пути проекта и предоставляет доступ к конфигурации.
+  - `refs.py` — переписывает ссылки на файлы с учётом переименований и маршрутов.
+  - `report.py` — формирует текстовые отчёты и сводки по конвейеру.
+  - `script_cleaner.py` — удаляет запрещённые JavaScript- и HTML-вставки.
+- `config/`
+  - `config.yaml` — центральный файл с правилами переименования, очистки и копирования ресурсов.
+- `resources/`
+  - `favicon.ico`, `send_email.php`, `js/form-handler.js` — статические шаблоны, которые копируются в итоговый проект при необходимости.
+- `tests/`
+  - Pytest-сценарии, проверяющие синхронизацию манифеста и корректность нормализации регистров.
+- `tools/`
+  - `sync_manifest.py` — CLI-утилита для обновления `manifest.json` на основе собранного архива.
 
-Optional tools:
+### Для разработчиков
 
-- `pytest` for running the automated test suite. 【F:tests/test_case_normalization.py†L1-L58】
+- Минимальная версия Python — 3.10 (проект проверяется на 3.11).
+- Зависимости: `PyYAML` для чтения конфигурации, `pytest` для тестов.
+- Запуск тестов: `pytest` из корня репозитория.
+- При изменениях сборки рекомендуется запускать `python tools/sync_manifest.py` для обновления `manifest.json`.
 
-## Installation
+## Product description
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
-pip install -r requirements.txt  # or pip install pyyaml pytest
-```
+Detilda is an offline automation tool that tidies up exported [Tilda.cc](https://tilda.cc) projects before they are deployed on external hosting. The program extracts the site archive, normalizes filenames and folder structure, removes Tilda-specific artefacts, fixes internal links, and produces a final report. Detilda runs locally, requires no connection to Tilda, and delivers self-hosted builds ready to publish on any CDN or file server.
 
-If you maintain your own dependency management, ensure `pyyaml` (and `pytest` for development) are available in the environment.
+### Architecture and key capabilities
 
-## Usage
+- **Main pipeline (`main.py`, `core/pipeline.py`)** – orchestrates the processing stages: archive extraction, asset normalization, service file cleanup, form generation, link rewriting, script removal, and final link checking. Stage settings are provided via a single YAML configuration.
+- **Project context (`core/project.py`, `core/config_loader.py`, `core/configuration.py`)** – defines working paths, lazily loads configuration data, validates parameters, and passes them to the other modules.
+- **Extraction and setup (`core/archive.py`, `core/logger.py`)** – unpacks the input ZIP archive into a temporary directory, logs progress, and gracefully cleans up the workspace on errors.
+- **Asset normalization (`core/assets.py`)** – converts filenames to lowercase, downloads remote resources, copies mandatory templates from `resources/`, removes Tilda service files, and stores a rename map for the following stages.
+- **Text cleanup (`core/cleaners.py`, `core/page404.py`)** – strips promotional and service blocks from `robots.txt`, `readme.txt`, `404.html`, and other text files, replacing them with ready-made templates.
+- **Form handling (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** – generates a PHP handler and frontend script, injects the script reference into HTML, and inserts the user-provided recipient address.
+- **Link and route repair (`core/refs.py`, `core/htaccess.py`)** – updates links across HTML/CSS/JS/JSON, respects renamed files, collects routes from `.htaccess`, enforces case matches, and reports unresolved paths.
+- **Script hygiene (`core/script_cleaner.py`)** – removes embedded analytics, form scripts, and other fragments that should not ship with the final package.
+- **Link checking and reporting (`core/checker.py`, `core/report.py`)** – scans the processed project for broken links, compiles interim and final reports, and aligns output with `manifest.json` settings.
+- **Configuration (`config/config.yaml`, `manifest.json`)** – defines rename rules, disallowed files, script injection parameters, and feature flags. `manifest.json` additionally stores the build version and description.
+- **Tooling and tests (`tools/sync_manifest.py`, `core/build_sync.py`, `tests/`)** – CLI helpers for manifest synchronization and pytest suites that verify case normalization and manifest updates.
 
-1. Export your site from Tilda and copy the resulting `.zip` archive into the `_workdir/` directory (created automatically on the first run). 【F:main.py†L124-L152】
-2. Run the CLI entrypoint:
-   ```bash
-   python main.py
-   ```
-3. Enter one or more archive names when prompted (comma-separated) and provide the recipient e-mail for generated forms (defaults to `r@prororo.com`). 【F:main.py†L132-L152】
-4. Monitor the console or `logs/` folder for progress. The tool reports renamed assets, cleaned files, fixed links, warnings, and total runtime at the end of each archive. 【F:main.py†L108-L118】
+### Typical workflow
 
-The processed project is left inside `_workdir/<archive-name>/` ready for publishing on any static hosting provider.
+1. Place the exported Tilda archive into the `_workdir/` directory (created automatically on the first run).
+2. Run `python main.py` and supply the archive name and the recipient e-mail for forms.
+3. Detilda extracts the archive, executes every stage in sequence, and writes detailed logs to the console and `logs/`.
+4. The finished build remains in `_workdir/<archive-name>/` along with reports and the rename map.
 
-## Configuration
+### Modules by directory
 
-Detilda is driven by the unified YAML file at `config/config.yaml`. Key sections include:
+- `core/`
+  - `archive.py` – handles archive extraction and workspace preparation.
+  - `assets.py` – normalizes asset structure, renames files, and downloads resources.
+  - `build_sync.py` – synchronizes build metadata with `manifest.json`.
+  - `checker.py` – runs the link checker and records issues.
+  - `cleaners.py` – removes Tilda boilerplate from text files.
+  - `configuration.py` – provides typed wrappers around the YAML configuration.
+  - `config_loader.py` – lazily reads `config/config.yaml` and caches sections.
+  - `forms.py` – creates the mail form handler and bundled assets.
+  - `htaccess.py` – parses `.htaccess`, extracting routes and redirects.
+  - `inject.py` – injects frontend handler script references into HTML.
+  - `logger.py` – configures log format, levels, and file output.
+  - `page404.py` – normalizes the 404 page and removes extra blocks.
+  - `pipeline.py` – declares pipeline stages and their execution order.
+  - `project.py` – stores project paths and exposes configuration accessors.
+  - `refs.py` – rewrites links to account for renamed files and routes.
+  - `report.py` – produces textual reports and pipeline summaries.
+  - `script_cleaner.py` – removes forbidden JavaScript and HTML snippets.
+- `config/`
+  - `config.yaml` – central rule set for renaming, cleaning, and resource copying.
+- `resources/`
+  - `favicon.ico`, `send_email.php`, `js/form-handler.js` – static templates copied into the final project when required.
+- `tests/`
+  - Pytest scenarios that validate manifest synchronization and case normalization.
+- `tools/`
+  - `sync_manifest.py` – CLI utility for updating `manifest.json` from a packaged archive.
 
-- `patterns`: regexes and replacement rules applied to links, README/robots cleanup, and `.htaccess` parsing. 【F:config/config.yaml†L1-L64】
-- `images`: guidance for removing or replacing vendor images/icons left in exports. 【F:config/config.yaml†L65-L93】
-- `service_files`: advanced pipeline settings, including remote asset downloads, scripts to delete, protected files, form injection, link checker options, and optional case-normalization stage. 【F:config/config.yaml†L94-L160】
+### For developers
 
-Adjust these sections to reflect your project-specific conventions or additional cleanup rules.
-
-## Подробное описание файлов
-
-### Корневой уровень
-
-- `README.md`
-  - **Назначение:** основная документация и руководство по запуску Detilda. 【F:README.md†L1-L116】
-  - **Зависимости и конфиг:** не использует конфигурацию, но описывает ключевые секции `config/config.yaml`.
-  - **Отключение через config:** не применимо.
-- `main.py`
-  - **Назначение:** CLI-входная точка, поочередно запускающая распаковку архива, обработку ассетов, очистку, генерацию форм, обновление ссылок, удаление скриптов, проверку ссылок и финальные отчёты. 【F:main.py†L10-L156】
-  - **Зависимости и конфиг:** загружает `manifest.json` для версии/рабочей папки и инициализирует `ConfigLoader`, передавая его в модули, которые читают `config/config.yaml`. 【F:main.py†L24-L126】
-  - **Отключение через config:** порядок шагов задаётся кодом; отдельные стадии можно отключить лишь удалив вызов в `main.py` либо настроив соответствующие секции конфига, если модуль поддерживает флаги (см. ниже).
-- `manifest.json`
-  - **Назначение:** метаданные релиза, список включаемых возможностей и путей по умолчанию. 【F:manifest.json†L1-L40】
-  - **Зависимости и конфиг:** используется `main.py` (путь `paths.workdir`) и модуль отчётов (флаг `features.reports`). 【F:main.py†L123-L152】【F:core/report.py†L9-L55】
-  - **Отключение через config:** отдельные фичи отключаются значениями `features.*`; например, `reports: false` выключает генерацию отчётов без правки кода.
-- `config/config.yaml`
-  - **Назначение:** единый YAML, управляющий правилами переименования ассетов, очистки текстов, обработкой изображений, загрузкой удалённых ресурсов и пр. 【F:config/config.yaml†L1-L160】
-  - **Зависимости и конфиг:** читается `ConfigLoader`/`ProjectContext`; большинство модулей (`assets`, `cleaners`, `inject`, `refs`, `script_cleaner`, `checker`) забирают свои параметры отсюда. 【F:core/config_loader.py†L10-L66】【F:core/project.py†L10-L47】
-  - **Отключение через config:** секция `service_files.pipeline_stages.normalize_case.enabled` отключает нормализацию регистра; очистка и удаление скриптов прекращаются при очистке соответствующих списков.
-
-### Конфигурация и утилиты
-
-- `core/config_loader.py`
-  - **Назначение:** лениво загружает `config.yaml` и предоставляет методы `patterns()`, `images()`, `service_files()`. 【F:core/config_loader.py†L10-L58】
-  - **Зависимости и конфиг:** зависит от `yaml` и `core.logger` для сообщений об ошибках; путь к конфигу вычисляется относительно репозитория. 【F:core/config_loader.py†L1-L34】
-  - **Отключение через config:** не отключается; чтобы выключить чтение конфигурации, требуется менять код.
-- `core/configuration.py`
-  - **Назначение:** альтернативные dataclass-обёртки (`DetildaConfig`, `ConfigSection`) для типизированного доступа к конфигу. 【F:core/configuration.py†L19-L121】
-  - **Зависимости и конфиг:** также читает `config/config.yaml` с помощью `yaml`; выводит предупреждения через `core.logger`. 【F:core/configuration.py†L7-L69】
-  - **Отключение через config:** не используется по умолчанию; отключение не требуется.
-- `core/utils.py`
-  - **Назначение:** общие вспомогательные функции (чтение/запись файлов, копирование ресурсов, обход директорий, загрузка `manifest.json`, форматирование времени). 【F:core/utils.py†L1-L118】
-  - **Зависимости и конфиг:** опирается на `core.logger` для логирования; параметры не читаются из конфигурации.
-  - **Отключение через config:** не управляется конфигом.
-- `core/logger.py`
-  - **Назначение:** единая система логирования с файлами журнала и контекстными менеджерами для этапов пайплайна. 【F:core/logger.py†L1-L102】
-  - **Зависимости и конфиг:** автоматически создаёт каталог `logs` рядом с проектом; настройки формата задаются самим модулем.
-  - **Отключение через config:** нет; чтобы отключить логирование, придётся модифицировать код.
-- `core/project.py`
-  - **Назначение:** `ProjectContext` хранит путь проекта, ссылку на репозиторий и экземпляр `ConfigLoader`, а также карту переименований. 【F:core/project.py†L1-L47】
-  - **Зависимости и конфиг:** определяет корень репозитория и подготавливает конфиг для остальных модулей. 【F:core/project.py†L10-L43】
-  - **Отключение через config:** не отключается; контекст нужен пайплайну `core/pipeline.py`.
-
-### Оркестрация пайплайна
-
-- `core/pipeline.py`
-  - **Назначение:** объектно-ориентированный вариант пайплайна (`DetildaPipeline`), который использует `ProjectContext` и по модульным блокам выполняет те же стадии, что и CLI. 【F:core/pipeline.py†L1-L107】
-  - **Зависимости и конфиг:** каждый блок читает настройки через `ProjectContext.config_loader`, то есть через `config.yaml`. 【F:core/pipeline.py†L32-L71】
-  - **Отключение через config:** отдельные стадии управляются теми же флагами, что и в `main.py` (см. описания модулей); глобального переключателя в конфиге нет.
-- `core/archive.py`
-  - **Назначение:** распаковывает входной ZIP-архив и возвращает корневую директорию проекта. 【F:core/archive.py†L1-L52】
-  - **Зависимости и конфиг:** не использует конфиг; опирается на `zipfile`, `shutil` и `core.logger` для сообщений об ошибках. 【F:core/archive.py†L13-L51】
-  - **Отключение через config:** нельзя; распаковка обязательна для дальнейших шагов.
-
-### Обработка контента
-
-- `core/assets.py`
-  - **Назначение:** переименовывает ассеты, скачивает удалённые ресурсы, удаляет фирменные файлы Tilda, копирует нужные шаблоны и нормализует регистр путей. 【F:core/assets.py†L1-L332】【F:core/assets.py†L332-L653】
-  - **Зависимости и конфиг:** использует секции `patterns`, `images`, `service_files` из `config.yaml` (правила ссылок, списки исключений, скачивание, копирование ресурсов, сохранение rename-map). 【F:core/assets.py†L139-L260】【F:core/assets.py†L562-L653】
-  - **Отключение через config:** нормализацию регистра можно отключить через `service_files.pipeline_stages.normalize_case.enabled`; скачивание и удаления прекращаются при очистке списков правил. Полное отключение этапа требует изменений в коде/пайплайне.
-- `core/cleaners.py`
-  - **Назначение:** чистит `robots.txt`, `readme.txt` и другие текстовые файлы от остатков Tilda. 【F:core/cleaners.py†L1-L79】
-  - **Зависимости и конфиг:** использует паттерны из `patterns` и список файлов из `service_files.cleaner_options.files_to_clean_tilda_refs`. 【F:core/cleaners.py†L60-L79】
-  - **Отключение через config:** достаточно очистить `files_to_clean_tilda_refs` или сами паттерны, тогда модуль ничего не изменит.
-- `core/forms.py`
-  - **Назначение:** генерирует `send_email.php` и `js/form-handler.js` с обработчиком форм. 【F:core/forms.py†L1-L195】
-  - **Зависимости и конфиг:** напрямую конфиг не читает; использует e-mail из CLI и путь проекта. 【F:core/forms.py†L136-L195】
-  - **Отключение через config:** нет прямого флага; чтобы не создавать файлы, нужно исключить вызов модуля из пайплайна.
-- `core/inject.py`
-  - **Назначение:** добавляет в HTML ссылку на скрипт обработчика форм перед заданным маркером. 【F:core/inject.py†L1-L51】
-  - **Зависимости и конфиг:** читает `service_files.html_inject_options` (имя скрипта и маркер вставки) из `config.yaml`. 【F:core/inject.py†L11-L22】
-  - **Отключение через config:** спецфлага нет, но можно очистить маркер/скрипт в конфиге или убрать стадию из пайплайна.
-- `core/refs.py`
-  - **Назначение:** обновляет ссылки в HTML/CSS/JS на основе карты переименований, правил замены и маршрутов `.htaccess`. 【F:core/refs.py†L1-L198】【F:core/refs.py†L198-L274】
-  - **Зависимости и конфиг:** использует `patterns` (`links`, `ignore_prefixes`, `replace_rules`), `images` (паттерны для favicon) и `htaccess_patterns`; маршруты берёт через `core.htaccess`. 【F:core/refs.py†L18-L130】【F:core/refs.py†L198-L236】
-  - **Отключение через config:** удалить все правила возможно, но стадия всё равно пройдёт по файлам; полное выключение требует изменения пайплайна.
-- `core/htaccess.py`
-  - **Назначение:** парсит `.htaccess` и собирает карту маршрутов/редиректов для обновления ссылок и проверки. 【F:core/htaccess.py†L1-L86】
-  - **Зависимости и конфиг:** читает регэкспы из `patterns.htaccess_patterns`. 【F:core/htaccess.py†L12-L40】
-  - **Отключение через config:** можно очистить паттерны, тогда маршруты не будут найдены; полностью отключить парсинг можно только убрав вызов `collect_routes`.
-- `core/page404.py`
-  - **Назначение:** нормализует страницу `404.html`, заменяя заголовок, сообщение и удаляя сторонние скрипты. 【F:core/page404.py†L1-L68】
-  - **Зависимости и конфиг:** работает без конфига; ищет файл в корне проекта. 【F:core/page404.py†L20-L68】
-  - **Отключение через config:** отсутствует; для пропуска нужно исключить вызов из пайплайна.
-- `core/script_cleaner.py`
-  - **Назначение:** удаляет из HTML/JS запретные скрипты Tilda и связанные комментарии. 【F:core/script_cleaner.py†L1-L220】
-  - **Зависимости и конфиг:** использует `service_files.scripts_to_remove_from_project` для списка имён и паттернов, а также `patterns.text_extensions` для перечня расширений. 【F:core/script_cleaner.py†L8-L91】【F:core/script_cleaner.py†L137-L220】
-  - **Отключение через config:** очистите списки `filenames`/`patterns`, тогда модуль завершится без изменений.
-- `core/checker.py`
-  - **Назначение:** проверяет ссылки в HTML, учитывая маршруты из `.htaccess`, и фиксирует битые ссылки. 【F:core/checker.py†L1-L108】
-  - **Зависимости и конфиг:** использует паттерны ссылок и игнорируемые префиксы из `patterns`, а также `core.htaccess`. 【F:core/checker.py†L13-L92】
-  - **Отключение через config:** конфиг не содержит флага; отключить можно только исключив вызов из пайплайна.
-- `core/report.py`
-  - **Назначение:** формирует промежуточные и финальные текстовые отчёты. 【F:core/report.py†L1-L86】
-  - **Зависимости и конфиг:** опирается на `manifest.json` (`features.reports`) и переменную окружения `DETILDA_DISABLE_REPORTS`. 【F:core/report.py†L9-L55】
-  - **Отключение через config:** установите `features.reports: false` в манифесте или задайте `DETILDA_DISABLE_REPORTS=1`.
-
-### Тесты и инструменты
-
-- `core/build_sync.py`
-  - **Назначение:** синхронизирует `manifest.json` с собранным архивом (имя файла, версия). 【F:core/build_sync.py†L1-L63】
-  - **Зависимости и конфиг:** работает с путями и JSON; конфиг не участвует.
-  - **Отключение через config:** не требуется; модуль используется вручную или из CLI.
-- `tools/sync_manifest.py`
-  - **Назначение:** CLI-обёртка вокруг `synchronize_manifest_with_build`, принимает путь к архиву и опциональную версию. 【F:tools/sync_manifest.py†L1-L33】
-  - **Зависимости и конфиг:** не читает конфиг; зависит от `argparse` и `core.build_sync`.
-  - **Отключение через config:** не применимо.
-- `tests/test_manifest_sync.py`
-  - **Назначение:** проверяет, что синхронизация манифеста обновляет версию и имя архива. 【F:tests/test_manifest_sync.py†L1-L55】
-  - **Зависимости и конфиг:** напрямую с конфигом не работает; подставляет временный `manifest.json`.
-  - **Отключение через config:** тест отключается только через pytest-маркеры/исключение из набора тестов.
-- `tests/test_case_normalization.py`
-  - **Назначение:** покрывает нормализацию регистра в `core.assets` и обновление ссылок. 【F:tests/test_case_normalization.py†L1-L77】
-  - **Зависимости и конфиг:** использует минимальные словари, имитируя секции `patterns` и `service_files` для проверки флага `normalize_case`. 【F:tests/test_case_normalization.py†L16-L56】
-  - **Отключение через config:** тест демонстрирует, что выключение достигается установкой `enabled: False`; отключить сам тест можно только на уровне pytest.
-- `resources/favicon.ico`
-  - **Назначение:** дефолтная иконка, копируемая на этапах ассетов по правилам `service_files.resource_copy`. 【F:core/assets.py†L468-L543】【F:config/config.yaml†L150-L160】
-  - **Зависимости и конфиг:** используется модулем `core.assets`; правило копирования настраивается в конфиге.
-  - **Отключение через config:** удалите или измените правило `resource_copy.files`, чтобы не копировать иконку.
-- `core/__init__.py`
-  - **Назначение:** помечает директорию `core` как пакет Python.
-  - **Зависимости и конфиг:** не содержит логики.
-  - **Отключение через config:** не требуется.
-
-## Logging & reports
-
-Logs are written to the `logs/` folder inside the project root. Intermediate and final summaries track renamed assets, cleaned files, fixed/remaining broken links, and overall duration. 【F:core/logger.py†L28-L136】【F:core/report.py†L44-L107】
-
-## Development & testing
-
-Run the existing tests with:
-
-```bash
-pytest
-```
-
-The suite covers manifest synchronization and asset case normalization behavior. 【F:tests/test_manifest_sync.py†L1-L62】【F:tests/test_case_normalization.py†L1-L114】
-
-For pull requests, keep the manifest (`manifest.json`) aligned with the build rules by running `python tools/sync_manifest.py` when packaging changes. 【F:tools/sync_manifest.py†L1-L41】【F:manifest.json†L32-L48】
-
-## License
-
-Detilda is distributed under the MIT License; see `manifest.json` for attribution details. 【F:manifest.json†L2-L21】
+- Minimum Python version: 3.10 (validated on 3.11).
+- Dependencies: `PyYAML` for configuration parsing, `pytest` for tests.
+- Run the test suite with `pytest` from the repository root.
+- After build changes, run `python tools/sync_manifest.py` to refresh `manifest.json`.
