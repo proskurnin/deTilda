@@ -86,15 +86,49 @@ def _resolve_target_path(target: str, project_root: Path) -> Optional[Path]:
     return candidate
 
 
-def _store_route(alias: str, target: str, project_root: Path, routes: Dict[str, str]) -> None:
+def fix_missing_htaccess_route(
+    route: str, target: str, fallback_target: str = "404.html"
+) -> str:
+    logger.warn(
+        f"[htaccess] Маршрут {route} вёл в отсутствующий файл {target}, заменён на {fallback_target}"
+    )
+    return fallback_target
+
+
+def _store_route(
+    alias: str,
+    target: str,
+    project_root: Path,
+    routes: Dict[str, str],
+    *,
+    soft_fallback_enabled: bool = False,
+    fallback_target: str = "404.html",
+) -> None:
     alias = _normalize_alias(alias)
     target = target.strip()
-    routes[alias] = target
     candidate = _resolve_target_path(target, project_root)
     exists = candidate.exists() if candidate else False
-    _routes_info[alias] = RouteInfo(target=target, exists=exists, path=candidate if candidate else None)
-    existence_note = "есть" if exists else "нет"
-    logger.debug(f"[htaccess] {alias} → {target} (файл {existence_note})")
+
+    if exists:
+        routes[alias] = target
+        _routes_info[alias] = RouteInfo(target=target, exists=True, path=candidate)
+        logger.debug(f"[htaccess] {alias} → {target} (файл есть)")
+        return
+
+    logger.err(f"[htaccess] Битый маршрут: {alias} → {target} (файл отсутствует)")
+
+    if soft_fallback_enabled:
+        fallback_candidate = _resolve_target_path(fallback_target, project_root)
+        if fallback_candidate and fallback_candidate.exists():
+            fixed_target = fix_missing_htaccess_route(alias, target, fallback_target)
+            routes[alias] = fixed_target
+            _routes_info[alias] = RouteInfo(
+                target=fixed_target, exists=True, path=fallback_candidate
+            )
+            return
+
+    routes[alias] = target
+    _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
 
 
 def _increment_stat(stats: Any | None, field: str) -> None:
@@ -148,6 +182,9 @@ def collect_routes(
     routes: Dict[str, str] = {}
     _routes_info.clear()
     rewrite_re, redirect_re = _load_patterns(loader)
+    patterns_cfg = loader.patterns().get("htaccess_patterns", {})
+    soft_fallback_enabled = bool(patterns_cfg.get("soft_fallback_to_404", False))
+    fallback_target = str(patterns_cfg.get("fallback_target", "404.html"))
 
     for file_path in _iter_htaccess_files(project_root):
         parsed_routes = collect_htaccess_routes(file_path, project_root, stats=stats)
@@ -160,15 +197,36 @@ def collect_routes(
 
         for match in rewrite_re.finditer(text):
             alias, target = match.groups()
-            _store_route(alias, target, project_root, routes)
+            _store_route(
+                alias,
+                target,
+                project_root,
+                routes,
+                soft_fallback_enabled=soft_fallback_enabled,
+                fallback_target=fallback_target,
+            )
 
         for match in redirect_re.finditer(text):
             alias, target = match.groups()
-            _store_route(alias, target, project_root, routes)
+            _store_route(
+                alias,
+                target,
+                project_root,
+                routes,
+                soft_fallback_enabled=soft_fallback_enabled,
+                fallback_target=fallback_target,
+            )
 
         index_match = re.search(r"DirectoryIndex\s+([^\s]+\.html)", text, re.IGNORECASE)
         if index_match:
-            _store_route("/", index_match.group(1), project_root, routes)
+            _store_route(
+                "/",
+                index_match.group(1),
+                project_root,
+                routes,
+                soft_fallback_enabled=soft_fallback_enabled,
+                fallback_target=fallback_target,
+            )
 
     if routes:
         logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")

@@ -19,6 +19,8 @@ class ReadmeCleanupRule(BaseModel):
 class HtaccessPatterns(BaseModel):
     rewrite_rule: str = ""
     redirect: str = ""
+    soft_fallback_to_404: bool = False
+    fallback_target: str = "404.html"
 
 
 class PatternsAssets(BaseModel):
