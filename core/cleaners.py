@@ -8,13 +8,15 @@ from typing import Iterable
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
+from core.project import ProjectContext
 
-__all__ = ["CleanStats", "clean_text_files"]
+__all__ = ["CleanStats", "clean_project_files", "clean_text_files"]
 
 
 @dataclass
 class CleanStats:
     updated: int = 0
+    removed: int = 0
 
 
 def _compile_patterns(patterns: Iterable[str]) -> list[re.Pattern[str]]:
@@ -106,3 +108,9 @@ def clean_text_files(project_root: Path, loader: ConfigLoader) -> CleanStats:
             stats.updated += 1
 
     return stats
+
+
+def clean_project_files(context: ProjectContext, _rename_map: dict[str, str] | None = None) -> CleanStats:
+    """Backward-compatible wrapper used by the orchestrator."""
+
+    return clean_text_files(context.project_root, context.config_loader)

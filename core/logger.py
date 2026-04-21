@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import time
+import traceback
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional, TextIO
@@ -13,6 +14,7 @@ __all__ = [
     "debug",
     "error",
     "err",
+    "exception",
     "get_logs_dir",
     "get_project_name",
     "info",
@@ -67,6 +69,16 @@ def error(message: str) -> None:
 
 def debug(message: str) -> None:
     _write_line("🐞", message)
+
+
+def exception(message: str) -> None:
+    """Log *message* with the active traceback."""
+
+    _write_line("💥", message)
+    tb = traceback.format_exc().rstrip()
+    if tb and tb != "NoneType: None":
+        for line in tb.splitlines():
+            _write_line("💥", line)
 
 
 @contextmanager
