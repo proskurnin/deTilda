@@ -57,12 +57,16 @@ def _process_archive(
 
     start = _now()
     try:
+        # Шаг 1. Переименовываем ассеты по правилам и удаляем лишние файлы.
+        # Результат содержит карту переименований (rename_map) — она нужна на шаге 6.
         with logger.module_scope("assets"):
             asset_result = assets.rename_and_cleanup_assets(project_root, loader)
 
+        # Шаг 2. Обновляем страницу 404 (подставляем актуальные пути/шаблон).
         with logger.module_scope("page404"):
             page404.update_404_page(project_root)
 
+        # Промежуточный отчёт после первых двух шагов (cleaners ещё не запущен).
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=0,
@@ -70,9 +74,11 @@ def _process_archive(
             broken_links=0,
         )
 
+        # Шаг 3. Чистим текстовые файлы: убираем мусор, нормализуем кодировку и т.д.
         with logger.module_scope("cleaners"):
             clean_stats = cleaners.clean_text_files(project_root, loader)
 
+        # Промежуточный отчёт после очистки файлов.
         report.generate_intermediate_report(
             renamed=asset_result.stats.renamed,
             cleaned=clean_stats.updated,
@@ -80,23 +86,31 @@ def _process_archive(
             broken_links=0,
         )
 
+        # Шаг 4. Генерируем send_email.php с указанным email получателя.
         with logger.module_scope("forms"):
             forms.generate_send_email_php(project_root, email)
 
+        # Шаг 5. Встраиваем JS-скрипты форм в HTML-страницы проекта.
         with logger.module_scope("inject"):
             inject.inject_form_scripts(project_root, loader)
 
+        # Шаг 6. Локализуем Google Fonts: скачиваем шрифты и правим CSS,
+        # чтобы сайт не обращался к внешним серверам Google (GDPR).
         with logger.module_scope("fonts"):
             fonts_localizer.localize_google_fonts(project_root)
 
+        # Шаг 7. Обновляем все ссылки в проекте согласно карте переименований из шага 1.
+        # Возвращает количество исправленных и оставшихся битых ссылок.
         with logger.module_scope("refs"):
             fixed_links, broken_links = refs.update_all_refs_in_project(
                 project_root, asset_result.rename_map, loader
             )
 
+        # Шаг 8. Удаляем запрещённые/нежелательные скрипты из HTML-файлов.
         with logger.module_scope("script_cleaner"):
             script_cleaner.remove_disallowed_scripts(project_root, loader)
 
+        # Шаг 9. Финальная проверка всех ссылок — выявляем оставшиеся битые.
         with logger.module_scope("checker"):
             link_check = checker.check_links(project_root, loader)
 
