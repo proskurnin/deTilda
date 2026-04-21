@@ -11,13 +11,43 @@ from core.project import ProjectContext
 
 @dataclass
 class PipelineStats:
-    renamed: int = 0
-    removed: int = 0
-    cleaned: int = 0
+    renamed_assets: int = 0
+    removed_assets: int = 0
+    cleaned_files: int = 0
     fixed_links: int = 0
     broken_links: int = 0
+    broken_htaccess_routes: int = 0
+    ssl_bypassed_downloads: int = 0
     warnings: int = 0
+    errors: int = 0
+    downloaded_remote_assets: int = 0
+    forms_found: int = 0
+    forms_hooked: int = 0
     exec_time: float = 0.0
+
+    @property
+    def renamed(self) -> int:
+        return self.renamed_assets
+
+    @renamed.setter
+    def renamed(self, value: int) -> None:
+        self.renamed_assets = value
+
+    @property
+    def removed(self) -> int:
+        return self.removed_assets
+
+    @removed.setter
+    def removed(self, value: int) -> None:
+        self.removed_assets = value
+
+    @property
+    def cleaned(self) -> int:
+        return self.cleaned_files
+
+    @cleaned.setter
+    def cleaned(self, value: int) -> None:
+        self.cleaned_files = value
 
 
 class DetildaPipeline:
@@ -44,20 +74,21 @@ class DetildaPipeline:
 
             with logger.module_scope("assets"):
                 asset_result = assets.rename_and_cleanup_assets(context)
-            stats.renamed = asset_result.stats.renamed
-            stats.removed = asset_result.stats.removed
-            report.generate_intermediate_report(stats.renamed, 0, 0, 0)
+            stats.renamed_assets = asset_result.stats.renamed
+            stats.removed_assets = asset_result.stats.removed
+            stats.downloaded_remote_assets = asset_result.stats.downloaded
+            report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
 
             with logger.module_scope("cleaners"):
                 clean_result = cleaners.clean_project_files(context, context.rename_map)
-            stats.cleaned = clean_result.updated
-            stats.removed += clean_result.removed
-            report.generate_intermediate_report(stats.renamed, stats.cleaned, 0, 0)
+            stats.cleaned_files = clean_result.updated
+            stats.removed_assets += clean_result.removed
+            report.generate_intermediate_report(stats.renamed_assets, stats.cleaned_files, 0, 0)
 
             with logger.module_scope("forms"):
                 forms.generate_send_email_php(context, email)
             with logger.module_scope("inject"):
-                inject.inject_form_scripts(context)
+                stats.forms_hooked = inject.inject_form_scripts(context)
 
             with logger.module_scope("fonts"):
                 fonts_localizer.localize_google_fonts(context.project_root)
@@ -69,7 +100,7 @@ class DetildaPipeline:
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links
             report.generate_intermediate_report(
-                stats.renamed, stats.cleaned, stats.fixed_links, stats.broken_links
+                stats.renamed_assets, stats.cleaned_files, stats.fixed_links, stats.broken_links
             )
 
             with logger.module_scope("script_cleaner"):
@@ -81,7 +112,7 @@ class DetildaPipeline:
             with logger.module_scope("report"):
                 report.generate_final_report(
                     project_root=context.project_root,
-                    renamed_count=stats.renamed,
+                    renamed_count=stats.renamed_assets,
                     warnings=stats.warnings,
                     broken_links_fixed=stats.fixed_links,
                     broken_links_left=stats.broken_links,
@@ -90,8 +121,8 @@ class DetildaPipeline:
 
             logger.info("======================================")
             logger.info(f"🎯  Detilda {self.version} — обработка завершена")
-            logger.info(f"📦 Переименовано ассетов: {stats.renamed}")
-            logger.info(f"🧹 Очищено файлов: {stats.cleaned}")
+            logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
+            logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
             logger.info(
                 f"🔗 Исправлено ссылок: {stats.fixed_links} / Осталось битых: {stats.broken_links}"
             )
