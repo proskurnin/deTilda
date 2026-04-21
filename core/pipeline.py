@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from core import (
+    archive,
     assets,
     checker,
     cleaners,
@@ -75,7 +76,7 @@ class DetildaPipeline:
     def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
 
-        project_root = refs.unpack_archive(archive_path)
+        project_root = archive.unpack_archive(archive_path)
         if not project_root:
             raise RuntimeError("Не удалось распаковать архив")
 
