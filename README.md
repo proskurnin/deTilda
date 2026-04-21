@@ -11,7 +11,7 @@ Detilda — офлайн-инструмент автоматизации, кот
 - **Распаковка и подготовка (`core/archive.py`, `core/logger.py`)** — извлекает входной ZIP-архив во временную директорию, ведёт журнал выполнения и аккуратно очищает рабочее окружение при ошибках.
 - **Нормализация ассетов (`core/assets.py`)** — приводит имена файлов к нижнему регистру, скачивает удалённые ресурсы, копирует обязательные шаблоны из `resources/`, удаляет служебные файлы Tilda и сохраняет карту переименований для следующих стадий.
 - **Очистка текстов (`core/cleaners.py`, `core/page404.py`)** — удаляет из `robots.txt`, `readme.txt`, `404.html` и других текстовых файлов рекламные и служебные блоки Tilda, заменяя их на готовые шаблоны.
-- **Работа с формами (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** — генерирует PHP-обработчик и фронтенд-скрипт, внедряет подключение скрипта в HTML, подставляя адрес получателя, заданный пользователем.
+- **Работа с формами (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** — генерирует PHP-обработчик и фронтенд-скрипт, внедряет подключение скрипта в HTML, копируя универсальный обработчик без интерактивного ввода адреса получателя.
 - **Правка ссылок и маршрутов (`core/refs.py`, `core/htaccess.py`)** — обновляет ссылки в HTML/CSS/JS/JSON, учитывает переименованные файлы, собирает маршруты из `.htaccess`, проверяет совпадение регистров и сообщает о нерешённых путях.
 - **Гигиена скриптов (`core/script_cleaner.py`)** — удаляет встроенные скрипты аналитики, обработки форм и другие элементы, которые не нужны в итоговой сборке.
 - **Проверка ссылок и отчётность (`core/checker.py`, `core/report.py`)** — проходит по итоговому проекту, находит битые ссылки, формирует промежуточные и финальные отчёты, синхронизируемые с настройками `manifest.json`.
@@ -21,7 +21,7 @@ Detilda — офлайн-инструмент автоматизации, кот
 ### Типовой рабочий процесс
 
 1. Пользователь помещает экспортированный архив Tilda в каталог `_workdir/` (создаётся автоматически при первом запуске).
-2. Запускает `python main.py` и указывает имя архива и e-mail получателя для форм.
+2. Запускает `python main.py` и указывает имя архива (для форм используется `default_email` из `manifest.json`, если это требуется конфигом).
 3. Detilda распаковывает архив, последовательно выполняет все стадии и пишет подробный лог в консоль и `logs/`.
 4. В конце конвейера готовая сборка остаётся в `_workdir/<имя-архива>/` вместе с отчётами и картой переименований.
 
@@ -72,7 +72,7 @@ Detilda is an offline automation tool that tidies up exported [Tilda.cc](https:/
 - **Extraction and setup (`core/archive.py`, `core/logger.py`)** – unpacks the input ZIP archive into a temporary directory, logs progress, and gracefully cleans up the workspace on errors.
 - **Asset normalization (`core/assets.py`)** – converts filenames to lowercase, downloads remote resources, copies mandatory templates from `resources/`, removes Tilda service files, and stores a rename map for the following stages.
 - **Text cleanup (`core/cleaners.py`, `core/page404.py`)** – strips promotional and service blocks from `robots.txt`, `readme.txt`, `404.html`, and other text files, replacing them with ready-made templates.
-- **Form handling (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** – generates a PHP handler and frontend script, injects the script reference into HTML, and inserts the user-provided recipient address.
+- **Form handling (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** – generates a PHP handler and frontend script, injects the script reference into HTML, and copies a universal handler without prompting for a recipient address.
 - **Link and route repair (`core/refs.py`, `core/htaccess.py`)** – updates links across HTML/CSS/JS/JSON, respects renamed files, collects routes from `.htaccess`, enforces case matches, and reports unresolved paths.
 - **Script hygiene (`core/script_cleaner.py`)** – removes embedded analytics, form scripts, and other fragments that should not ship with the final package.
 - **Link checking and reporting (`core/checker.py`, `core/report.py`)** – scans the processed project for broken links, compiles interim and final reports, and aligns output with `manifest.json` settings.
@@ -82,7 +82,7 @@ Detilda is an offline automation tool that tidies up exported [Tilda.cc](https:/
 ### Typical workflow
 
 1. Place the exported Tilda archive into the `_workdir/` directory (created automatically on the first run).
-2. Run `python main.py` and supply the archive name and the recipient e-mail for forms.
+2. Run `python main.py` and provide the archive name (forms use `default_email` from `manifest.json` if needed by config).
 3. Detilda extracts the archive, executes every stage in sequence, and writes detailed logs to the console and `logs/`.
 4. The finished build remains in `_workdir/<archive-name>/` along with reports and the rename map.
 
