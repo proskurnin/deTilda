@@ -4,12 +4,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
 
-__all__ = ["RouteInfo", "collect_routes", "fix_missing_htaccess_route", "get_route_info"]
+__all__ = ["RouteInfo", "collect_htaccess_routes", "collect_routes", "get_route_info"]
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,54 @@ def _store_route(
     _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
 
 
-def collect_routes(project_root: Path, loader: ConfigLoader) -> Dict[str, str]:
+def _increment_stat(stats: Any | None, field: str) -> None:
+    if stats is None:
+        return
+    if not hasattr(stats, field):
+        return
+    setattr(stats, field, getattr(stats, field, 0) + 1)
+
+
+def collect_htaccess_routes(
+    htaccess_path: Path,
+    project_root: Path,
+    stats: Any | None = None,
+) -> Dict[str, str]:
+    routes: Dict[str, str] = {}
+
+    if not htaccess_path.exists():
+        logger.info("ℹ️ .htaccess не найден, пропуск анализа маршрутов")
+        return routes
+
+    content = htaccess_path.read_text(encoding="utf-8", errors="ignore")
+    pattern = re.compile(
+        r"RewriteRule\s+\^?([^\s$]+)\$?\s+([^\s]+\.html)\s*\[([^\]]*)\]",
+        re.IGNORECASE,
+    )
+
+    for match in pattern.finditer(content):
+        route = "/" + match.group(1).lstrip("/")
+        target = match.group(2).strip()
+        target_path = project_root / target
+
+        routes[route] = target
+        _routes_info[route] = RouteInfo(target=target, exists=target_path.exists(), path=target_path)
+        if target_path.exists():
+            logger.debug(f"[htaccess] {route} → {target} (файл есть)")
+        else:
+            logger.error(f"[htaccess] Битый маршрут: {route} → {target} (файл отсутствует)")
+            _increment_stat(stats, "broken_htaccess_routes")
+            _increment_stat(stats, "errors")
+
+    logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")
+    return routes
+
+
+def collect_routes(
+    project_root: Path,
+    loader: ConfigLoader,
+    stats: Any | None = None,
+) -> Dict[str, str]:
     routes: Dict[str, str] = {}
     _routes_info.clear()
     rewrite_re, redirect_re = _load_patterns(loader)
@@ -140,6 +187,8 @@ def collect_routes(project_root: Path, loader: ConfigLoader) -> Dict[str, str]:
     fallback_target = str(patterns_cfg.get("fallback_target", "404.html"))
 
     for file_path in _iter_htaccess_files(project_root):
+        parsed_routes = collect_htaccess_routes(file_path, project_root, stats=stats)
+        routes.update(parsed_routes)
         try:
             text = utils.safe_read(file_path)
         except Exception as exc:

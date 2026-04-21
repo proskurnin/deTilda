@@ -77,6 +77,8 @@ class DetildaPipeline:
             stats.renamed_assets = asset_result.stats.renamed
             stats.removed_assets = asset_result.stats.removed
             stats.downloaded_remote_assets = asset_result.stats.downloaded
+            stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
+            stats.warnings += asset_result.stats.warnings
             report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
 
             with logger.module_scope("cleaners"):
@@ -95,7 +97,7 @@ class DetildaPipeline:
 
             with logger.module_scope("refs"):
                 fixed_links, broken_links = refs.update_all_refs_in_project(
-                    context.project_root, context.rename_map
+                    context.project_root, context.rename_map, stats=stats
                 )
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links

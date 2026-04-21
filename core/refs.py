@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
@@ -214,6 +214,7 @@ def update_all_refs_in_project(
     project_root: Path,
     rename_map: Dict[str, str],
     loader: ConfigLoader | None = None,
+    stats: Any | None = None,
 ) -> tuple[int, int]:
     project_root = Path(project_root)
     rename_map = dict(rename_map)
@@ -250,7 +251,7 @@ def update_all_refs_in_project(
         if isinstance(value, str)
     ]
 
-    routes = collect_routes(project_root, loader)
+    routes = collect_routes(project_root, loader, stats=stats)
 
     fixed_total = 0
     broken_total = 0
