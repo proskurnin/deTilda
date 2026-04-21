@@ -108,7 +108,18 @@ def _process_archive(
 
         # Шаг 8. Удаляем запрещённые/нежелательные скрипты из HTML-файлов.
         with logger.module_scope("script_cleaner"):
-            script_cleaner.remove_disallowed_scripts(project_root, loader)
+            if script_cleaner.can_remove_tilda_form_scripts(project_root):
+                logger.info(
+                    "[script_cleaner] Пользовательский обработчик форм найден, "
+                    "удаляем Tilda form/events/fallback"
+                )
+                script_cleaner.remove_disallowed_scripts(project_root, loader)
+            else:
+                logger.error(
+                    "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
+                    "удаление Tilda-скриптов отменено"
+                )
+                return
 
         # Шаг 9. Финальная проверка всех ссылок — выявляем оставшиеся битые.
         with logger.module_scope("checker"):

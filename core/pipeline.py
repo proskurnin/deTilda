@@ -104,9 +104,20 @@ class DetildaPipeline:
             )
 
             with logger.module_scope("script_cleaner"):
-                script_cleaner.remove_disallowed_scripts(
-                    context.project_root, context.config_loader
-                )
+                if script_cleaner.can_remove_tilda_form_scripts(context.project_root):
+                    logger.info(
+                        "[script_cleaner] Пользовательский обработчик форм найден, "
+                        "удаляем Tilda form/events/fallback"
+                    )
+                    script_cleaner.remove_disallowed_scripts(
+                        context.project_root, context.config_loader
+                    )
+                else:
+                    logger.error(
+                        "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
+                        "удаление Tilda-скриптов отменено"
+                    )
+                    stats.errors += 1
 
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
