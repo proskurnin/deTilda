@@ -40,6 +40,7 @@ class PipelineStats:
     forms_found: int = 0
     forms_hooked: int = 0
     formatted_html_files: int = 0
+    html_prettify_skipped: bool = False
     exec_time: float = 0.0
 
     @property
@@ -155,6 +156,7 @@ class DetildaPipeline:
                 link_check = checker.check_links(context.project_root, context.config_loader)
             stats.broken_links += link_check.broken
             stats.warnings += link_check.broken
+            stats.warnings += stats.broken_htaccess_routes
 
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
@@ -189,6 +191,8 @@ class DetildaPipeline:
 
     def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
         logger.info("======================================")
+        effective_warnings = stats.warnings
+        effective_errors = stats.errors
         status_message = self._status_message(stats)
         logger.info(f"🎯  Detilda {self.version} — {status_message}")
         logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
@@ -205,10 +209,12 @@ class DetildaPipeline:
         logger.info(f"⚠️ Предупреждений: {stats.warnings}")
         logger.info(f"⛔ Ошибок: {stats.errors}")
         logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
+        if stats.html_prettify_skipped:
+            logger.warn("⚠️ html_prettify пропущен из-за отсутствующей зависимости")
 
-        if stats.errors > 0:
+        if effective_errors > 0:
             logger.err(f"❌ Detilda {self.version} — завершено с ошибками")
-        elif stats.warnings > 0:
+        elif effective_warnings > 0:
             logger.warn(f"⚠️ Detilda {self.version} — завершено с предупреждениями")
         else:
             logger.ok(f"✅ Detilda {self.version} — завершено успешно")
@@ -230,6 +236,8 @@ class DetildaPipeline:
 
     @staticmethod
     def _status_message(stats: PipelineStats) -> str:
+        if stats.html_prettify_skipped and stats.warnings == 0 and stats.errors == 0:
+            return "завершено с предупреждениями"
         if stats.errors > 0:
             return "завершено с ошибками"
         if stats.warnings > 0:

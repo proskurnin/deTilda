@@ -6,26 +6,10 @@
 
 from __future__ import annotations
 
-from time import time as _now
 from pathlib import Path
 
-from core import (
-    archive,
-    assets,
-    checker,
-    cleaners,
-    forms,
-    fonts_localizer,
-    html_prettify,
-    inject,
-    logger,
-    page404,
-    refs,
-    report,
-    script_cleaner,
-)
-from core.config_loader import ConfigLoader
-from core.utils import ensure_dir, get_elapsed_time, load_manifest
+from core.pipeline import DetildaPipeline
+from core.utils import ensure_dir, load_manifest
 from core.version import APP_VERSION
 
 VERSION = APP_VERSION
@@ -48,131 +32,8 @@ def _process_archive(
     if not archive_path.exists():
         print(f"❌ Архив не найден: {archive_path}")
         return
-
-    project_root = archive.unpack_archive(archive_path)
-    if project_root is None:
-        print("💥 Не удалось распаковать архив.")
-        return
-
-    logger.attach_to_project(project_root)
-    loader = ConfigLoader(Path(__file__).resolve().parent)
-
-    start = _now()
-    try:
-        # Шаг 1. Переименовываем ассеты по правилам и удаляем лишние файлы.
-        # Результат содержит карту переименований (rename_map) — она нужна на шаге 6.
-        with logger.module_scope("assets"):
-            asset_result = assets.rename_and_cleanup_assets(project_root, loader)
-
-        # Шаг 2. Обновляем страницу 404 (подставляем актуальные пути/шаблон).
-        with logger.module_scope("page404"):
-            page404.update_404_page(project_root)
-
-        # Промежуточный отчёт после первых двух шагов (cleaners ещё не запущен).
-        report.generate_intermediate_report(
-            renamed=asset_result.stats.renamed,
-            cleaned=0,
-            fixed_links=0,
-            broken_links=0,
-        )
-
-        # Шаг 3. Чистим текстовые файлы: убираем мусор, нормализуем кодировку и т.д.
-        with logger.module_scope("cleaners"):
-            clean_stats = cleaners.clean_text_files(project_root, loader)
-
-        # Промежуточный отчёт после очистки файлов.
-        report.generate_intermediate_report(
-            renamed=asset_result.stats.renamed,
-            cleaned=clean_stats.updated,
-            fixed_links=0,
-            broken_links=0,
-        )
-
-        # Шаг 4. Копируем готовый send_email.php и JS-обработчик форм.
-        with logger.module_scope("forms"):
-            forms.generate_send_email_php(project_root, email)
-
-        # Шаг 5. Встраиваем JS-скрипты форм в HTML-страницы проекта.
-        with logger.module_scope("inject"):
-            inject.inject_form_scripts(project_root, loader)
-
-        # Шаг 6. Локализуем Google Fonts: скачиваем шрифты и правим CSS,
-        # чтобы сайт не обращался к внешним серверам Google (GDPR).
-        with logger.module_scope("fonts"):
-            fonts_localizer.localize_google_fonts(project_root)
-
-        # Шаг 7. Обновляем все ссылки в проекте согласно карте переименований из шага 1.
-        # Возвращает количество исправленных и оставшихся битых ссылок.
-        with logger.module_scope("refs"):
-            fixed_links, broken_links = refs.update_all_refs_in_project(
-                project_root, asset_result.rename_map, loader
-            )
-
-        # Шаг 8. Удаляем запрещённые/нежелательные скрипты из HTML-файлов.
-        with logger.module_scope("script_cleaner"):
-            if script_cleaner.can_remove_tilda_form_scripts(project_root):
-                logger.info(
-                    "[script_cleaner] Пользовательский обработчик форм найден, "
-                    "удаляем Tilda form/events/fallback"
-                )
-                script_cleaner.remove_disallowed_scripts(project_root, loader)
-            else:
-                logger.error(
-                    "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
-                    "удаление Tilda-скриптов отменено"
-                )
-                return
-
-        # Шаг 9. Пост-проверка форм после чистки:
-        # убеждаемся, что обработчик формы не был потерян.
-        with logger.module_scope("forms_check"):
-            forms_check = checker.check_forms_integration(project_root)
-
-        # Шаг 10. Финальная проверка всех ссылок — выявляем оставшиеся битые.
-        with logger.module_scope("html_prettify"):
-            formatted_files = html_prettify.run(
-                type("MainContext", (), {"project_root": project_root})(), stats=None
-            )
-
-        with logger.module_scope("checker"):
-            link_check = checker.check_links(project_root, loader)
-
-        warnings = link_check.broken + forms_check.warnings
-        errors = 0
-        exec_time = _now() - start
-        with logger.module_scope("report"):
-            report.generate_final_report(
-                project_root=project_root,
-                cleaned_count=clean_stats.updated,
-                renamed_count=asset_result.stats.renamed,
-                formatted_html_files=formatted_files,
-                warnings=warnings,
-                errors=errors,
-                broken_links_fixed=fixed_links,
-                broken_links_left=broken_links + link_check.broken,
-                broken_htaccess_routes=0,
-                downloaded_remote_assets=asset_result.stats.downloaded,
-                ssl_bypass_downloads=asset_result.stats.ssl_bypassed_downloads,
-                forms_found=forms_check.forms_found,
-                forms_hooked=forms_check.forms_hooked,
-                missing_htaccess_routes=[],
-                exec_time=exec_time,
-            )
-
-        logger.info("======================================")
-        logger.info(f"🎯  Detilda {version} — обработка завершена")
-        logger.info(f"📦 Переименовано ассетов: {asset_result.stats.renamed}")
-        logger.info(f"🧹 Очищено файлов: {clean_stats.updated}")
-        logger.info(f"🧼 Отформатировано HTML-файлов: {formatted_files}")
-        logger.info(
-            f"🔗 Исправлено ссылок: {fixed_links} / Осталось битых: {broken_links + link_check.broken}"
-        )
-        logger.info(f"⚠️ Предупреждений: {warnings}")
-        logger.info(f"🕓 Время выполнения: {get_elapsed_time(start)}")
-        logger.info("======================================")
-        logger.ok(f"🎯 Detilda {version} — завершено успешно.")
-    finally:
-        logger.close()
+    pipeline = DetildaPipeline(version=version)
+    pipeline.run(archive_path, email)
 
 
 def main() -> None:
