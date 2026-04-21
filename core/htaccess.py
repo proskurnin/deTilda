@@ -41,6 +41,7 @@ class MissingRouteInfo:
 
 _routes_info: Dict[str, RouteInfo] = {}
 _missing_routes: List[MissingRouteInfo] = []
+_missing_route_keys: set[tuple[str, str]] = set()
 
 
 def _load_patterns(loader: ConfigLoader) -> tuple[re.Pattern[str], re.Pattern[str]]:
@@ -168,21 +169,26 @@ def _store_route(
         logger.debug(f"[htaccess] {alias} → {target} (файл есть)")
         return
 
-    logger.err(f"[htaccess] Битый маршрут: {alias} → {target} (файл отсутствует)")
+    route_key = (alias, target)
+    is_new_missing = route_key not in _missing_route_keys
+    if is_new_missing:
+        _missing_route_keys.add(route_key)
+        logger.err(f"[htaccess] Битый маршрут: {alias} → {target} (файл отсутствует)")
 
     if auto_stub_enabled and _create_route_stub(alias, target, project_root, fallback_target):
         stub_candidate = _resolve_target_path(target, project_root)
         routes[alias] = target
         _routes_info[alias] = RouteInfo(target=target, exists=True, path=stub_candidate)
-        _missing_routes.append(
-            MissingRouteInfo(
-                alias=alias,
-                target=target,
-                action="stub_created",
-                replacement=target,
+        if is_new_missing:
+            _missing_routes.append(
+                MissingRouteInfo(
+                    alias=alias,
+                    target=target,
+                    action="stub_created",
+                    replacement=target,
+                )
             )
-        )
-        _increment_stat(stats, "broken_htaccess_routes")
+            _increment_stat(stats, "broken_htaccess_routes")
         return
 
     if soft_fallback_enabled:
@@ -193,24 +199,26 @@ def _store_route(
             _routes_info[alias] = RouteInfo(
                 target=fixed_target, exists=True, path=fallback_candidate
             )
-            _missing_routes.append(
-                MissingRouteInfo(
-                    alias=alias,
-                    target=target,
-                    action="fallback_redirect",
-                    replacement=fixed_target,
+            if is_new_missing:
+                _missing_routes.append(
+                    MissingRouteInfo(
+                        alias=alias,
+                        target=target,
+                        action="fallback_redirect",
+                        replacement=fixed_target,
+                    )
                 )
-            )
-            _increment_stat(stats, "broken_htaccess_routes")
+                _increment_stat(stats, "broken_htaccess_routes")
             return
 
     routes[alias] = target
     _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
-    _missing_routes.append(
-        MissingRouteInfo(alias=alias, target=target, action="unresolved", replacement=None)
-    )
-    _increment_stat(stats, "broken_htaccess_routes")
-    _increment_stat(stats, "errors")
+    if is_new_missing:
+        _missing_routes.append(
+            MissingRouteInfo(alias=alias, target=target, action="unresolved", replacement=None)
+        )
+        _increment_stat(stats, "broken_htaccess_routes")
+        _increment_stat(stats, "errors")
 
 
 def _increment_stat(stats: Any | None, field: str) -> None:
@@ -248,7 +256,9 @@ def collect_htaccess_routes(
         if target_path.exists():
             logger.debug(f"[htaccess] {route} → {target} (файл есть)")
         else:
-            logger.error(f"[htaccess] Битый маршрут: {route} → {target} (файл отсутствует)")
+            logger.debug(
+                f"[htaccess] Потенциально битый маршрут: {route} → {target} (проверка в основном парсере)"
+            )
 
     logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")
     return routes
@@ -262,6 +272,7 @@ def collect_routes(
     routes: Dict[str, str] = {}
     _routes_info.clear()
     _missing_routes.clear()
+    _missing_route_keys.clear()
     rewrite_re, redirect_re = _load_patterns(loader)
     patterns_cfg = loader.patterns().get("htaccess_patterns", {})
     soft_fallback_enabled = bool(patterns_cfg.get("soft_fallback_to_404", False))

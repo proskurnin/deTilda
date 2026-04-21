@@ -16,6 +16,7 @@ from core import (
     cleaners,
     forms,
     fonts_localizer,
+    html_prettify,
     inject,
     logger,
     page404,
@@ -25,8 +26,9 @@ from core import (
 )
 from core.config_loader import ConfigLoader
 from core.utils import ensure_dir, get_elapsed_time, load_manifest
+from core.version import APP_VERSION
 
-VERSION = "v4.5.0 LTS unified"
+VERSION = APP_VERSION
 
 
 def _prompt(prompt: str) -> str:
@@ -127,18 +129,33 @@ def _process_archive(
             forms_check = checker.check_forms_integration(project_root)
 
         # Шаг 10. Финальная проверка всех ссылок — выявляем оставшиеся битые.
+        with logger.module_scope("html_prettify"):
+            formatted_files = html_prettify.run(
+                type("MainContext", (), {"project_root": project_root})(), stats=None
+            )
+
         with logger.module_scope("checker"):
             link_check = checker.check_links(project_root, loader)
 
         warnings = link_check.broken + forms_check.warnings
+        errors = 0
         exec_time = _now() - start
         with logger.module_scope("report"):
             report.generate_final_report(
                 project_root=project_root,
+                cleaned_count=clean_stats.updated,
                 renamed_count=asset_result.stats.renamed,
+                formatted_html_files=formatted_files,
                 warnings=warnings,
+                errors=errors,
                 broken_links_fixed=fixed_links,
                 broken_links_left=broken_links + link_check.broken,
+                broken_htaccess_routes=0,
+                downloaded_remote_assets=asset_result.stats.downloaded,
+                ssl_bypass_downloads=asset_result.stats.ssl_bypassed_downloads,
+                forms_found=forms_check.forms_found,
+                forms_hooked=forms_check.forms_hooked,
+                missing_htaccess_routes=[],
                 exec_time=exec_time,
             )
 
@@ -146,6 +163,7 @@ def _process_archive(
         logger.info(f"🎯  Detilda {version} — обработка завершена")
         logger.info(f"📦 Переименовано ассетов: {asset_result.stats.renamed}")
         logger.info(f"🧹 Очищено файлов: {clean_stats.updated}")
+        logger.info(f"🧼 Отформатировано HTML-файлов: {formatted_files}")
         logger.info(
             f"🔗 Исправлено ссылок: {fixed_links} / Осталось битых: {broken_links + link_check.broken}"
         )

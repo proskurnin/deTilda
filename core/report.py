@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Final, Iterable, Tuple
 
 from core import logger, utils
+from core.version import APP_TITLE
 
 __all__ = ["generate_intermediate_report", "generate_final_report"]
 
@@ -55,7 +56,7 @@ def generate_intermediate_report(
 
     report_path = _report_path("detilda_report")
     text = (
-        "=== Detilda v4.5.0 LTS unified — Промежуточный отчёт ===\n"
+        f"=== {APP_TITLE} — Промежуточный отчёт ===\n"
         f"Дата: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"{'-' * 70}\n"
         f"🖼 Переименовано ассетов: {renamed}\n"
@@ -73,11 +74,18 @@ def generate_intermediate_report(
 
 def generate_final_report(
     project_root: Path,
+    cleaned_count: int,
     renamed_count: int,
+    formatted_html_files: int,
     warnings: int,
+    errors: int,
     broken_links_fixed: int,
     broken_links_left: int,
     broken_htaccess_routes: int,
+    downloaded_remote_assets: int,
+    ssl_bypass_downloads: int,
+    forms_found: int,
+    forms_hooked: int,
     missing_htaccess_routes: Iterable[Tuple[str, str, str, str | None]],
     exec_time: float,
 ) -> None:
@@ -86,18 +94,30 @@ def generate_final_report(
         return
 
     report_path = _report_path("final_report")
-    status = "✅ Успех" if broken_links_left == 0 else "⚠️ Есть проблемы"
+    if errors > 0:
+        status = f"❌ {APP_TITLE} — завершено с ошибками"
+    elif warnings > 0:
+        status = f"⚠️ {APP_TITLE} — завершено с предупреждениями"
+    else:
+        status = f"✅ {APP_TITLE} — завершено успешно"
     text = (
-        "=== Detilda v4.5.0 LTS unified — Финальный отчёт ===\n"
+        f"=== {APP_TITLE} — Финальный отчёт ===\n"
         f"Проект: {project_root.name}\n"
         f"Путь: {project_root.resolve()}\n"
         f"Дата: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"{'=' * 70}\n"
-        f"🖼 Переименовано ассетов: {renamed_count}\n"
+        f"📦 Переименовано ассетов: {renamed_count}\n"
+        f"🧹 Очищено файлов: {cleaned_count}\n"
+        f"🧼 Отформатировано HTML-файлов: {formatted_html_files}\n"
+        f"🌐 Загружено удалённых ассетов: {downloaded_remote_assets}\n"
+        f"🔐 SSL bypass downloads: {ssl_bypass_downloads}\n"
         f"🔗 Исправлено ссылок: {broken_links_fixed}\n"
-        f"🚫 Осталось битых ссылок: {broken_links_left}\n"
+        f"❌ Битых внутренних ссылок: {broken_links_left}\n"
         f"❌ Битых htaccess-маршрутов: {broken_htaccess_routes}\n"
+        f"📝 Форм найдено: {forms_found}\n"
+        f"🧩 Форм подключено к handler: {forms_hooked}\n"
         f"⚠️ Предупреждений: {warnings}\n"
+        f"⛔ Ошибок: {errors}\n"
         f"🕓 Время выполнения: {exec_time:.2f} сек\n"
         f"{'=' * 70}\n"
         f"{status}\n"

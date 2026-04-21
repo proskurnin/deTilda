@@ -10,7 +10,7 @@ from core.module_versions import register_module_version
 
 register_module_version(
     __name__,
-    "v4.6 Stable",
+    "v4.7 Stable",
     "Добавлена регистрация версий модулей для отслеживания эволюции форм.",
 )
 
