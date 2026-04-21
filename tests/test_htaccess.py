@@ -12,7 +12,7 @@ if yaml_stub is None:
     yaml_stub.safe_load = lambda *_args, **_kwargs: {}
     sys.modules["yaml"] = yaml_stub
 
-from core.htaccess import collect_routes, get_route_info
+from core.htaccess import collect_routes, get_missing_routes, get_route_info
 
 
 class _Loader:
@@ -67,3 +67,29 @@ def test_collect_routes_without_soft_fallback_keeps_broken_target(tmp_path: Path
     assert info is not None
     assert not info.exists
     assert info.target == "missing.html"
+
+
+def test_collect_routes_auto_stub_creates_missing_file(tmp_path: Path) -> None:
+    (tmp_path / ".htaccess").write_text(
+        "RewriteRule ^broken$ missing.html\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "404.html").write_text("<h1>404</h1>", encoding="utf-8")
+
+    loader = _Loader(
+        {
+            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+            "auto_stub_missing_routes": True,
+            "fallback_target": "404.html",
+        }
+    )
+    routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
+
+    assert routes["/broken"] == "missing.html"
+    assert (tmp_path / "missing.html").exists()
+    assert (tmp_path / "missing.html").read_text(encoding="utf-8") == "<h1>404</h1>"
+    missing = get_missing_routes()
+    assert len(missing) == 1
+    assert missing[0].alias == "/broken"
+    assert missing[0].action == "stub_created"

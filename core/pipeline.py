@@ -19,6 +19,7 @@ from core import (
     script_cleaner,
 )
 from core.project import ProjectContext
+from core.htaccess import get_missing_routes
 
 
 @dataclass
@@ -148,6 +149,11 @@ class DetildaPipeline:
                     warnings=stats.warnings,
                     broken_links_fixed=stats.fixed_links,
                     broken_links_left=stats.broken_links,
+                    broken_htaccess_routes=stats.broken_htaccess_routes,
+                    missing_htaccess_routes=[
+                        (item.alias, item.target, item.action, item.replacement)
+                        for item in get_missing_routes()
+                    ],
                     exec_time=stats.exec_time,
                 )
 
@@ -200,4 +206,3 @@ class DetildaPipeline:
         else:
             logger.ok(f"✅ Detilda {self.version} — завершено успешно")
         logger.info("======================================")
-
