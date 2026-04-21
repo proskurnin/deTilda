@@ -149,18 +149,50 @@ class DetildaPipeline:
                     exec_time=stats.exec_time,
                 )
 
-            logger.info("======================================")
-            logger.info(f"🎯  Detilda {self.version} — обработка завершена")
-            logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
-            logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
-            logger.info(
-                f"🔗 Исправлено ссылок: {stats.fixed_links} / Осталось битых: {stats.broken_links}"
-            )
-            logger.info(f"⚠️ Предупреждений: {stats.warnings}")
-            logger.info(f"🕓 Время выполнения: {stats.exec_time:.2f} сек")
-            logger.info("======================================")
-            logger.ok(f"🎯 Detilda {self.version} — завершено успешно.")
+            self._print_final_summary(stats, stats.exec_time)
 
             return stats
         finally:
             logger.close()
+
+    def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
+        derived_warnings = stats.broken_links + stats.broken_htaccess_routes
+        stats.warnings = max(stats.warnings, derived_warnings)
+
+        logger.info("======================================")
+        logger.info(f"🎯  Detilda {self.version} — обработка завершена")
+        logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
+        logger.info(f"🗑 Удалено ассетов: {stats.removed_assets}")
+        logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
+        logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded_remote_assets}")
+        logger.info(f"🔐 SSL bypass downloads: {stats.ssl_bypassed_downloads}")
+        logger.info(f"🔗 Исправлено ссылок: {stats.fixed_links}")
+        logger.info(f"❌ Битых внутренних ссылок: {stats.broken_links}")
+        logger.info(f"❌ Битых htaccess-маршрутов: {stats.broken_htaccess_routes}")
+        logger.info(f"📝 Форм найдено: {stats.forms_found}")
+        logger.info(f"🧩 Форм подключено к handler: {stats.forms_hooked}")
+        logger.info(f"⚠️ Предупреждений: {stats.warnings}")
+        logger.info(f"⛔ Ошибок: {stats.errors}")
+        logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
+
+        logger.info("⚠️ Предупреждения (детализация):")
+        if stats.broken_links > 0:
+            logger.warn(f"  • Найдены битые внутренние ссылки: {stats.broken_links}")
+        if stats.broken_htaccess_routes > 0:
+            logger.warn(f"  • Найдены битые htaccess-маршруты: {stats.broken_htaccess_routes}")
+        if stats.warnings == 0:
+            logger.info("  • Нет")
+
+        logger.info("⛔ Ошибки (детализация):")
+        if stats.errors > 0:
+            logger.err(f"  • Зафиксировано ошибок: {stats.errors}")
+        else:
+            logger.info("  • Нет")
+
+        if stats.errors > 0:
+            logger.err(f"❌ Detilda {self.version} — завершено с ошибками")
+        elif stats.warnings > 0:
+            logger.warn(f"⚠️ Detilda {self.version} — завершено с предупреждениями")
+        else:
+            logger.ok(f"✅ Detilda {self.version} — завершено успешно")
+        logger.info("======================================")
