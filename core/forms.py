@@ -16,92 +16,6 @@ register_module_version(
 
 __all__ = ["generate_send_email_php", "generate_form_handler_js"]
 
-_SEND_EMAIL_TEMPLATE = """<?php
-declare(strict_types=1);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {{
-    http_response_code(405);
-    header('Content-Type: text/plain; charset=UTF-8');
-    echo 'Method Not Allowed';
-    exit;
-}}
-
-// ----------------- SETTINGS ----------------- //
-$recipient_email = "{email}"; // <-- your email here
-$subject         = "New request from " . ($_SERVER['HTTP_HOST'] ?? 'website');
-// -------------------------------------------- //
-
-function p(string $k, string $d=''): string {{ return isset($_POST[$k]) ? trim((string)$_POST[$k]) : $d; }}
-
-$ignored = ['redirect','redirect2parent','g-recaptcha-response','csrf_token'];
-$lines   = [];
-$lines[] = 'Form submission from ' . ($_SERVER['HTTP_HOST'] ?? 'website');
-$lines[] = 'Date: ' . date('Y-m-d H:i:s');
-$lines[] = str_repeat('-', 40);
-foreach ($_POST as $k => $v) {{
-    if (in_array($k, $ignored, true)) continue;
-    if (is_array($v)) $v = implode(', ', $v);
-    $lines[] = $k . ': ' . $v;
-}}
-$lines[] = str_repeat('-', 40);
-$message = implode("\n", $lines);
-
-$email = p('Email');
-$name  = strip_tags(p('Name', 'Not specified'));
-
-$encoded_subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-$fromHost = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$replyTo  = (filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : ('no-reply@' . $fromHost));
-$headers  = "MIME-Version: 1.0\n";
-$headers .= "Content-Type: text/plain; charset=UTF-8\n";
-$headers .= "From: no-reply@" . $fromHost . "\n";
-$headers .= "Reply-To: " . $replyTo . "\n";
-
-if (function_exists('error_clear_last')) {
-    error_clear_last();
-}
-
-$sent_ok = @mail($recipient_email, $encoded_subject, $message, $headers);
-
-$logTime = date('Y-m-d H:i:s');
-if ($sent_ok) {
-    error_log(sprintf('{%s}{%s}{%s}', $logTime, $recipient_email, $message));
-} else {
-    $lastError = error_get_last();
-    $reason = isset($lastError['message']) ? $lastError['message'] : 'Неизвестная причина';
-    error_log(sprintf('{%s}{%s}{%s}', $logTime, 'Ошибка', $reason));
-}
-
-// Определяем URL возврата (PRG)
-$back = (!empty($_POST['redirect'])) ? (string)$_POST['redirect']
-      : (!empty($_POST['redirect2parent']) ? (string)$_POST['redirect2parent']
-      : (isset($_SERVER['HTTP_REFERER']) ? (string)$_SERVER['HTTP_REFERER'] : '/'));
-
-$parsed = parse_url($back);
-$currentHost = $_SERVER['HTTP_HOST'] ?? '';
-if (isset($parsed['host']) && $parsed['host'] !== '' && $parsed['host'] !== $currentHost) {{
-    $back = '/';
-}}
-
-$hash = '';
-if (strpos($back, '#') !== false) {{
-    list($base, $frag) = explode('#', $back, 2);
-    $back = $base;
-    $hash = '#' . $frag;
-}}
-
-if ($hash === '' || $hash === null) {{
-    $hash = '#popup:myform';
-}}
-
-$sep  = (strpos($back, '?') === false) ? '?' : '&';
-$back = $back . $sep . 'sent=' . ($sent_ok ? '1' : '0') . $hash;
-
-header('Location: ' . $back, true, 303);
-exit;
-?>
-"""
-
 _FORM_HANDLER_TEMPLATE = """/* form-handler.js */
 (function(){
   function qs(s, root){ return (root||document).querySelector(s); }
@@ -350,10 +264,12 @@ def _extract_project_name(project_root: Path) -> str:
 
 
 def generate_send_email_php(project_root: Path | Any, email: str) -> Path:
+    _ = email
     project_root = _resolve_project_root(project_root)
     target = project_root / "send_email.php"
-    content = _SEND_EMAIL_TEMPLATE.replace("{email}", email)
-    utils.safe_write(target, content)
+    template_path = Path(__file__).resolve().parent.parent / "resources" / "send_email.php"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(template_path.read_bytes())
     logger.info(f"📨 Файл send_email.php создан: {utils.relpath(target, project_root)}")
     generate_form_handler_js(project_root)
     return target
