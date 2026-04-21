@@ -6,26 +6,10 @@
 
 from __future__ import annotations
 
-from time import time as _now
 from pathlib import Path
 
-from core import (
-    archive,
-    assets,
-    checker,
-    cleaners,
-    forms,
-    fonts_localizer,
-    html_prettify,
-    inject,
-    logger,
-    page404,
-    refs,
-    report,
-    script_cleaner,
-)
-from core.config_loader import ConfigLoader
-from core.utils import ensure_dir, get_elapsed_time, load_manifest
+from core.pipeline import DetildaPipeline
+from core.utils import ensure_dir, load_manifest
 from core.version import APP_VERSION
 
 VERSION = APP_VERSION
@@ -47,7 +31,6 @@ def _process_archive(
     if not archive_path.exists():
         print(f"❌ Архив не найден: {archive_path}")
         return
-
     project_root = archive.unpack_archive(archive_path)
     if project_root is None:
         print("💥 Не удалось распаковать архив.")

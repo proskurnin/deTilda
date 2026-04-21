@@ -15,6 +15,11 @@ except Exception:  # pragma: no cover - optional dependency resolution
     etree = None  # type: ignore[assignment]
     html = None  # type: ignore[assignment]
 
+try:
+    from bs4 import BeautifulSoup
+except Exception:  # pragma: no cover - optional dependency resolution
+    BeautifulSoup = None  # type: ignore[assignment]
+
 
 def _iter_targets(project_root: Path) -> list[Path]:
     root_html = sorted(path for path in project_root.glob("*.html") if path.is_file())
@@ -46,9 +51,7 @@ def _extract_doctype(text: str) -> str | None:
     return None
 
 
-def _prettify_html(text: str) -> str:
-    if etree is None or html is None:
-        raise RuntimeError("lxml не установлен")
+def _prettify_html_with_lxml(text: str) -> str:
     parser = html.HTMLParser(encoding="utf-8", recover=True, remove_comments=False)
     tree = html.document_fromstring(text, parser=parser)
     doctype = _extract_doctype(text)
@@ -62,14 +65,42 @@ def _prettify_html(text: str) -> str:
     return _normalize_pretty_html(pretty)
 
 
+def _prettify_html_with_bs4(text: str) -> str:
+    soup = BeautifulSoup(text, "html.parser")
+    pretty = soup.prettify()
+    return _normalize_pretty_html(pretty)
+
+
+def _resolve_prettify_engine() -> tuple[str | None, str | None]:
+    if etree is not None and html is not None:
+        return "lxml", None
+    if BeautifulSoup is not None:
+        return "bs4", "html_prettify: lxml not installed, using BeautifulSoup fallback"
+    return None, "html_prettify skipped: lxml not installed"
+
+
 def run(context: ProjectContext, stats: Any | None = None) -> int:
-    logger.info("[html_prettify] ▶️ Начало работы")
+    targets = _iter_targets(context.project_root)
+    engine, warning_message = _resolve_prettify_engine()
+    if warning_message:
+        logger.warn(f"[html_prettify] {warning_message}")
+        if stats is not None and hasattr(stats, "warnings"):
+            stats.warnings += 1
+    if engine is None:
+        if stats is not None and hasattr(stats, "html_prettify_skipped"):
+            stats.html_prettify_skipped = True
+        logger.info("[html_prettify] ✅ Завершено. Отформатировано файлов: 0")
+        return 0
+
     formatted = 0
-    for path in _iter_targets(context.project_root):
+    for path in targets:
         rel_path = utils.relpath(path, context.project_root)
         try:
             original = utils.safe_read(path)
-            updated = _prettify_html(original)
+            if engine == "lxml":
+                updated = _prettify_html_with_lxml(original)
+            else:
+                updated = _prettify_html_with_bs4(original)
             if updated != original.replace("\r\n", "\n").replace("\r", "\n"):
                 utils.safe_write(path, updated)
                 formatted += 1
