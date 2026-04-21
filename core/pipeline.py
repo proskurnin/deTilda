@@ -95,7 +95,7 @@ class DetildaPipeline:
 
             with logger.module_scope("refs"):
                 fixed_links, broken_links = refs.update_all_refs_in_project(
-                    context.project_root, context.rename_map
+                    context.project_root, context.rename_map, stats=stats
                 )
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links
