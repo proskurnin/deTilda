@@ -77,6 +77,8 @@ class DetildaPipeline:
             stats.renamed_assets = asset_result.stats.renamed
             stats.removed_assets = asset_result.stats.removed
             stats.downloaded_remote_assets = asset_result.stats.downloaded
+            stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
+            stats.warnings += asset_result.stats.warnings
             report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
 
             with logger.module_scope("cleaners"):
