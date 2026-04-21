@@ -11,6 +11,7 @@ __all__ = [
     "attach_to_project",
     "close",
     "debug",
+    "error",
     "err",
     "get_logs_dir",
     "get_project_name",
@@ -56,6 +57,12 @@ def warn(message: str) -> None:
 
 def err(message: str) -> None:
     _write_line("💥", message)
+
+
+def error(message: str) -> None:
+    """Backward-compatible alias for :func:`err`."""
+
+    err(message)
 
 
 def debug(message: str) -> None:
