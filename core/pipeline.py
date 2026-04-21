@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from core import assets, cleaners, forms, inject, logger, refs, report, script_cleaner
+from core import assets, cleaners, forms, fonts_localizer, inject, logger, refs, report, script_cleaner
 from core.project import ProjectContext
 
 
@@ -58,6 +58,9 @@ class DetildaPipeline:
                 forms.generate_send_email_php(context, email)
             with logger.module_scope("inject"):
                 inject.inject_form_scripts(context)
+
+            with logger.module_scope("fonts"):
+                fonts_localizer.localize_google_fonts(context.project_root)
 
             with logger.module_scope("refs"):
                 fixed_links, broken_links = refs.update_all_refs_in_project(

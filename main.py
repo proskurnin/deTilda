@@ -15,6 +15,7 @@ from core import (
     checker,
     cleaners,
     forms,
+    fonts_localizer,
     inject,
     logger,
     page404,
@@ -84,6 +85,9 @@ def _process_archive(
 
         with logger.module_scope("inject"):
             inject.inject_form_scripts(project_root, loader)
+
+        with logger.module_scope("fonts"):
+            fonts_localizer.localize_google_fonts(project_root)
 
         with logger.module_scope("refs"):
             fixed_links, broken_links = refs.update_all_refs_in_project(
