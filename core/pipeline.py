@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 from core import assets, cleaners, forms, fonts_localizer, inject, logger, refs, report, script_cleaner
 from core.project import ProjectContext
@@ -87,6 +88,7 @@ class DetildaPipeline:
 
             with logger.module_scope("forms"):
                 forms.generate_send_email_php(context, email)
+            stats.forms_found = self._count_forms(context.project_root)
             with logger.module_scope("inject"):
                 stats.forms_hooked = inject.inject_form_scripts(context)
 
@@ -127,6 +129,7 @@ class DetildaPipeline:
                 f"🔗 Исправлено ссылок: {stats.fixed_links} / Осталось битых: {stats.broken_links}"
             )
             logger.info(f"⚠️ Предупреждений: {stats.warnings}")
+            self._print_critical_findings(stats)
             logger.info(f"🕓 Время выполнения: {stats.exec_time:.2f} сек")
             logger.info("======================================")
             logger.ok(f"🎯 Detilda {self.version} — завершено успешно.")
@@ -134,3 +137,39 @@ class DetildaPipeline:
             return stats
         finally:
             logger.close()
+
+    @staticmethod
+    def _count_forms(project_root: Path) -> int:
+        """Count all HTML form tags in project files."""
+
+        form_tag_pattern = re.compile(r"<form\b", re.IGNORECASE)
+        total = 0
+
+        for html_path in Path(project_root).rglob("*.html"):
+            try:
+                content = html_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            total += len(form_tag_pattern.findall(content))
+
+        return total
+
+    @staticmethod
+    def _print_critical_findings(stats: PipelineStats) -> None:
+        findings: list[str] = []
+
+        if stats.broken_htaccess_routes > 0:
+            findings.append(f"Broken htaccess routes: {stats.broken_htaccess_routes}")
+
+        if stats.ssl_bypassed_downloads > 0:
+            findings.append(f"SSL bypass used for downloads: {stats.ssl_bypassed_downloads}")
+
+        if stats.forms_found != stats.forms_hooked:
+            findings.append(
+                f"Forms hooked incorrectly: found {stats.forms_found}, hooked {stats.forms_hooked}"
+            )
+
+        if findings:
+            logger.warn("CRITICAL FINDINGS:")
+            for i, item in enumerate(findings, start=1):
+                logger.warn(f"{i}. {item}")
