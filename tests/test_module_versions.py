@@ -21,26 +21,26 @@ def _clean_registry() -> None:
 
 
 def test_register_and_fetch_module_version() -> None:
-    register_module_version("core.forms", "v4.6 Stable", "Первичная запись")
+    register_module_version("core.forms", "v4.7 Stable", "Первичная запись")
 
     info = get_module_version("core.forms")
     assert info is not None
     assert info.module == "core.forms"
-    assert info.version == "v4.6 Stable"
+    assert info.version == "v4.7 Stable"
     assert info.notes == ("Первичная запись",)
 
 
 def test_notes_are_normalized_and_serialisable() -> None:
-    register_module_version(" core.forms ", " v4.6 Stable ", "", "  milestone ")
+    register_module_version(" core.forms ", " v4.7 Stable ", "", "  milestone ")
 
     info = get_module_version("core.forms")
     assert info is not None
-    assert info.version == "v4.6 Stable"
+    assert info.version == "v4.7 Stable"
     assert info.notes == ("milestone",)
 
     serialised = module_versions_as_dict()
     assert serialised == {
-        "core.forms": {"version": "v4.6 Stable", "notes": ["milestone"]}
+        "core.forms": {"version": "v4.7 Stable", "notes": ["milestone"]}
     }
 
 
@@ -57,4 +57,3 @@ def test_register_module_version_requires_names() -> None:
         register_module_version("", "v1")
     with pytest.raises(ValueError):
         register_module_version("core.a", " ")
-

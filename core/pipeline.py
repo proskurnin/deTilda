@@ -12,14 +12,17 @@ from core import (
     cleaners,
     forms,
     fonts_localizer,
+    html_prettify,
     inject,
     logger,
+    page404,
     refs,
     report,
     script_cleaner,
 )
 from core.project import ProjectContext
 from core.htaccess import get_missing_routes
+from core.version import APP_VERSION
 
 
 @dataclass
@@ -36,6 +39,7 @@ class PipelineStats:
     downloaded_remote_assets: int = 0
     forms_found: int = 0
     forms_hooked: int = 0
+    formatted_html_files: int = 0
     exec_time: float = 0.0
 
     @property
@@ -64,7 +68,7 @@ class PipelineStats:
 
 
 class DetildaPipeline:
-    def __init__(self, version: str = "v5.0 refactored") -> None:
+    def __init__(self, version: str = APP_VERSION) -> None:
         self.version = version
 
     def run(self, archive_path: Path, email: str) -> PipelineStats:
@@ -93,6 +97,9 @@ class DetildaPipeline:
             stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
             stats.warnings += asset_result.stats.warnings
             report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
+
+            with logger.module_scope("page404"):
+                page404.update_404_page(context.project_root)
 
             with logger.module_scope("cleaners"):
                 clean_result = cleaners.clean_project_files(context, context.rename_map)
@@ -141,15 +148,30 @@ class DetildaPipeline:
             stats.forms_hooked = forms_check.forms_hooked
             stats.warnings += forms_check.warnings
 
+            with logger.module_scope("html_prettify"):
+                html_prettify.run(context, stats=stats)
+
+            with logger.module_scope("checker"):
+                link_check = checker.check_links(context.project_root, context.config_loader)
+            stats.broken_links += link_check.broken
+            stats.warnings += link_check.broken
+
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
                 report.generate_final_report(
                     project_root=context.project_root,
+                    cleaned_count=stats.cleaned_files,
                     renamed_count=stats.renamed_assets,
+                    formatted_html_files=stats.formatted_html_files,
                     warnings=stats.warnings,
+                    errors=stats.errors,
                     broken_links_fixed=stats.fixed_links,
                     broken_links_left=stats.broken_links,
                     broken_htaccess_routes=stats.broken_htaccess_routes,
+                    downloaded_remote_assets=stats.downloaded_remote_assets,
+                    ssl_bypass_downloads=stats.ssl_bypassed_downloads,
+                    forms_found=stats.forms_found,
+                    forms_hooked=stats.forms_hooked,
                     missing_htaccess_routes=[
                         (item.alias, item.target, item.action, item.replacement)
                         for item in get_missing_routes()
@@ -166,14 +188,13 @@ class DetildaPipeline:
 
 
     def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
-        derived_warnings = stats.broken_links + stats.broken_htaccess_routes
-        stats.warnings = max(stats.warnings, derived_warnings)
-
         logger.info("======================================")
-        logger.info(f"🎯  Detilda {self.version} — обработка завершена")
+        status_message = self._status_message(stats)
+        logger.info(f"🎯  Detilda {self.version} — {status_message}")
         logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
         logger.info(f"🗑 Удалено ассетов: {stats.removed_assets}")
         logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
+        logger.info(f"🧼 Отформатировано HTML-файлов: {stats.formatted_html_files}")
         logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded_remote_assets}")
         logger.info(f"🔐 SSL bypass downloads: {stats.ssl_bypassed_downloads}")
         logger.info(f"🔗 Исправлено ссылок: {stats.fixed_links}")
@@ -185,24 +206,32 @@ class DetildaPipeline:
         logger.info(f"⛔ Ошибок: {stats.errors}")
         logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
 
-        logger.info("⚠️ Предупреждения (детализация):")
-        if stats.broken_links > 0:
-            logger.warn(f"  • Найдены битые внутренние ссылки: {stats.broken_links}")
-        if stats.broken_htaccess_routes > 0:
-            logger.warn(f"  • Найдены битые htaccess-маршруты: {stats.broken_htaccess_routes}")
-        if stats.warnings == 0:
-            logger.info("  • Нет")
-
-        logger.info("⛔ Ошибки (детализация):")
-        if stats.errors > 0:
-            logger.err(f"  • Зафиксировано ошибок: {stats.errors}")
-        else:
-            logger.info("  • Нет")
-
         if stats.errors > 0:
             logger.err(f"❌ Detilda {self.version} — завершено с ошибками")
         elif stats.warnings > 0:
             logger.warn(f"⚠️ Detilda {self.version} — завершено с предупреждениями")
         else:
             logger.ok(f"✅ Detilda {self.version} — завершено успешно")
+
+        critical_findings: list[str] = []
+        if stats.broken_htaccess_routes > 0:
+            critical_findings.append(
+                f"Broken htaccess routes: {stats.broken_htaccess_routes}"
+            )
+        if stats.ssl_bypassed_downloads > 0:
+            critical_findings.append(
+                f"SSL bypass used for downloads: {stats.ssl_bypassed_downloads}"
+            )
+        if critical_findings:
+            logger.warn("CRITICAL FINDINGS:")
+            for idx, finding in enumerate(critical_findings, start=1):
+                logger.warn(f"{idx}. {finding}")
         logger.info("======================================")
+
+    @staticmethod
+    def _status_message(stats: PipelineStats) -> str:
+        if stats.errors > 0:
+            return "завершено с ошибками"
+        if stats.warnings > 0:
+            return "завершено с предупреждениями"
+        return "завершено успешно"

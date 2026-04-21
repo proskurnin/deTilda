@@ -13,7 +13,7 @@ Usage example::
 
     from core.module_versions import register_module_version
 
-    register_module_version(__name__, "v4.6 Stable", "Refined form handling")
+    register_module_version(__name__, "v4.7 Stable", "Refined form handling")
 
 Keeping the registration alongside the code change encourages contributors to
 update the version when they touch the module.
@@ -99,4 +99,3 @@ def module_versions_as_dict() -> Dict[str, Dict[str, List[str]]]:
         }
         for info in iter_module_versions()
     }
-
