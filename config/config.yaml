@@ -139,6 +139,9 @@ service_files:
   html_inject_options:
     inject_handler_script: "form-handler.js"
     inject_after_marker: "</body>"
+    inject_head_scripts:
+      - "ga.js"
+    inject_head_marker: "</head>"
   checker_options:
     allow_inline_base64_error: false
     extensions_to_check:
@@ -172,3 +175,5 @@ service_files:
         originals:
           - "images/tildafavicon.ico"
           - "tildafavicon.ico"
+      - source: "ga.js"
+        destination: "js/ga.js"
