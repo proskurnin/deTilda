@@ -8,7 +8,16 @@ from typing import Iterator
 from core import logger, utils
 from core.config_loader import ConfigLoader
 
-__all__ = ["remove_disallowed_scripts"]
+__all__ = ["can_remove_tilda_form_scripts", "remove_disallowed_scripts"]
+
+
+def can_remove_tilda_form_scripts(project_root: Path) -> bool:
+    """Проверяет, созданы ли пользовательские обработчики форм."""
+
+    project_root = Path(project_root)
+    send_email_php = project_root / "send_email.php"
+    form_handler_js = project_root / "js" / "form-handler.js"
+    return send_email_php.exists() and form_handler_js.exists()
 
 
 def _collect_script_rules(loader: ConfigLoader) -> tuple[list[str], list[re.Pattern[str]]]:
@@ -238,4 +247,3 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
         logger.info("🧹 Скрипты для удаления не найдены.")
 
     return removed_tags
-

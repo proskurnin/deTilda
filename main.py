@@ -108,18 +108,35 @@ def _process_archive(
 
         # Шаг 8. Удаляем запрещённые/нежелательные скрипты из HTML-файлов.
         with logger.module_scope("script_cleaner"):
-            script_cleaner.remove_disallowed_scripts(project_root, loader)
+            if script_cleaner.can_remove_tilda_form_scripts(project_root):
+                logger.info(
+                    "[script_cleaner] Пользовательский обработчик форм найден, "
+                    "удаляем Tilda form/events/fallback"
+                )
+                script_cleaner.remove_disallowed_scripts(project_root, loader)
+            else:
+                logger.error(
+                    "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
+                    "удаление Tilda-скриптов отменено"
+                )
+                return
 
-        # Шаг 9. Финальная проверка всех ссылок — выявляем оставшиеся битые.
+        # Шаг 9. Пост-проверка форм после чистки:
+        # убеждаемся, что обработчик формы не был потерян.
+        with logger.module_scope("forms_check"):
+            forms_check = checker.check_forms_integration(project_root)
+
+        # Шаг 10. Финальная проверка всех ссылок — выявляем оставшиеся битые.
         with logger.module_scope("checker"):
             link_check = checker.check_links(project_root, loader)
 
+        warnings = link_check.broken + forms_check.warnings
         exec_time = _now() - start
         with logger.module_scope("report"):
             report.generate_final_report(
                 project_root=project_root,
                 renamed_count=asset_result.stats.renamed,
-                warnings=link_check.broken,
+                warnings=warnings,
                 broken_links_fixed=fixed_links,
                 broken_links_left=broken_links + link_check.broken,
                 exec_time=exec_time,
@@ -132,7 +149,7 @@ def _process_archive(
         logger.info(
             f"🔗 Исправлено ссылок: {fixed_links} / Осталось битых: {broken_links + link_check.broken}"
         )
-        logger.info(f"⚠️ Предупреждений: {link_check.broken}")
+        logger.info(f"⚠️ Предупреждений: {warnings}")
         logger.info(f"🕓 Время выполнения: {get_elapsed_time(start)}")
         logger.info("======================================")
         logger.ok(f"🎯 Detilda {version} — завершено успешно.")

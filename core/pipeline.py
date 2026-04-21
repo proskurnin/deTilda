@@ -6,7 +6,18 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from core import assets, cleaners, forms, fonts_localizer, inject, logger, refs, report, script_cleaner
+from core import (
+    assets,
+    checker,
+    cleaners,
+    forms,
+    fonts_localizer,
+    inject,
+    logger,
+    refs,
+    report,
+    script_cleaner,
+)
 from core.project import ProjectContext
 
 
@@ -78,6 +89,8 @@ class DetildaPipeline:
             stats.renamed_assets = asset_result.stats.renamed
             stats.removed_assets = asset_result.stats.removed
             stats.downloaded_remote_assets = asset_result.stats.downloaded
+            stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
+            stats.warnings += asset_result.stats.warnings
             report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
 
             with logger.module_scope("cleaners"):
@@ -97,7 +110,7 @@ class DetildaPipeline:
 
             with logger.module_scope("refs"):
                 fixed_links, broken_links = refs.update_all_refs_in_project(
-                    context.project_root, context.rename_map
+                    context.project_root, context.rename_map, stats=stats
                 )
             stats.fixed_links = fixed_links
             stats.broken_links = broken_links
@@ -106,9 +119,26 @@ class DetildaPipeline:
             )
 
             with logger.module_scope("script_cleaner"):
-                script_cleaner.remove_disallowed_scripts(
-                    context.project_root, context.config_loader
-                )
+                if script_cleaner.can_remove_tilda_form_scripts(context.project_root):
+                    logger.info(
+                        "[script_cleaner] Пользовательский обработчик форм найден, "
+                        "удаляем Tilda form/events/fallback"
+                    )
+                    script_cleaner.remove_disallowed_scripts(
+                        context.project_root, context.config_loader
+                    )
+                else:
+                    logger.error(
+                        "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
+                        "удаление Tilda-скриптов отменено"
+                    )
+                    stats.errors += 1
+
+            with logger.module_scope("forms_check"):
+                forms_check = checker.check_forms_integration(context.project_root)
+            stats.forms_found = forms_check.forms_found
+            stats.forms_hooked = forms_check.forms_hooked
+            stats.warnings += forms_check.warnings
 
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
@@ -121,55 +151,53 @@ class DetildaPipeline:
                     exec_time=stats.exec_time,
                 )
 
-            logger.info("======================================")
-            logger.info(f"🎯  Detilda {self.version} — обработка завершена")
-            logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
-            logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
-            logger.info(
-                f"🔗 Исправлено ссылок: {stats.fixed_links} / Осталось битых: {stats.broken_links}"
-            )
-            logger.info(f"⚠️ Предупреждений: {stats.warnings}")
-            self._print_critical_findings(stats)
-            logger.info(f"🕓 Время выполнения: {stats.exec_time:.2f} сек")
-            logger.info("======================================")
-            logger.ok(f"🎯 Detilda {self.version} — завершено успешно.")
+
+            self._print_final_summary(stats, stats.exec_time)
 
             return stats
         finally:
             logger.close()
 
-    @staticmethod
-    def _count_forms(project_root: Path) -> int:
-        """Count all HTML form tags in project files."""
 
-        form_tag_pattern = re.compile(r"<form\b", re.IGNORECASE)
-        total = 0
+    def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
+        derived_warnings = stats.broken_links + stats.broken_htaccess_routes
+        stats.warnings = max(stats.warnings, derived_warnings)
 
-        for html_path in Path(project_root).rglob("*.html"):
-            try:
-                content = html_path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            total += len(form_tag_pattern.findall(content))
+        logger.info("======================================")
+        logger.info(f"🎯  Detilda {self.version} — обработка завершена")
+        logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
+        logger.info(f"🗑 Удалено ассетов: {stats.removed_assets}")
+        logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
+        logger.info(f"🌐 Загружено удалённых ассетов: {stats.downloaded_remote_assets}")
+        logger.info(f"🔐 SSL bypass downloads: {stats.ssl_bypassed_downloads}")
+        logger.info(f"🔗 Исправлено ссылок: {stats.fixed_links}")
+        logger.info(f"❌ Битых внутренних ссылок: {stats.broken_links}")
+        logger.info(f"❌ Битых htaccess-маршрутов: {stats.broken_htaccess_routes}")
+        logger.info(f"📝 Форм найдено: {stats.forms_found}")
+        logger.info(f"🧩 Форм подключено к handler: {stats.forms_hooked}")
+        logger.info(f"⚠️ Предупреждений: {stats.warnings}")
+        logger.info(f"⛔ Ошибок: {stats.errors}")
+        logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
 
-        return total
-
-    @staticmethod
-    def _print_critical_findings(stats: PipelineStats) -> None:
-        findings: list[str] = []
-
+        logger.info("⚠️ Предупреждения (детализация):")
+        if stats.broken_links > 0:
+            logger.warn(f"  • Найдены битые внутренние ссылки: {stats.broken_links}")
         if stats.broken_htaccess_routes > 0:
-            findings.append(f"Broken htaccess routes: {stats.broken_htaccess_routes}")
+            logger.warn(f"  • Найдены битые htaccess-маршруты: {stats.broken_htaccess_routes}")
+        if stats.warnings == 0:
+            logger.info("  • Нет")
 
-        if stats.ssl_bypassed_downloads > 0:
-            findings.append(f"SSL bypass used for downloads: {stats.ssl_bypassed_downloads}")
+        logger.info("⛔ Ошибки (детализация):")
+        if stats.errors > 0:
+            logger.err(f"  • Зафиксировано ошибок: {stats.errors}")
+        else:
+            logger.info("  • Нет")
 
-        if stats.forms_found != stats.forms_hooked:
-            findings.append(
-                f"Forms hooked incorrectly: found {stats.forms_found}, hooked {stats.forms_hooked}"
-            )
+        if stats.errors > 0:
+            logger.err(f"❌ Detilda {self.version} — завершено с ошибками")
+        elif stats.warnings > 0:
+            logger.warn(f"⚠️ Detilda {self.version} — завершено с предупреждениями")
+        else:
+            logger.ok(f"✅ Detilda {self.version} — завершено успешно")
+        logger.info("======================================")
 
-        if findings:
-            logger.warn("CRITICAL FINDINGS:")
-            for i, item in enumerate(findings, start=1):
-                logger.warn(f"{i}. {item}")
