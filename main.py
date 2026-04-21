@@ -86,7 +86,7 @@ def _process_archive(
             broken_links=0,
         )
 
-        # Шаг 4. Генерируем send_email.php с указанным email получателя.
+        # Шаг 4. Копируем готовый send_email.php и JS-обработчик форм.
         with logger.module_scope("forms"):
             forms.generate_send_email_php(project_root, email)
 
@@ -162,7 +162,8 @@ def main() -> None:
         print("❌ Имя архива не указано — завершение работы.")
         return
 
-    email = _prompt("Введите e-mail для отправки формы (по умолчанию r@prororo.com): ").strip() or "r@prororo.com"
+    email = str(manifest.get("default_email", "r@prororo.com")).strip() or "r@prororo.com"
+    print(f"E-mail для форм: {email}")
 
     for index, archive_name in enumerate(archive_names, start=1):
         if len(archive_names) > 1:
