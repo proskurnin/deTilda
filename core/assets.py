@@ -28,6 +28,8 @@ class AssetStats:
     renamed: int = 0
     removed: int = 0
     downloaded: int = 0
+    warnings: int = 0
+    ssl_bypassed_downloads: int = 0
 
 
 @dataclass
@@ -132,7 +134,30 @@ def _get_unverified_context() -> ssl.SSLContext:
     return _SSL_FALLBACK_CONTEXT
 
 
-def _fetch_url(url: str) -> bytes:
+def _fetch_with_ssl_fallback(request: urllib.request.Request, timeout: int) -> tuple[bytes, bool]:
+    try:
+        with contextlib.closing(
+            urllib.request.urlopen(request, timeout=timeout)  # type: ignore[arg-type]
+        ) as response:
+            return response.read(), False
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        if not isinstance(reason, ssl.SSLError):
+            raise
+    except ssl.SSLError:
+        pass
+
+    with contextlib.closing(
+        urllib.request.urlopen(  # type: ignore[arg-type]
+            request,
+            timeout=timeout,
+            context=_get_unverified_context(),
+        )
+    ) as response:
+        return response.read(), True
+
+
+def _fetch_url(url: str) -> tuple[bytes, bool]:
     normalized = url
     if url.startswith("//"):
         normalized = f"https:{url}"
@@ -143,51 +168,25 @@ def _fetch_url(url: str) -> bytes:
             "Accept": "*/*",
         },
     )
-    try:
-        with contextlib.closing(
-            urllib.request.urlopen(request, timeout=15)  # type: ignore[arg-type]
-        ) as response:
-            return response.read()
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", None)
-        if isinstance(reason, ssl.SSLError):
-            logger.warn(
-                f"[assets] SSL-проверка не удалась для {normalized}, повтор с отключённой проверкой"
-            )
-            with contextlib.closing(
-                urllib.request.urlopen(  # type: ignore[arg-type]
-                    request,
-                    timeout=15,
-                    context=_get_unverified_context(),
-                )
-            ) as response:
-                return response.read()
-        raise
-    except ssl.SSLError:
+    payload, used_insecure_retry = _fetch_with_ssl_fallback(request, timeout=15)
+    if used_insecure_retry:
         logger.warn(
             f"[assets] SSL-проверка не удалась для {normalized}, повтор с отключённой проверкой"
         )
-        with contextlib.closing(
-            urllib.request.urlopen(  # type: ignore[arg-type]
-                request,
-                timeout=15,
-                context=_get_unverified_context(),
-            )
-        ) as response:
-            return response.read()
+    return payload, used_insecure_retry
 
 
-def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
+def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[int, int, int]:
     service_cfg = loader.service_files()
     remote_cfg = service_cfg.get("remote_assets", {})
     rules = remote_cfg.get("rules", [])
     if not rules:
-        return 0
+        return 0, 0, 0
 
     patterns_cfg = loader.patterns()
     link_patterns = patterns_cfg.get("links", [])
     if not link_patterns:
-        return 0
+        return 0, 0, 0
 
     scan_exts = remote_cfg.get("scan_extensions") or []
     if scan_exts:
@@ -216,6 +215,8 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
             urls.add(link)
 
     downloaded = 0
+    warnings = 0
+    ssl_bypassed_downloads = 0
     for url in sorted(urls):
         target = _resolve_download_target(url, rules)
         if target is None:
@@ -227,13 +228,17 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
         if destination_path.exists():
             continue
         try:
-            payload = _fetch_url(url)
+            payload, used_insecure_retry = _fetch_url(url)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             logger.warn(f"[assets] Не удалось скачать {url}: {exc}")
             continue
         except Exception as exc:  # pragma: no cover - сетевые сбои
             logger.warn(f"[assets] Неожиданная ошибка скачивания {url}: {exc}")
             continue
+
+        if used_insecure_retry:
+            warnings += 1
+            ssl_bypassed_downloads += 1
 
         try:
             destination_path.write_bytes(payload)
@@ -246,7 +251,7 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> int:
             f"🌐 Загружен ресурс: {url} → {utils.relpath(destination_path, project_root)}"
         )
 
-    return downloaded
+    return downloaded, warnings, ssl_bypassed_downloads
 
 
 def _normalize_case_enabled(service_cfg: Dict[str, object]) -> tuple[bool, set[str]]:
@@ -474,7 +479,9 @@ def rename_and_cleanup_assets(
     images_cfg = loader.images()
     service_cfg = loader.service_files()
 
-    downloaded = _download_remote_assets(project_root, loader)
+    downloaded, download_warnings, ssl_bypassed_downloads = _download_remote_assets(
+        project_root, loader
+    )
 
     regex_pattern = (
         patterns_cfg.get("assets", {}).get("til_to_ai_filename")
@@ -542,7 +549,11 @@ def rename_and_cleanup_assets(
         return True
 
     rename_map: Dict[str, str] = {}
-    stats = AssetStats(downloaded=downloaded)
+    stats = AssetStats(
+        downloaded=downloaded,
+        warnings=download_warnings,
+        ssl_bypassed_downloads=ssl_bypassed_downloads,
+    )
 
     for path in sorted(project_root.rglob("*")):
         if not path.is_file():
