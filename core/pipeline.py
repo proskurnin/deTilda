@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 from core import (
     assets,
@@ -100,6 +101,7 @@ class DetildaPipeline:
 
             with logger.module_scope("forms"):
                 forms.generate_send_email_php(context, email)
+            stats.forms_found = self._count_forms(context.project_root)
             with logger.module_scope("inject"):
                 stats.forms_hooked = inject.inject_form_scripts(context)
 
@@ -149,11 +151,13 @@ class DetildaPipeline:
                     exec_time=stats.exec_time,
                 )
 
+
             self._print_final_summary(stats, stats.exec_time)
 
             return stats
         finally:
             logger.close()
+
 
     def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
         derived_warnings = stats.broken_links + stats.broken_htaccess_routes
@@ -196,3 +200,4 @@ class DetildaPipeline:
         else:
             logger.ok(f"✅ Detilda {self.version} — завершено успешно")
         logger.info("======================================")
+
