@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
 
-__all__ = ["RouteInfo", "collect_htaccess_routes", "collect_routes", "get_route_info"]
+__all__ = [
+    "MissingRouteInfo",
+    "RouteInfo",
+    "collect_htaccess_routes",
+    "collect_routes",
+    "get_missing_routes",
+    "get_route_info",
+]
 
 
 @dataclass(frozen=True)
@@ -21,7 +29,18 @@ class RouteInfo:
     path: Optional[Path] = None
 
 
+@dataclass(frozen=True)
+class MissingRouteInfo:
+    """Information about routes that pointed to non-existent targets."""
+
+    alias: str
+    target: str
+    action: str
+    replacement: Optional[str] = None
+
+
 _routes_info: Dict[str, RouteInfo] = {}
+_missing_routes: List[MissingRouteInfo] = []
 
 
 def _load_patterns(loader: ConfigLoader) -> tuple[re.Pattern[str], re.Pattern[str]]:
@@ -95,6 +114,38 @@ def fix_missing_htaccess_route(
     return fallback_target
 
 
+def _create_route_stub(
+    alias: str,
+    target: str,
+    project_root: Path,
+    fallback_target: str,
+) -> bool:
+    target_candidate = _resolve_target_path(target, project_root)
+    if target_candidate is None:
+        logger.warn(
+            f"[htaccess] Маршрут {alias}: невозможно создать заглушку для динамической цели {target}"
+        )
+        return False
+    fallback_candidate = _resolve_target_path(fallback_target, project_root)
+    if fallback_candidate is None or not fallback_candidate.exists():
+        logger.warn(
+            f"[htaccess] Маршрут {alias}: не найден шаблон заглушки {fallback_target}"
+        )
+        return False
+    try:
+        target_candidate.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(fallback_candidate, target_candidate)
+        logger.warn(
+            f"[htaccess] Маршрут {alias}: создана заглушка {target} из {fallback_target}"
+        )
+        return True
+    except Exception as exc:
+        logger.warn(
+            f"[htaccess] Маршрут {alias}: не удалось создать заглушку {target}: {exc}"
+        )
+        return False
+
+
 def _store_route(
     alias: str,
     target: str,
@@ -103,6 +154,8 @@ def _store_route(
     *,
     soft_fallback_enabled: bool = False,
     fallback_target: str = "404.html",
+    auto_stub_enabled: bool = False,
+    stats: Any | None = None,
 ) -> None:
     alias = _normalize_alias(alias)
     target = target.strip()
@@ -117,6 +170,21 @@ def _store_route(
 
     logger.err(f"[htaccess] Битый маршрут: {alias} → {target} (файл отсутствует)")
 
+    if auto_stub_enabled and _create_route_stub(alias, target, project_root, fallback_target):
+        stub_candidate = _resolve_target_path(target, project_root)
+        routes[alias] = target
+        _routes_info[alias] = RouteInfo(target=target, exists=True, path=stub_candidate)
+        _missing_routes.append(
+            MissingRouteInfo(
+                alias=alias,
+                target=target,
+                action="stub_created",
+                replacement=target,
+            )
+        )
+        _increment_stat(stats, "broken_htaccess_routes")
+        return
+
     if soft_fallback_enabled:
         fallback_candidate = _resolve_target_path(fallback_target, project_root)
         if fallback_candidate and fallback_candidate.exists():
@@ -125,10 +193,24 @@ def _store_route(
             _routes_info[alias] = RouteInfo(
                 target=fixed_target, exists=True, path=fallback_candidate
             )
+            _missing_routes.append(
+                MissingRouteInfo(
+                    alias=alias,
+                    target=target,
+                    action="fallback_redirect",
+                    replacement=fixed_target,
+                )
+            )
+            _increment_stat(stats, "broken_htaccess_routes")
             return
 
     routes[alias] = target
     _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
+    _missing_routes.append(
+        MissingRouteInfo(alias=alias, target=target, action="unresolved", replacement=None)
+    )
+    _increment_stat(stats, "broken_htaccess_routes")
+    _increment_stat(stats, "errors")
 
 
 def _increment_stat(stats: Any | None, field: str) -> None:
@@ -167,8 +249,6 @@ def collect_htaccess_routes(
             logger.debug(f"[htaccess] {route} → {target} (файл есть)")
         else:
             logger.error(f"[htaccess] Битый маршрут: {route} → {target} (файл отсутствует)")
-            _increment_stat(stats, "broken_htaccess_routes")
-            _increment_stat(stats, "errors")
 
     logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")
     return routes
@@ -181,9 +261,11 @@ def collect_routes(
 ) -> Dict[str, str]:
     routes: Dict[str, str] = {}
     _routes_info.clear()
+    _missing_routes.clear()
     rewrite_re, redirect_re = _load_patterns(loader)
     patterns_cfg = loader.patterns().get("htaccess_patterns", {})
     soft_fallback_enabled = bool(patterns_cfg.get("soft_fallback_to_404", False))
+    auto_stub_enabled = bool(patterns_cfg.get("auto_stub_missing_routes", False))
     fallback_target = str(patterns_cfg.get("fallback_target", "404.html"))
 
     for file_path in _iter_htaccess_files(project_root):
@@ -204,6 +286,8 @@ def collect_routes(
                 routes,
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
+                auto_stub_enabled=auto_stub_enabled,
+                stats=stats,
             )
 
         for match in redirect_re.finditer(text):
@@ -215,6 +299,8 @@ def collect_routes(
                 routes,
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
+                auto_stub_enabled=auto_stub_enabled,
+                stats=stats,
             )
 
         index_match = re.search(r"DirectoryIndex\s+([^\s]+\.html)", text, re.IGNORECASE)
@@ -226,6 +312,8 @@ def collect_routes(
                 routes,
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
+                auto_stub_enabled=auto_stub_enabled,
+                stats=stats,
             )
 
     if routes:
@@ -239,3 +327,9 @@ def get_route_info(alias: str) -> Optional[RouteInfo]:
     """Return stored information about a specific alias from ``.htaccess``."""
 
     return _routes_info.get(_normalize_alias(alias))
+
+
+def get_missing_routes() -> list[MissingRouteInfo]:
+    """Return collected broken/missing route entries from the latest scan."""
+
+    return list(_missing_routes)

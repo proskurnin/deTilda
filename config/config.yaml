@@ -49,6 +49,7 @@ patterns:
     rewrite_rule: "(?im)^[ \\t]*RewriteRule[ \\t]+\\^/?([a-z0-9\\-\\_\\/]+)\\??\\$[ \\t]+([^\\s\\[]+)"
     redirect: "(?im)^[ \\t]*Redirect(?:Permanent|[ \\t]+3\\d{2})?[ \\t]+(/[^\\s]+)[ \\t]+([^\\s]+)"
     soft_fallback_to_404: false
+    auto_stub_missing_routes: true
     fallback_target: "404.html"
   assets:
     til_to_ai_filename: "\\btil"

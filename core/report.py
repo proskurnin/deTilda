@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Final
+from typing import Final, Iterable, Tuple
 
 from core import logger, utils
 
@@ -77,6 +77,8 @@ def generate_final_report(
     warnings: int,
     broken_links_fixed: int,
     broken_links_left: int,
+    broken_htaccess_routes: int,
+    missing_htaccess_routes: Iterable[Tuple[str, str, str, str | None]],
     exec_time: float,
 ) -> None:
     if not _reports_enabled():
@@ -94,12 +96,22 @@ def generate_final_report(
         f"🖼 Переименовано ассетов: {renamed_count}\n"
         f"🔗 Исправлено ссылок: {broken_links_fixed}\n"
         f"🚫 Осталось битых ссылок: {broken_links_left}\n"
+        f"❌ Битых htaccess-маршрутов: {broken_htaccess_routes}\n"
         f"⚠️ Предупреждений: {warnings}\n"
         f"🕓 Время выполнения: {exec_time:.2f} сек\n"
         f"{'=' * 70}\n"
         f"{status}\n"
         f"{'=' * 70}\n"
     )
+    missing_lines = list(missing_htaccess_routes)
+    if missing_lines:
+        text += "Потерянные htaccess-маршруты:\n"
+        for alias, target, action, replacement in missing_lines:
+            if replacement:
+                text += f"  - {alias} -> {target} [{action}: {replacement}]\n"
+            else:
+                text += f"  - {alias} -> {target} [{action}]\n"
+        text += f"{'=' * 70}\n"
     try:
         utils.safe_write(report_path, text)
         logger.ok(f"📊 Финальный отчёт сформирован: {report_path.name}")
