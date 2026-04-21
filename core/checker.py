@@ -11,13 +11,20 @@ from core import logger, utils
 from core.config_loader import ConfigLoader
 from core.htaccess import collect_routes, get_route_info
 
-__all__ = ["LinkCheckerResult", "check_links"]
+__all__ = ["FormIntegrationResult", "LinkCheckerResult", "check_forms_integration", "check_links"]
 
 
 @dataclass
 class LinkCheckerResult:
     checked: int = 0
     broken: int = 0
+
+
+@dataclass
+class FormIntegrationResult:
+    forms_found: int = 0
+    forms_hooked: int = 0
+    warnings: int = 0
 
 
 def _iter_links(text: str, patterns: Iterable[str]) -> Iterable[str]:
@@ -136,4 +143,41 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     logger.info(
         f"🔍 Проверка ссылок завершена. Проверено: {result.checked}, битых: {result.broken}"
     )
+    return result
+
+
+def check_forms_integration(project_root: Path) -> FormIntegrationResult:
+    """Verify that every HTML form has the form handler script on the same page."""
+
+    project_root = Path(project_root)
+    html_files = list(project_root.rglob("*.html"))
+    files_dir = project_root / "files"
+    body_files = list(files_dir.glob("*body.html")) if files_dir.exists() else []
+
+    forms_found = 0
+    forms_hooked = 0
+    form_pattern = re.compile(r"<form\b", re.IGNORECASE)
+    handler_pattern = re.compile(r"form-handler\.js", re.IGNORECASE)
+
+    for file_path in html_files + body_files:
+        try:
+            content = utils.safe_read(file_path)
+        except Exception:
+            continue
+
+        file_forms = len(form_pattern.findall(content))
+        if file_forms == 0:
+            continue
+        forms_found += file_forms
+        if handler_pattern.search(content):
+            forms_hooked += file_forms
+
+    result = FormIntegrationResult(forms_found=forms_found, forms_hooked=forms_hooked)
+    if forms_found != forms_hooked:
+        result.warnings = 1
+        logger.warn(
+            f"[forms-check] Найдено форм: {forms_found}, подключено к handler: {forms_hooked}"
+        )
+    else:
+        logger.info(f"[forms-check] Формы проверены: {forms_found}, все подключены корректно")
     return result
