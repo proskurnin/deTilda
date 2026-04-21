@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """CLI entry point orchestrating the Detilda pipeline."""
 # TODO: [26.10.2025] Разобраться с регистром урлов. При проверке относительных урлов указанных в htaccess в нижнем регистре мы получаем ошибку если в коде регистр отличается. Пример href="/Job" в логе ⚠️ [checker] Битая ссылка в page24165416.html: /Job
+# TODO: [04.02.2026] Добавить единый универсальный send_email.php (брать из alliance-trd.com)
+# TODO: [04.02.2026]
 
 from __future__ import annotations
 
