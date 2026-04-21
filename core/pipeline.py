@@ -5,7 +5,18 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from core import assets, cleaners, forms, fonts_localizer, inject, logger, refs, report, script_cleaner
+from core import (
+    assets,
+    checker,
+    cleaners,
+    forms,
+    fonts_localizer,
+    inject,
+    logger,
+    refs,
+    report,
+    script_cleaner,
+)
 from core.project import ProjectContext
 
 
@@ -107,6 +118,12 @@ class DetildaPipeline:
                 script_cleaner.remove_disallowed_scripts(
                     context.project_root, context.config_loader
                 )
+
+            with logger.module_scope("forms_check"):
+                forms_check = checker.check_forms_integration(context.project_root)
+            stats.forms_found = forms_check.forms_found
+            stats.forms_hooked = forms_check.forms_hooked
+            stats.warnings += forms_check.warnings
 
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
