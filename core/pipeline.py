@@ -71,7 +71,7 @@ class DetildaPipeline:
     def __init__(self, version: str = APP_VERSION) -> None:
         self.version = version
 
-    def run(self, archive_path: Path, email: str) -> PipelineStats:
+    def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
 
         project_root = refs.unpack_archive(archive_path)
@@ -85,7 +85,6 @@ class DetildaPipeline:
             logger.info(f"=== Detilda {self.version} ===")
             logger.info(f"Рабочая папка: {archive_path.parent.resolve()}")
             logger.info(f"Дата запуска: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"→ Используется адрес: {email}")
 
             stats = PipelineStats()
 
@@ -108,7 +107,7 @@ class DetildaPipeline:
             report.generate_intermediate_report(stats.renamed_assets, stats.cleaned_files, 0, 0)
 
             with logger.module_scope("forms"):
-                forms.generate_send_email_php(context, email)
+                forms.generate_send_email_php(context)
             stats.forms_found = self._count_forms(context.project_root)
             with logger.module_scope("inject"):
                 stats.forms_hooked = inject.inject_form_scripts(context)

@@ -41,7 +41,6 @@ def _prompt(prompt: str) -> str:
 def _process_archive(
     archive_name: str,
     workdir: Path,
-    email: str,
     version: str,
 ) -> None:
     archive_path = workdir / archive_name
@@ -90,7 +89,7 @@ def _process_archive(
 
         # Шаг 4. Копируем готовый send_email.php и JS-обработчик форм.
         with logger.module_scope("forms"):
-            forms.generate_send_email_php(project_root, email)
+            forms.generate_send_email_php(project_root)
 
         # Шаг 5. Встраиваем JS-скрипты форм в HTML-страницы проекта.
         with logger.module_scope("inject"):
@@ -197,15 +196,12 @@ def main() -> None:
         print("❌ Имя архива не указано — завершение работы.")
         return
 
-    email = str(manifest.get("default_email", "r@prororo.com")).strip() or "r@prororo.com"
-    print(f"E-mail для форм: {email}")
-
     for index, archive_name in enumerate(archive_names, start=1):
         if len(archive_names) > 1:
             print("======================================")
             print(f"▶️  {index}/{len(archive_names)}: обработка архива {archive_name}")
 
-        _process_archive(archive_name, workdir, email, version)
+        _process_archive(archive_name, workdir, version)
 
 
 if __name__ == "__main__":

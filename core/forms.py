@@ -263,8 +263,7 @@ def _extract_project_name(project_root: Path) -> str:
     return project_root.name
 
 
-def generate_send_email_php(project_root: Path | Any, email: str) -> Path:
-    _ = email
+def generate_send_email_php(project_root: Path | Any) -> Path:
     project_root = _resolve_project_root(project_root)
     target = project_root / "send_email.php"
     template_path = Path(__file__).resolve().parent.parent / "resources" / "send_email.php"
