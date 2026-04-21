@@ -1,14 +1,30 @@
-"""Lightweight access helpers for :mod:`config/config.yaml`."""
+"""Typed access helpers for :mod:`config/config.yaml`."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator
 
 import yaml
+from core.pydantic_compat import ValidationError
 
 from core import logger
+from core.schemas import AppConfig
 
 _DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _validate_config(data: Dict[str, Any]) -> AppConfig:
+    if hasattr(AppConfig, "model_validate"):
+        return AppConfig.model_validate(data)  # type: ignore[attr-defined]
+    return AppConfig.parse_obj(data)
+
+
+def _model_dump(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 
 
 class ConfigLoader:
@@ -16,9 +32,8 @@ class ConfigLoader:
 
     def __init__(self, base_dir: Path | None = None) -> None:
         self._base_dir = base_dir or _DEFAULT_BASE_DIR
-        self._cache: Dict[str, Any] | None = None
+        self._cache: AppConfig | None = None
 
-    # ------------------------------------------------------------------
     @property
     def base_dir(self) -> Path:
         return Path(self._base_dir)
@@ -27,40 +42,46 @@ class ConfigLoader:
     def config_path(self) -> Path:
         return Path(self._base_dir) / "config" / "config.yaml"
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> AppConfig:
         if self._cache is not None:
             return self._cache
+
         path = self.config_path
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             if not isinstance(data, dict):
                 raise ValueError("config.yaml должен содержать словарь")
+            config = _validate_config(data)
         except FileNotFoundError:
             logger.err(f"[config_loader] Не найден файл конфигурации: {path}")
-            data = {}
+            config = AppConfig()
+        except ValidationError as exc:
+            logger.err(f"[config_loader] Ошибка валидации {path}: {exc}")
+            config = AppConfig()
         except Exception as exc:  # pragma: no cover - defensive branch
             logger.err(f"[config_loader] Ошибка чтения {path}: {exc}")
-            data = {}
-        self._cache = data
-        return data
+            config = AppConfig()
+
+        self._cache = config
+        return config
+
+    @property
+    def config(self) -> AppConfig:
+        return self._load()
 
     def as_dict(self) -> Dict[str, Any]:
-        return dict(self._load())
+        return _model_dump(self.config)
 
-    # ------------------------------------------------------------------
     def patterns(self) -> Dict[str, Any]:
-        return dict(self._load().get("patterns", {}))
+        return _model_dump(self.config.patterns)
 
     def images(self) -> Dict[str, Any]:
-        return dict(self._load().get("images", {}))
+        return _model_dump(self.config.images)
 
     def service_files(self) -> Dict[str, Any]:
-        return dict(self._load().get("service_files", {}))
+        return _model_dump(self.config.service_files)
 
 
-# ----------------------------------------------------------------------------
-# Backwards compatible module level helpers
-# ----------------------------------------------------------------------------
 _loader = ConfigLoader()
 
 
@@ -95,4 +116,4 @@ def iter_section_list(section: Dict[str, Any], *keys: str) -> Iterator[str]:
         values = current
     else:
         values = []
-    return [value for value in values if isinstance(value, str)]
+    return iter([value for value in values if isinstance(value, str)])

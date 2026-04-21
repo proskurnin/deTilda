@@ -7,6 +7,7 @@ from typing import Dict
 
 from core import logger
 from core.config_loader import ConfigLoader
+from core.schemas import AppConfig
 
 
 def _detect_repository_root(project_root: Path) -> Path:
@@ -37,7 +38,8 @@ class ProjectContext:
         )
 
     @property
-    def config(self):
+    def config(self) -> AppConfig:
+        """Typed project config loaded from ``config/config.yaml``."""
         return self.config_loader.config
 
     def relative_to_root(self, path: Path) -> str:
