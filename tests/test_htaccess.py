@@ -93,3 +93,25 @@ def test_collect_routes_auto_stub_creates_missing_file(tmp_path: Path) -> None:
     assert len(missing) == 1
     assert missing[0].alias == "/broken"
     assert missing[0].action == "stub_created"
+
+
+def test_collect_routes_handles_regex_with_extra_groups(tmp_path: Path) -> None:
+    (tmp_path / ".htaccess").write_text(
+        "RewriteRule ^broken$ missing.html\n",
+        encoding="utf-8",
+    )
+
+    loader = _Loader(
+        {
+            "rewrite_rule": (
+                r"(?im)^[ \t]*RewriteRule[ \t]+\^/?(([a-z0-9\-_/]+))\??\$?[ \t]+([^ \t]+)"
+            ),
+            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        }
+    )
+    routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
+
+    assert routes["/broken"] == "missing.html"
+    info = get_route_info("/broken")
+    assert info is not None
+    assert info.target == "missing.html"
