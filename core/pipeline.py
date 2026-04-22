@@ -35,6 +35,8 @@ class PipelineStats:
     cleaned_files: int = 0
     fixed_links: int = 0
     broken_links: int = 0
+    htaccess_routes_initially_broken: int = 0
+    htaccess_routes_autofixed: int = 0
     broken_htaccess_routes: int = 0
     ssl_bypassed_downloads: int = 0
     warnings: int = 0
@@ -172,6 +174,7 @@ class DetildaPipeline:
 
             with logger.module_scope("checker"):
                 link_check = checker.check_links(context.project_root, context.config_loader)
+            stats.broken_htaccess_routes = self._count_unresolved_htaccess_routes()
             stats.broken_links += link_check.broken
             stats.warnings += link_check.broken
             stats.warnings += stats.broken_htaccess_routes
@@ -187,6 +190,8 @@ class DetildaPipeline:
                     errors=stats.errors,
                     broken_links_fixed=stats.fixed_links,
                     broken_links_left=stats.broken_links,
+                    htaccess_routes_initially_broken=stats.htaccess_routes_initially_broken,
+                    htaccess_routes_autofixed=stats.htaccess_routes_autofixed,
                     broken_htaccess_routes=stats.broken_htaccess_routes,
                     downloaded_remote_assets=stats.downloaded_remote_assets,
                     ssl_bypass_downloads=stats.ssl_bypassed_downloads,
@@ -234,6 +239,10 @@ class DetildaPipeline:
         logger.info(f"🔐 SSL bypass downloads: {stats.ssl_bypassed_downloads}")
         logger.info(f"🔗 Исправлено ссылок: {stats.fixed_links}")
         logger.info(f"❌ Битых внутренних ссылок: {stats.broken_links}")
+        logger.info(
+            f"❌ Битых htaccess-маршрутов найдено изначально: {stats.htaccess_routes_initially_broken}"
+        )
+        logger.info(f"🛠 Автоисправлено htaccess-маршрутов: {stats.htaccess_routes_autofixed}")
         logger.info(f"❌ Битых htaccess-маршрутов: {stats.broken_htaccess_routes}")
         logger.info(f"📝 Форм найдено: {stats.forms_found}")
         logger.info(f"🧩 Форм подключено к handler: {stats.forms_hooked}")
@@ -278,3 +287,7 @@ class DetildaPipeline:
         if stats.warnings > 0:
             return "завершено с предупреждениями"
         return "завершено успешно"
+
+    @staticmethod
+    def _count_unresolved_htaccess_routes() -> int:
+        return sum(1 for item in get_missing_routes() if item.action == "unresolved")

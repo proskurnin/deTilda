@@ -81,6 +81,8 @@ def generate_final_report(
     errors: int,
     broken_links_fixed: int,
     broken_links_left: int,
+    htaccess_routes_initially_broken: int,
+    htaccess_routes_autofixed: int,
     broken_htaccess_routes: int,
     downloaded_remote_assets: int,
     ssl_bypass_downloads: int,
@@ -113,6 +115,8 @@ def generate_final_report(
         f"🔐 SSL bypass downloads: {ssl_bypass_downloads}\n"
         f"🔗 Исправлено ссылок: {broken_links_fixed}\n"
         f"❌ Битых внутренних ссылок: {broken_links_left}\n"
+        f"❌ Битых htaccess-маршрутов найдено изначально: {htaccess_routes_initially_broken}\n"
+        f"🛠 Автоисправлено htaccess-маршрутов: {htaccess_routes_autofixed}\n"
         f"❌ Битых htaccess-маршрутов: {broken_htaccess_routes}\n"
         f"📝 Форм найдено: {forms_found}\n"
         f"🧩 Форм подключено к handler: {forms_hooked}\n"
