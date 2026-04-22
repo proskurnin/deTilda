@@ -1,9 +1,10 @@
-"""Utilities for making Tilda-exported images independent from Tilda lazy scripts."""
+"""Utilities for conservative image fixes in Tilda-exported HTML."""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from core import logger, utils
 
@@ -18,10 +19,12 @@ class ImageFixStats:
     unresolved_candidates: int = 0
 
 
-_TAG_RE = re.compile(r"<(?P<name>[a-zA-Z][a-zA-Z0-9:-]*)(?P<attrs>[^>]*)>", re.DOTALL)
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<(?P<name>[a-zA-Z][a-zA-Z0-9:-]*)(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
 _ATTR_RE = re.compile(
-    r"(?P<name>[a-zA-Z_:][a-zA-Z0-9_:\-\.]*)\s*=\s*(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
-    re.DOTALL,
+    r"(?P<name>[a-zA-Z_:][a-zA-Z0-9_:\-\.]*)\s*=\s*"
+    r"(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    re.IGNORECASE | re.DOTALL,
 )
 _BG_IMAGE_RE = re.compile(
     r"background-image\s*:\s*url\((?P<quote>[\"']?)(?P<url>[^\)\"']+)(?P=quote)\)",
@@ -31,39 +34,20 @@ _BG_IMAGE_RE = re.compile(
 _FULL_IMAGE_ATTRS = (
     "data-original",
     "data-img-zoom-url",
-    "data-lazy",
     "data-lazy-src",
-    "data-zoom-target",
-    "data-popup-img-url",
+    "data-content-cover-bg",
 )
 
+_PLACEHOLDER_RE = re.compile(r"(?:1x1|blank|empty|transparent|loader)\.(?:gif|png|svg)$", re.IGNORECASE)
 
-def _parse_attrs(attrs_chunk: str) -> tuple[dict[str, str], list[str]]:
+
+def _parse_attrs(attrs_chunk: str) -> dict[str, str]:
     attrs: dict[str, str] = {}
-    order: list[str] = []
     for match in _ATTR_RE.finditer(attrs_chunk):
-        name = match.group("name")
+        name = match.group("name").lower()
         value = match.group("value").strip()
         attrs[name] = value
-        if name not in order:
-            order.append(name)
-    return attrs, order
-
-
-def _build_tag(name: str, attrs: dict[str, str], order: list[str], self_closing: bool) -> str:
-    rendered: list[str] = []
-    for attr_name in order:
-        if attr_name not in attrs:
-            continue
-        rendered.append(f'{attr_name}="{attrs[attr_name]}"')
-    for attr_name, value in attrs.items():
-        if attr_name in order:
-            continue
-        rendered.append(f'{attr_name}="{value}"')
-    suffix = " />" if self_closing else ">"
-    if rendered:
-        return f"<{name} {' '.join(rendered)}{suffix}"
-    return f"<{name}{suffix}"
+    return attrs
 
 
 def _pick_full_image(attrs: dict[str, str], current: str) -> str:
@@ -72,6 +56,44 @@ def _pick_full_image(attrs: dict[str, str], current: str) -> str:
         if value:
             return value
     return current
+
+
+def _local_url_exists(project_root: Path, url: str) -> bool:
+    if not url:
+        return False
+    split = urlsplit(url)
+    if split.scheme or url.startswith("//"):
+        return True
+    candidate = split.path.strip()
+    if not candidate or candidate.startswith("data:"):
+        return True
+    normalized = candidate.lstrip("/")
+    return (project_root / normalized).exists()
+
+
+def _looks_like_placeholder(url: str) -> bool:
+    if not url:
+        return True
+    split = urlsplit(url)
+    name = Path(split.path).name
+    return bool(_PLACEHOLDER_RE.search(name))
+
+
+def _replace_attr_value(tag: str, attr_name: str, new_value: str) -> tuple[str, bool]:
+    pattern = re.compile(
+        rf'(\b{re.escape(attr_name)}\s*=\s*)(?P<quote>["\'])(?P<value>.*?)(?P=quote)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    match = pattern.search(tag)
+    if not match:
+        return tag, False
+    current = match.group("value").strip()
+    if current == new_value:
+        return tag, False
+    quote = match.group("quote")
+    start, end = match.span("value")
+    updated = f"{tag[:start]}{new_value}{tag[end:]}"
+    return updated, True
 
 
 def _update_background_style(style: str, full_image: str) -> tuple[str, bool]:
@@ -91,63 +113,63 @@ def _update_background_style(style: str, full_image: str) -> tuple[str, bool]:
     return updated, True
 
 
-def _transform_html_images(text: str) -> tuple[str, int, int, int]:
+def _transform_html_images(text: str, project_root: Path) -> tuple[str, int, int, int]:
     img_fixed = 0
     bg_fixed = 0
     unresolved = 0
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace_img(match: re.Match[str]) -> str:
         nonlocal img_fixed, bg_fixed, unresolved
-        name = match.group("name")
-        attrs_chunk = match.group("attrs")
         original_tag = match.group(0)
-        lower_name = name.lower()
-
-        if lower_name.startswith("/"):
-            return original_tag
-
-        attrs, order = _parse_attrs(attrs_chunk)
+        attrs = _parse_attrs(original_tag)
         if not attrs:
             return original_tag
 
-        changed = False
-        full_image = _pick_full_image(attrs, attrs.get("src", "").strip())
-
-        if lower_name == "img":
-            src = attrs.get("src", "").strip()
-            if full_image and src != full_image:
-                attrs["src"] = full_image
-                changed = True
-                img_fixed += 1
-            if full_image and attrs.get("srcset", "").strip() and full_image not in attrs["srcset"]:
-                attrs["srcset"] = f"{full_image} 1x"
-                changed = True
-            for attr_name in ("data-src", "data-lazy", "data-lazy-src"):
-                value = attrs.get(attr_name, "").strip()
-                if value and full_image and value != full_image:
-                    attrs[attr_name] = full_image
-                    changed = True
-            if full_image and attrs.get("src", "").strip() and attrs["src"].strip() != full_image:
-                unresolved += 1
-
-        style = attrs.get("style", "")
-        if full_image and (style or any(key in attrs for key in ("data-original", "data-bgimgfield", "data-content-cover-id"))):
-            new_style, style_changed = _update_background_style(style, full_image)
-            if style_changed:
-                attrs["style"] = new_style
-                changed = True
-                if lower_name != "img":
-                    bg_fixed += 1
-
-        if not changed:
-            if lower_name == "img" and attrs.get("data-original") and attrs.get("src") != attrs.get("data-original"):
-                unresolved += 1
+        src = attrs.get("src", "").strip()
+        full_image = _pick_full_image(attrs, src)
+        if not full_image or full_image == src:
             return original_tag
+        if not _local_url_exists(project_root, full_image):
+            unresolved += 1
+            return original_tag
+        # Keep Tilda lazyload semantics intact:
+        # promote full image only for clearly placeholder/empty src.
+        if src and not _looks_like_placeholder(src):
+            return original_tag
+        updated_tag, changed = _replace_attr_value(original_tag, "src", full_image)
+        if changed:
+            img_fixed += 1
+            return updated_tag
+        return original_tag
 
-        self_closing = original_tag.rstrip().endswith("/>")
-        return _build_tag(name, attrs, order, self_closing)
+    updated = _IMG_TAG_RE.sub(_replace_img, text)
 
-    updated = _TAG_RE.sub(_replace, text)
+    def _replace_bg(match: re.Match[str]) -> str:
+        nonlocal bg_fixed, unresolved
+        original_tag = match.group(0)
+        name = match.group("name").lower()
+        if name == "img" or name.startswith("/"):
+            return original_tag
+        attrs = _parse_attrs(match.group("attrs"))
+        style = attrs.get("style", "")
+        if not style:
+            return original_tag
+        full_image = _pick_full_image(attrs, "")
+        if not full_image:
+            return original_tag
+        if not _local_url_exists(project_root, full_image):
+            unresolved += 1
+            return original_tag
+        new_style, style_changed = _update_background_style(style, full_image)
+        if not style_changed:
+            return original_tag
+        updated_tag, changed = _replace_attr_value(original_tag, "style", new_style)
+        if changed:
+            bg_fixed += 1
+            return updated_tag
+        return original_tag
+
+    updated = _TAG_RE.sub(_replace_bg, updated)
     return updated, img_fixed, bg_fixed, unresolved
 
 
@@ -162,7 +184,7 @@ def fix_project_images(project_root: Path) -> ImageFixStats:
             logger.warn(f"[images] Пропуск {path.name}: {exc}")
             continue
 
-        new_text, img_fixed, bg_fixed, unresolved = _transform_html_images(text)
+        new_text, img_fixed, bg_fixed, unresolved = _transform_html_images(text, project_root)
         stats.img_tags_fixed += img_fixed
         stats.background_tags_fixed += bg_fixed
         stats.unresolved_candidates += unresolved
