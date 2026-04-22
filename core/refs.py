@@ -23,6 +23,12 @@ def _is_internal_anchor(url: str) -> bool:
     return url.startswith("#")
 
 
+def _is_root_anchor(url: str) -> bool:
+    """Return ``True`` when *url* points to a root-relative anchor."""
+
+    return url.startswith("/#")
+
+
 def _replace_static_prefix(url: str) -> str:
     for prefix in ("css/", "js/", "images/", "files/"):
         if url.startswith("/" + prefix):
@@ -123,7 +129,7 @@ def _update_links_in_html(
         url = match.group("link")
         base_url, suffix = _split_url(url)
 
-        if _is_internal_anchor(url):
+        if _is_internal_anchor(url) or _is_root_anchor(url):
             return match.group(0)
 
         if _should_skip(url, ignore_prefixes) or base_url.startswith("../"):
