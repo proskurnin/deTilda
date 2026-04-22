@@ -94,7 +94,6 @@ def _apply_replace_rules(text: str, rules: Iterable[tuple[re.Pattern[str], str]]
     return text, total
 
 
-_JS_STRING_RE = re.compile(r"""(?P<quote>["'])(?P<inner>(?:\\.|(?!\1).)*)(?P=quote)""", re.DOTALL)
 _JS_REPLACE_HINT_RE = re.compile(
     r"""
     (?:
@@ -110,30 +109,125 @@ _JS_REPLACE_HINT_RE = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
-_JS_WINDOW_TILDA_RE = re.compile(r"\bwindow\.Tilda\b")
 _JS_TILDA_NAMESPACE_RE = re.compile(r"\bTilda(?=\.)")
+
+
+def _apply_replace_rules_in_string(
+    inner: str,
+    rules: Iterable[tuple[re.Pattern[str], str]],
+) -> tuple[str, int]:
+    return _apply_replace_rules(inner, rules)
+
+
+def _replace_namespace_identifiers(code: str) -> tuple[str, int]:
+    updated, count = _JS_TILDA_NAMESPACE_RE.subn("aida", code)
+    return updated, count
 
 
 def _apply_replace_rules_js(text: str, rules: Iterable[tuple[re.Pattern[str], str]]) -> tuple[str, int]:
     total = 0
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    quote_chars = {"'", '"', "`"}
 
-    def _string_replacer(match: re.Match[str]) -> str:
-        nonlocal total
-        quote = match.group("quote")
-        inner = match.group("inner")
-        if not _JS_REPLACE_HINT_RE.search(inner):
-            return match.group(0)
-        updated, count = _apply_replace_rules(inner, rules)
-        total += count
-        return f"{quote}{updated}{quote}"
+    def _regex_allowed_before(cursor: int) -> bool:
+        j = cursor - 1
+        while j >= 0 and text[j].isspace():
+            j -= 1
+        if j < 0:
+            return True
+        return text[j] in "=([{!?:;,<>+-*%^&|~"
 
-    text = _JS_STRING_RE.sub(_string_replacer, text)
+    while i < n:
+        ch = text[i]
 
-    text, window_count = _JS_WINDOW_TILDA_RE.subn("window.aida", text)
-    total += window_count
-    text, namespace_count = _JS_TILDA_NAMESPACE_RE.subn("aida", text)
-    total += namespace_count
-    return text, total
+        if ch in quote_chars:
+            quote = ch
+            j = i + 1
+            escaped = False
+            while j < n:
+                cur = text[j]
+                if escaped:
+                    escaped = False
+                elif cur == "\\":
+                    escaped = True
+                elif cur == quote:
+                    break
+                j += 1
+            if j >= n:
+                code_chunk, chunk_count = _replace_namespace_identifiers(text[i:])
+                out.append(code_chunk)
+                total += chunk_count
+                break
+
+            raw_literal = text[i : j + 1]
+            prefix_probe = text[max(0, i - 80) : i].lower()
+            if "base64" in prefix_probe:
+                out.append(raw_literal)
+            else:
+                inner = raw_literal[1:-1]
+                if _JS_REPLACE_HINT_RE.search(inner):
+                    replaced_inner, count = _apply_replace_rules_in_string(inner, rules)
+                    out.append(f"{quote}{replaced_inner}{quote}")
+                    total += count
+                else:
+                    out.append(raw_literal)
+            i = j + 1
+            continue
+
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i + 2)
+            if j == -1:
+                out.append(text[i:])
+                break
+            out.append(text[i:j])
+            i = j
+            continue
+
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            if j == -1:
+                out.append(text[i:])
+                break
+            j += 2
+            out.append(text[i:j])
+            i = j
+            continue
+
+        if ch == "/" and _regex_allowed_before(i):
+            j = i + 1
+            escaped = False
+            in_class = False
+            while j < n:
+                cur = text[j]
+                if escaped:
+                    escaped = False
+                elif cur == "\\":
+                    escaped = True
+                elif cur == "[":
+                    in_class = True
+                elif cur == "]" and in_class:
+                    in_class = False
+                elif cur == "/" and not in_class:
+                    j += 1
+                    while j < n and text[j].isalpha():
+                        j += 1
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+
+        j = i
+        while j < n and text[j] not in quote_chars and text[j] != "/":
+            j += 1
+        code_chunk, chunk_count = _replace_namespace_identifiers(text[i:j])
+        out.append(code_chunk)
+        total += chunk_count
+        i = j
+
+    return "".join(out), total
 
 
 def _apply_replace_rules_for_suffix(
