@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import types
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -118,6 +119,37 @@ def test_collect_routes_auto_stub_creates_missing_file(tmp_path: Path) -> None:
     assert len(missing) == 1
     assert missing[0].alias == "/broken"
     assert missing[0].action == "stub_created"
+
+
+def test_collect_routes_counts_initial_and_autofixed_routes(tmp_path: Path) -> None:
+    (tmp_path / ".htaccess").write_text(
+        "RewriteRule ^broken$ missing.html\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "404.html").write_text("<h1>404</h1>", encoding="utf-8")
+
+    loader = _Loader(
+        {
+            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+            "auto_stub_missing_routes": True,
+            "fallback_target": "404.html",
+        }
+    )
+    stats = SimpleNamespace(
+        htaccess_routes_initially_broken=0,
+        htaccess_routes_autofixed=0,
+        broken_htaccess_routes=0,
+        warnings=0,
+        errors=0,
+    )
+
+    routes = collect_routes(tmp_path, loader, stats=stats)  # type: ignore[arg-type]
+
+    assert routes["/broken"] == "missing.html"
+    assert stats.htaccess_routes_initially_broken == 1
+    assert stats.htaccess_routes_autofixed == 1
+    assert stats.broken_htaccess_routes == 0
 
 
 def test_collect_routes_handles_regex_with_extra_groups(tmp_path: Path) -> None:

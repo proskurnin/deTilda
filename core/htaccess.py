@@ -181,6 +181,8 @@ def _store_route(
         routes[alias] = target
         _routes_info[alias] = RouteInfo(target=target, exists=True, path=stub_candidate)
         if is_new_missing:
+            _increment_stat(stats, "htaccess_routes_initially_broken")
+            _increment_stat(stats, "htaccess_routes_autofixed")
             _missing_routes.append(
                 MissingRouteInfo(
                     alias=alias,
@@ -189,7 +191,6 @@ def _store_route(
                     replacement=target,
                 )
             )
-            _increment_stat(stats, "broken_htaccess_routes")
         logger.warn(
             f"[htaccess] Решение: маршрут {alias} направлен на созданную заглушку {target}"
         )
@@ -204,6 +205,8 @@ def _store_route(
                 target=fixed_target, exists=True, path=fallback_candidate
             )
             if is_new_missing:
+                _increment_stat(stats, "htaccess_routes_initially_broken")
+                _increment_stat(stats, "htaccess_routes_autofixed")
                 _missing_routes.append(
                     MissingRouteInfo(
                         alias=alias,
@@ -212,7 +215,6 @@ def _store_route(
                         replacement=fixed_target,
                     )
                 )
-                _increment_stat(stats, "broken_htaccess_routes")
             logger.warn(
                 f"[htaccess] Решение: маршрут {alias} перенаправлен на fallback {fixed_target}"
             )
@@ -222,10 +224,11 @@ def _store_route(
         routes.pop(alias, None)
         _routes_info.pop(alias, None)
         if is_new_missing:
+            _increment_stat(stats, "htaccess_routes_initially_broken")
+            _increment_stat(stats, "htaccess_routes_autofixed")
             _missing_routes.append(
                 MissingRouteInfo(alias=alias, target=target, action="removed", replacement=None)
             )
-            _increment_stat(stats, "broken_htaccess_routes")
             _increment_stat(stats, "warnings")
         logger.warn(
             f"[htaccess] Решение: битый маршрут {alias} -> {target} будет удалён из htaccess"
@@ -235,6 +238,7 @@ def _store_route(
     routes[alias] = target
     _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
     if is_new_missing:
+        _increment_stat(stats, "htaccess_routes_initially_broken")
         _missing_routes.append(
             MissingRouteInfo(alias=alias, target=target, action="unresolved", replacement=None)
         )
