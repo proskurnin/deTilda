@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from core import logger, utils
 from core.config_loader import ConfigLoader, iter_section_list
+from core.runtime_scripts import filter_removable_scripts
 
 if TYPE_CHECKING:  # pragma: no cover - type checking helper
     from core.project import ProjectContext
@@ -493,7 +494,17 @@ def rename_and_cleanup_assets(
     exclude_from_rename = _collect_lowercase_names(service_cfg, "exclude_from_rename", "files")
     delete_after_rename = _collect_lowercase_names(images_cfg, "delete_physical_files", "after_rename")
     delete_immediately = _collect_lowercase_names(images_cfg, "delete_physical_files", "as_is")
-    delete_service = _collect_lowercase_names(service_cfg, "scripts_to_delete", "after_rename")
+    delete_service_raw = list(iter_section_list(service_cfg, "scripts_to_delete", "after_rename"))
+    removable_service_scripts, preserved_service_scripts = filter_removable_scripts(
+        delete_service_raw,
+        project_root,
+    )
+    if preserved_service_scripts:
+        logger.info(
+            "[assets] Обнаружены видео/галереи/lazyload-маркеры — runtime-скрипты не удаляются: "
+            + ", ".join(sorted(set(preserved_service_scripts)))
+        )
+    delete_service = {name.lower() for name in removable_service_scripts}
 
     resource_cfg = service_cfg.get("resource_copy", {})
     resource_rules: list[ResourceCopyRule] = []
