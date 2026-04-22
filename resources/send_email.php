@@ -8,161 +8,148 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     exit;
 }
 
-// ----------------- HOST (for subject / headers / dynamic recipient) ----------------- //
-$rawHost = $_SERVER['SERVER_NAME'] ?? ($_SERVER['HTTP_HOST'] ?? '');
-$host = strtolower(trim((string)$rawHost));
-
-// remove port (example.com:8080 -> example.com)
-$host = preg_replace('/:\d+$/', '', $host);
-// remove leading www.
-$host = preg_replace('/^www\./', '', $host);
-
-// IDN -> punycode (if needed)
-if ($host !== '' && function_exists('idn_to_ascii')) {
-    $ascii = idn_to_ascii($host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
-    if (is_string($ascii) && $ascii !== '') {
-        $host = $ascii;
-    }
-}
-
-$hostForEmail = ($host !== '') ? $host : 'localhost';
-
-// ----------------- ENV / DEV DETECTION ----------------- //
-// You can force modes via env:
-// - SENDMAIL_MODE = "prod" | "test" (anything else -> auto)
-// - SENDMAIL_TEST_TO = "test@example.com"
-$envMode = strtolower((string)getenv('SENDMAIL_MODE'));          // 'prod' or 'test'
-$envTestTo = trim((string)getenv('SENDMAIL_TEST_TO'));           // optional override
-
-$isDevHost = false;
-if ($hostForEmail === 'localhost' || $hostForEmail === '127.0.0.1' || $hostForEmail === '::1') {
-    $isDevHost = true;
-} elseif (preg_match('/\.(local|test|invalid)$/', $hostForEmail)) {
-    $isDevHost = true;
-}
-
-$testMode = false;
-if ($envMode === 'test') {
-    $testMode = true;
-} elseif ($envMode === 'prod') {
-    $testMode = false;
-} else {
-    $testMode = $isDevHost;
-}
-
-$testRecipient = ($envTestTo !== '') ? $envTestTo : 'ivan3362768@gmail.com';
-if (!filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
-    $testRecipient = 'ivan3362768@gmail.com';
-}
-
-// ----------------- SETTINGS ----------------- //
-// PROD: recipient = info@<host>, BCC = test addresses
-// TEST: recipient = $testRecipient, BCC = empty (to avoid accidental mass sending)
-$prodRecipient = 'info@' . $hostForEmail;
-$recipient_email = $testMode ? $testRecipient : $prodRecipient;
-
-// BCC emails (used only in PROD)
-$bcc_emails = $testMode ? [] : [
+const TEST_RECIPIENTS = [
     'r@prororo.com',
     '3362768@mail.ru',
     'ivan3362768@gmail.com',
 ];
 
-$subject = 'New request from ' . (($host !== '') ? $host : 'website');
-// -------------------------------------------- //
+/** @return non-empty-string */
+function detect_domain_from_host(): string
+{
+    $rawHost = (string)($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '');
+    $host = strtolower(trim($rawHost));
 
-function p(string $k, string $d = ''): string {
-    return isset($_POST[$k]) ? trim((string)$_POST[$k]) : $d;
+    if ($host === '') {
+        return 'localhost';
+    }
+
+    if (strpos($host, '://') !== false) {
+        $parsedHost = (string)parse_url($host, PHP_URL_HOST);
+        if ($parsedHost !== '') {
+            $host = $parsedHost;
+        }
+    }
+
+    $host = preg_replace('/:\\d+$/', '', $host) ?? $host;
+    $host = preg_replace('/^www\./i', '', $host) ?? $host;
+
+    return $host !== '' ? $host : 'localhost';
 }
 
-$ignored = ['redirect', 'redirect2parent', 'g-recaptcha-response', 'csrf_token'];
-$lines = [];
-$lines[] = 'Form submission from ' . (($host !== '') ? $host : 'website');
-$lines[] = 'Date: ' . date('Y-m-d H:i:s');
-$lines[] = 'Mode: ' . ($testMode ? 'TEST' : 'PROD');
-$lines[] = str_repeat('-', 40);
+function form_value(string $key, string $default = ''): string
+{
+    if (!isset($_POST[$key])) {
+        return $default;
+    }
 
-foreach ($_POST as $k => $v) {
-    if (in_array($k, $ignored, true)) {
+    $value = $_POST[$key];
+    if (is_array($value)) {
+        $value = implode(', ', array_map(static fn ($item): string => trim((string)$item), $value));
+    }
+
+    return trim((string)$value);
+}
+
+function is_test_submission(string $name): bool
+{
+    return $name !== '' && preg_match('/\btest\b/i', $name) === 1;
+}
+
+$domain = detect_domain_from_host();
+$mainRecipient = 'info@' . $domain;
+
+$name = form_value('name', form_value('Name', ''));
+$email = form_value('email', form_value('Email', ''));
+
+$isTestSubmission = is_test_submission($name);
+$recipients = $isTestSubmission ? TEST_RECIPIENTS : [$mainRecipient];
+
+$ignoredFields = ['redirect', 'redirect2parent', 'g-recaptcha-response', 'csrf_token'];
+$messageLines = [
+    'Form submission from ' . $domain,
+    'Date: ' . date('Y-m-d H:i:s'),
+    'Route: ' . ($isTestSubmission ? 'TEST_ONLY' : 'MAIN_ONLY'),
+    str_repeat('-', 40),
+];
+
+foreach ($_POST as $key => $value) {
+    if (in_array($key, $ignoredFields, true)) {
         continue;
     }
-    if (is_array($v)) {
-        $v = implode(', ', $v);
+
+    if (is_array($value)) {
+        $value = implode(', ', array_map('strval', $value));
     }
-    $lines[] = $k . ': ' . $v;
+
+    $messageLines[] = $key . ': ' . trim((string)$value);
 }
 
-$lines[] = str_repeat('-', 40);
-$message = implode("\n", $lines);
+$messageLines[] = str_repeat('-', 40);
+$message = implode("\n", $messageLines);
 
-$email = p('Email');
-$name  = strip_tags(p('Name', 'Not specified'));
+$subject = 'New request from ' . $domain;
+$encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+$fromAddress = 'no-reply@' . $domain;
+$replyTo = filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : $fromAddress;
 
-$encoded_subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-$replyTo = (filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : ('no-reply@' . $hostForEmail));
-
-$headersArr = [];
-$headersArr[] = 'MIME-Version: 1.0';
-$headersArr[] = 'Content-Type: text/plain; charset=UTF-8';
-$headersArr[] = 'From: no-reply@' . $hostForEmail;
-$headersArr[] = 'Reply-To: ' . $replyTo;
-$headersArr[] = 'X-Mail-Mode: ' . ($testMode ? 'TEST' : 'PROD');
-
-if (!empty($bcc_emails)) {
-    $headersArr[] = 'Bcc: ' . implode(', ', $bcc_emails);
-}
-
-$headers = implode("\r\n", $headersArr);
+$headers = implode("\r\n", [
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'From: ' . $fromAddress,
+    'Reply-To: ' . $replyTo,
+]);
 
 if (function_exists('error_clear_last')) {
     error_clear_last();
 }
 
-$sent_ok = @mail($recipient_email, $encoded_subject, $message, $headers);
+$sentOk = true;
+foreach ($recipients as $recipient) {
+    $sentCurrent = @mail($recipient, $encodedSubject, $message, $headers);
+    if (!$sentCurrent) {
+        $sentOk = false;
+    }
+}
 
 $logTime = date('Y-m-d H:i:s');
-if ($sent_ok) {
-    error_log(sprintf('{%s}{%s}{%s}', $logTime, $recipient_email, $message));
+if ($sentOk) {
+    error_log(sprintf('{%s}{%s}{%s}', $logTime, implode(',', $recipients), $message));
 } else {
     $lastError = error_get_last();
-    $reason = isset($lastError['message']) ? $lastError['message'] : 'Неизвестная причина';
+    $reason = isset($lastError['message']) ? (string)$lastError['message'] : 'Unknown error';
     error_log(sprintf('{%s}{%s}{%s}', $logTime, 'Ошибка', $reason));
 }
 
-// Определяем URL возврата (PRG)
-$back = (!empty($_POST['redirect'])) ? (string)$_POST['redirect']
-      : (!empty($_POST['redirect2parent']) ? (string)$_POST['redirect2parent']
-      : (isset($_SERVER['HTTP_REFERER']) ? (string)$_SERVER['HTTP_REFERER'] : '/'));
+$back = !empty($_POST['redirect'])
+    ? (string)$_POST['redirect']
+    : (!empty($_POST['redirect2parent'])
+        ? (string)$_POST['redirect2parent']
+        : (string)($_SERVER['HTTP_REFERER'] ?? '/'));
 
-$parsed = parse_url($back);
+$parsedBack = parse_url($back);
+$currentHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+$currentHost = preg_replace('/:\\d+$/', '', $currentHost) ?? $currentHost;
+$currentHost = preg_replace('/^www\./i', '', $currentHost) ?? $currentHost;
 
-$currentHost = strtolower(trim((string)($_SERVER['HTTP_HOST'] ?? '')));
-$currentHost = preg_replace('/:\d+$/', '', $currentHost);
-$currentHost = preg_replace('/^www\./', '', $currentHost);
-
-if (isset($parsed['host']) && $parsed['host'] !== '') {
-    $backHost = strtolower((string)$parsed['host']);
-    $backHost = preg_replace('/^www\./', '', $backHost);
+if (isset($parsedBack['host']) && $parsedBack['host'] !== '') {
+    $backHost = strtolower((string)$parsedBack['host']);
+    $backHost = preg_replace('/^www\./i', '', $backHost) ?? $backHost;
 
     if ($backHost !== $currentHost) {
         $back = '/';
     }
 }
 
-$hash = '';
+$hash = '#popup:myform';
 if (strpos($back, '#') !== false) {
-    [$base, $frag] = explode('#', $back, 2);
+    [$base, $fragment] = explode('#', $back, 2);
     $back = $base;
-    $hash = '#' . $frag;
+    $hash = '#' . $fragment;
 }
 
-if ($hash === '') {
-    $hash = '#popup:myform';
-}
-
-$sep  = (strpos($back, '?') === false) ? '?' : '&';
-$back = $back . $sep . 'sent=' . ($sent_ok ? '1' : '0') . $hash;
+$separator = (strpos($back, '?') === false) ? '?' : '&';
+$back = $back . $separator . 'sent=' . ($sentOk ? '1' : '0') . $hash;
 
 header('Location: ' . $back, true, 303);
 exit;
-?>
