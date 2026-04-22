@@ -156,8 +156,9 @@ def _store_route(
     soft_fallback_enabled: bool = False,
     fallback_target: str = "404.html",
     auto_stub_enabled: bool = False,
+    remove_unresolved_enabled: bool = False,
     stats: Any | None = None,
-) -> None:
+) -> str:
     alias = _normalize_alias(alias)
     target = target.strip()
     candidate = _resolve_target_path(target, project_root)
@@ -167,7 +168,7 @@ def _store_route(
         routes[alias] = target
         _routes_info[alias] = RouteInfo(target=target, exists=True, path=candidate)
         logger.debug(f"[htaccess] {alias} → {target} (файл есть)")
-        return
+        return "ok"
 
     route_key = (alias, target)
     is_new_missing = route_key not in _missing_route_keys
@@ -189,7 +190,10 @@ def _store_route(
                 )
             )
             _increment_stat(stats, "broken_htaccess_routes")
-        return
+        logger.warn(
+            f"[htaccess] Решение: маршрут {alias} направлен на созданную заглушку {target}"
+        )
+        return "stub_created"
 
     if soft_fallback_enabled:
         fallback_candidate = _resolve_target_path(fallback_target, project_root)
@@ -209,7 +213,24 @@ def _store_route(
                     )
                 )
                 _increment_stat(stats, "broken_htaccess_routes")
-            return
+            logger.warn(
+                f"[htaccess] Решение: маршрут {alias} перенаправлен на fallback {fixed_target}"
+            )
+            return "fallback_redirect"
+
+    if remove_unresolved_enabled:
+        routes.pop(alias, None)
+        _routes_info.pop(alias, None)
+        if is_new_missing:
+            _missing_routes.append(
+                MissingRouteInfo(alias=alias, target=target, action="removed", replacement=None)
+            )
+            _increment_stat(stats, "broken_htaccess_routes")
+            _increment_stat(stats, "warnings")
+        logger.warn(
+            f"[htaccess] Решение: битый маршрут {alias} -> {target} будет удалён из htaccess"
+        )
+        return "removed"
 
     routes[alias] = target
     _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
@@ -219,6 +240,10 @@ def _store_route(
         )
         _increment_stat(stats, "broken_htaccess_routes")
         _increment_stat(stats, "errors")
+    logger.err(
+        f"[htaccess] Решение: маршрут {alias} -> {target} не удалось исправить автоматически"
+    )
+    return "unresolved"
 
 
 def _increment_stat(stats: Any | None, field: str) -> None:
@@ -288,6 +313,7 @@ def collect_routes(
     patterns_cfg = loader.patterns().get("htaccess_patterns", {})
     soft_fallback_enabled = bool(patterns_cfg.get("soft_fallback_to_404", False))
     auto_stub_enabled = bool(patterns_cfg.get("auto_stub_missing_routes", False))
+    remove_unresolved_enabled = bool(patterns_cfg.get("remove_unresolved_routes", True))
     fallback_target = str(patterns_cfg.get("fallback_target", "404.html"))
 
     for file_path in _iter_htaccess_files(project_root):
@@ -299,13 +325,19 @@ def collect_routes(
             logger.warn(f"[htaccess] Не удалось прочитать {file_path}: {exc}")
             continue
 
-        for match in rewrite_re.finditer(text):
+        rewrite_matches = list(rewrite_re.finditer(text))
+        redirect_matches = list(redirect_re.finditer(text))
+        index_match = re.search(r"DirectoryIndex\s+([^\s]+\.html)", text, re.IGNORECASE)
+        updated_text = text
+        htaccess_changed = False
+
+        for match in rewrite_matches:
             extracted = _extract_alias_target(match)
             if extracted is None:
                 logger.warn("[htaccess] Пропущено RewriteRule: не удалось извлечь alias/target")
                 continue
             alias, target = extracted
-            _store_route(
+            action = _store_route(
                 alias,
                 target,
                 project_root,
@@ -313,16 +345,20 @@ def collect_routes(
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
                 auto_stub_enabled=auto_stub_enabled,
+                remove_unresolved_enabled=remove_unresolved_enabled,
                 stats=stats,
             )
+            if action == "removed":
+                updated_text = updated_text.replace(match.group(0), "", 1)
+                htaccess_changed = True
 
-        for match in redirect_re.finditer(text):
+        for match in redirect_matches:
             extracted = _extract_alias_target(match)
             if extracted is None:
                 logger.warn("[htaccess] Пропущено Redirect: не удалось извлечь alias/target")
                 continue
             alias, target = extracted
-            _store_route(
+            action = _store_route(
                 alias,
                 target,
                 project_root,
@@ -330,21 +366,41 @@ def collect_routes(
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
                 auto_stub_enabled=auto_stub_enabled,
+                remove_unresolved_enabled=remove_unresolved_enabled,
                 stats=stats,
             )
+            if action == "removed":
+                updated_text = updated_text.replace(match.group(0), "", 1)
+                htaccess_changed = True
 
-        index_match = re.search(r"DirectoryIndex\s+([^\s]+\.html)", text, re.IGNORECASE)
         if index_match:
-            _store_route(
+            target = index_match.group(1)
+            action = _store_route(
                 "/",
-                index_match.group(1),
+                target,
                 project_root,
                 routes,
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
                 auto_stub_enabled=auto_stub_enabled,
+                remove_unresolved_enabled=remove_unresolved_enabled,
                 stats=stats,
             )
+            if action == "removed":
+                updated_text = updated_text.replace(index_match.group(0), "", 1)
+                htaccess_changed = True
+
+        if htaccess_changed and updated_text != text:
+            try:
+                utils.safe_write(file_path, updated_text)
+                logger.warn(
+                    f"[htaccess] Legacy/broken маршруты удалены из {utils.relpath(file_path, project_root)}"
+                )
+            except Exception as exc:
+                logger.err(
+                    f"[htaccess] Не удалось сохранить очищенный {utils.relpath(file_path, project_root)}: {exc}"
+                )
+                _increment_stat(stats, "errors")
 
     if routes:
         logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")

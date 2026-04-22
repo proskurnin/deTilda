@@ -55,9 +55,10 @@ def test_collect_routes_without_soft_fallback_keeps_broken_target(tmp_path: Path
 
     loader = _Loader(
         {
-                "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-                "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
             "soft_fallback_to_404": False,
+            "remove_unresolved_routes": False,
         }
     )
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
@@ -67,6 +68,30 @@ def test_collect_routes_without_soft_fallback_keeps_broken_target(tmp_path: Path
     assert info is not None
     assert not info.exists
     assert info.target == "missing.html"
+
+
+def test_collect_routes_removes_legacy_broken_route_by_default(tmp_path: Path) -> None:
+    htaccess_path = tmp_path / ".htaccess"
+    htaccess_path.write_text(
+        "RewriteRule ^legacy$ missing.html [L]\n",
+        encoding="utf-8",
+    )
+
+    loader = _Loader(
+        {
+            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+            "soft_fallback_to_404": False,
+        }
+    )
+    routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
+
+    assert "/legacy" not in routes
+    assert "missing.html" not in htaccess_path.read_text(encoding="utf-8")
+    missing = get_missing_routes()
+    assert len(missing) == 1
+    assert missing[0].alias == "/legacy"
+    assert missing[0].action == "removed"
 
 
 def test_collect_routes_auto_stub_creates_missing_file(tmp_path: Path) -> None:
@@ -107,6 +132,7 @@ def test_collect_routes_handles_regex_with_extra_groups(tmp_path: Path) -> None:
                 r"(?im)^[ \t]*RewriteRule[ \t]+\^/?(([a-z0-9\-_/]+))\??\$?[ \t]+([^ \t]+)"
             ),
             "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+            "remove_unresolved_routes": False,
         }
     )
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]

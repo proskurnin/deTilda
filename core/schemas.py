@@ -20,6 +20,8 @@ class HtaccessPatterns(BaseModel):
     rewrite_rule: str = ""
     redirect: str = ""
     soft_fallback_to_404: bool = False
+    auto_stub_missing_routes: bool = False
+    remove_unresolved_routes: bool = True
     fallback_target: str = "404.html"
 
 
