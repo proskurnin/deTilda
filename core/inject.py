@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
@@ -25,9 +26,26 @@ def _load_options(loader: ConfigLoader) -> tuple[str, str, list[str], str]:
     return handler, marker, head_scripts, head_marker
 
 
-def inject_form_scripts(project_root: Path, loader: ConfigLoader) -> int:
-    project_root = Path(project_root)
-    handler, marker, head_scripts, head_marker = _load_options(loader)
+def _resolve_inputs(context: Any, loader: ConfigLoader | None) -> tuple[Path, ConfigLoader]:
+    if hasattr(context, "project_root"):
+        project_root = Path(context.project_root)
+        resolved_loader = loader or getattr(context, "config_loader", None)
+    else:
+        project_root = Path(context)
+        resolved_loader = loader
+
+    if resolved_loader is None:
+        raise ValueError(
+            "inject_form_scripts требует loader при передаче только project_root. "
+            "Передайте loader явно или используйте ProjectContext."
+        )
+
+    return project_root, resolved_loader
+
+
+def inject_form_scripts(context: Any, loader: ConfigLoader | None = None) -> int:
+    project_root, resolved_loader = _resolve_inputs(context, loader)
+    handler, marker, head_scripts, head_marker = _load_options(resolved_loader)
     processed = 0
 
     marker_pattern = re.compile(re.escape(marker), re.IGNORECASE)

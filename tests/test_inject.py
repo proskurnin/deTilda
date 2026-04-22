@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from core.config_loader import ConfigLoader
 from core.inject import inject_form_scripts
@@ -31,3 +32,15 @@ def test_inject_does_not_duplicate_existing_ga(tmp_path: Path) -> None:
 
     content = page.read_text(encoding="utf-8")
     assert content.count('script src="js/ga.js"') == 1
+
+
+def test_inject_supports_project_context_without_explicit_loader(tmp_path: Path) -> None:
+    page = tmp_path / "index.html"
+    page.write_text("<html><head></head><body>ok</body></html>", encoding="utf-8")
+    context = SimpleNamespace(project_root=tmp_path, config_loader=ConfigLoader(ROOT))
+
+    updated = inject_form_scripts(context)
+
+    content = page.read_text(encoding="utf-8")
+    assert updated == 1
+    assert 'script src="js/form-handler.js"' in content
