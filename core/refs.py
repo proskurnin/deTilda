@@ -29,6 +29,36 @@ def _is_root_anchor(url: str) -> bool:
     return url.startswith("/#")
 
 
+def _resolve_owner_page(path: Path, project_root: Path) -> str:
+    """Return page filename that *path* belongs to for anchor resolution."""
+
+    rel_path = path.relative_to(project_root).as_posix()
+    if rel_path.startswith("files/"):
+        name = path.name
+        body_match = re.fullmatch(r"(page\d+)body\.html", name, re.IGNORECASE)
+        if body_match:
+            return f"{body_match.group(1)}.html"
+    return path.name
+
+
+def _is_same_page_root_anchor(
+    url: str,
+    *,
+    current_path: Path,
+    project_root: Path,
+    routes: Dict[str, str],
+) -> bool:
+    """Check whether ``/#...`` anchor points to the current document."""
+
+    if not _is_root_anchor(url):
+        return False
+    root_target = routes.get("/")
+    if not root_target:
+        return False
+    owner_page = _resolve_owner_page(current_path, project_root)
+    return owner_page == Path(root_target).name
+
+
 def _replace_static_prefix(url: str) -> str:
     for prefix in ("css/", "js/", "images/", "files/"):
         if url.startswith("/" + prefix):
@@ -114,6 +144,7 @@ def _update_links_in_html(
     routes: Dict[str, str],
     rename_map: Dict[str, str],
     project_root: Path,
+    current_path: Path,
     ignore_prefixes: Iterable[str],
     link_rel_values: Iterable[str],
     replace_patterns: Iterable[str],
@@ -129,7 +160,17 @@ def _update_links_in_html(
         url = match.group("link")
         base_url, suffix = _split_url(url)
 
-        if _is_internal_anchor(url) or _is_root_anchor(url):
+        if _is_internal_anchor(url):
+            return match.group(0)
+        if _is_same_page_root_anchor(
+            url,
+            current_path=current_path,
+            project_root=project_root,
+            routes=routes,
+        ):
+            fixed += 1
+            return f"{attr}={quote}{suffix or '#'}{quote}"
+        if _is_root_anchor(url):
             return match.group(0)
 
         if _should_skip(url, ignore_prefixes) or base_url.startswith("../"):
@@ -150,6 +191,9 @@ def _update_links_in_html(
             if relative in rename_map:
                 fixed += 1
                 return f"{attr}={quote}{rename_map[relative]}{suffix}{quote}"
+            last_segment = relative.rsplit("/", 1)[-1]
+            if relative and "." not in last_segment:
+                return match.group(0)
             target = project_root / relative
             if not target.exists():
                 broken += 1
@@ -173,7 +217,7 @@ def _update_links_in_html(
         return match.group(0)
 
     pattern = re.compile(
-        r'(?P<attr>href|src|data-src|data-href|action)\\s*=\\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
+        r'(?P<attr>href|src|data-src|data-href|action)\s*=\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
         re.IGNORECASE,
     )
     text = pattern.sub(repl, text)
@@ -290,6 +334,7 @@ def update_all_refs_in_project(
                 routes,
                 rename_map,
                 project_root,
+                path,
                 ignore_prefixes,
                 link_rel_values,
                 replace_patterns,
