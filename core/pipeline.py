@@ -14,6 +14,7 @@ from core import (
     forms,
     fonts_localizer,
     html_prettify,
+    images,
     inject,
     logger,
     page404,
@@ -43,6 +44,10 @@ class PipelineStats:
     forms_hooked: int = 0
     formatted_html_files: int = 0
     html_prettify_skipped: bool = False
+    images_updated_files: int = 0
+    images_img_fixed: int = 0
+    images_background_fixed: int = 0
+    images_unresolved: int = 0
     exec_time: float = 0.0
 
     @property
@@ -131,6 +136,14 @@ class DetildaPipeline:
             report.generate_intermediate_report(
                 stats.renamed_assets, stats.cleaned_files, stats.fixed_links, stats.broken_links
             )
+
+            with logger.module_scope("images"):
+                image_fix = images.fix_project_images(context.project_root)
+            stats.images_updated_files = image_fix.updated_files
+            stats.images_img_fixed = image_fix.img_tags_fixed
+            stats.images_background_fixed = image_fix.background_tags_fixed
+            stats.images_unresolved = image_fix.unresolved_candidates
+            stats.warnings += image_fix.unresolved_candidates
 
             with logger.module_scope("script_cleaner"):
                 if script_cleaner.can_remove_tilda_form_scripts(context.project_root):
@@ -224,6 +237,10 @@ class DetildaPipeline:
         logger.info(f"❌ Битых htaccess-маршрутов: {stats.broken_htaccess_routes}")
         logger.info(f"📝 Форм найдено: {stats.forms_found}")
         logger.info(f"🧩 Форм подключено к handler: {stats.forms_hooked}")
+        logger.info(f"🖼 Файлов с правками изображений: {stats.images_updated_files}")
+        logger.info(f"🖼 Исправлено <img>: {stats.images_img_fixed}")
+        logger.info(f"🖼 Исправлено background-image: {stats.images_background_fixed}")
+        logger.info(f"⚠️ Потенциально неразрешённых изображений: {stats.images_unresolved}")
         logger.info(f"⚠️ Предупреждений: {stats.warnings}")
         logger.info(f"⛔ Ошибок: {stats.errors}")
         logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
