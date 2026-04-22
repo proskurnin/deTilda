@@ -89,6 +89,16 @@ _SRC_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 _STAT_COMMENT_TAIL_RE = re.compile(r"(\s*<!--\s*Stat\s*-->\s*)$", re.IGNORECASE)
+_MEDIA_MARKERS_RE = re.compile(
+    r"(youtube\.com|youtu\.be|data-youtube|t-video|t-slds|t-gallery|data-img-zoom-url|data-original|t-bgimg)",
+    re.IGNORECASE,
+)
+_CONDITIONALLY_REQUIRED_SCRIPTS = {
+    "tilda-events-1.0.min.js",
+    "aida-events-1.0.min.js",
+    "tilda-fallback-1.0.min.js",
+    "aida-fallback-1.0.min.js",
+}
 
 
 def _normalize_src(value: str) -> str:
@@ -135,6 +145,32 @@ def _iter_script_blocks(text: str) -> Iterator[tuple[int, int, str, str]]:
         pos = end
 
 
+def _project_needs_media_runtime(project_root: Path) -> bool:
+    for path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
+        try:
+            text = utils.safe_read(path)
+        except Exception:
+            continue
+        if _MEDIA_MARKERS_RE.search(text):
+            return True
+    return False
+
+
+def _filter_disallowed_scripts(script_names: list[str], project_root: Path) -> list[str]:
+    if not script_names:
+        return []
+    if not _project_needs_media_runtime(project_root):
+        return script_names
+
+    filtered = [name for name in script_names if name.lower() not in _CONDITIONALLY_REQUIRED_SCRIPTS]
+    skipped = sorted(set(script_names) - set(filtered))
+    if skipped:
+        logger.info(
+            "[script_cleaner] Обнаружены видео/галереи/lazyload-маркеры — сохраняем runtime-скрипты: "
+            + ", ".join(skipped)
+        )
+    return filtered
+
 
 def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
     """Remove script tags that reference disallowed filenames.
@@ -144,6 +180,7 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
 
     project_root = Path(project_root)
     script_names, extra_patterns = _collect_script_rules(loader)
+    script_names = _filter_disallowed_scripts(script_names, project_root)
     if not script_names and not extra_patterns:
         logger.info("[script_cleaner] Список скриптов для удаления пуст — пропуск шага.")
         return 0

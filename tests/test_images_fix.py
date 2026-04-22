@@ -10,14 +10,17 @@ if str(ROOT) not in sys.path:
 from core.images import fix_project_images
 
 
-def test_fix_project_images_promotes_full_sources(tmp_path: Path) -> None:
+def test_fix_project_images_promotes_only_placeholder_img_sources(tmp_path: Path) -> None:
     html = tmp_path / "index.html"
     html.write_text(
-        '<img class="t-img" src="images/preview.jpg" data-original="images/full.jpg" data-lazy="images/preview.jpg">\n'
+        '<img class="t-img" src="images/1x1.gif" data-original="images/full.jpg" data-lazy="images/preview.jpg">\n'
         '<div class="t-bgimg" style="background-image:url(\'images/preview-bg.jpg\');" '
         'data-original="images/full-bg.jpg"></div>',
         encoding="utf-8",
     )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "full.jpg").write_bytes(b"x")
+    (tmp_path / "images" / "full-bg.jpg").write_bytes(b"x")
 
     result = fix_project_images(tmp_path)
     text = html.read_text(encoding="utf-8")
@@ -26,19 +29,43 @@ def test_fix_project_images_promotes_full_sources(tmp_path: Path) -> None:
     assert result.img_tags_fixed >= 1
     assert result.background_tags_fixed >= 1
     assert 'src="images/full.jpg"' in text
-    assert 'data-lazy="images/full.jpg"' in text
+    assert 'data-lazy="images/preview.jpg"' in text
     assert 'background-image:url("images/full-bg.jpg")' in text
 
 
-def test_fix_project_images_counts_unresolved_candidates(tmp_path: Path) -> None:
+def test_fix_project_images_skips_missing_full_image_candidates(tmp_path: Path) -> None:
     html = tmp_path / "page.html"
     html.write_text(
-        '<img src="images/preview.jpg" data-original="images/full.jpg">',
+        '<img src="images/1x1.gif" data-original="images/full.jpg">',
         encoding="utf-8",
     )
 
     result = fix_project_images(tmp_path)
 
-    assert result.updated_files == 1
-    assert result.unresolved_candidates == 0
-    assert 'src="images/full.jpg"' in html.read_text(encoding="utf-8")
+    assert result.updated_files == 0
+    assert result.unresolved_candidates == 1
+    assert 'src="images/1x1.gif"' in html.read_text(encoding="utf-8")
+
+
+def test_fix_project_images_does_not_override_existing_img_src(tmp_path: Path) -> None:
+    html = tmp_path / "fixture.html"
+    html.write_text(
+        '<img class="t-img" src="images/preview.jpg" data-original="images/full.jpg" data-img-zoom-url="images/zoom.jpg">\n'
+        '<div class="t-cover__carrier" data-content-cover-bg="images/hero.jpg" '
+        'style="background-image:url(\'images/preview-hero.jpg\');"></div>\n'
+        '<div class="t-slds__bgimg" data-img-zoom-url="images/zoom2.jpg" '
+        'style="background-image:url(\'images/preview2.jpg\');"></div>',
+        encoding="utf-8",
+    )
+    (tmp_path / "images").mkdir()
+    for name in ("full.jpg", "zoom.jpg", "hero.jpg", "zoom2.jpg"):
+        (tmp_path / "images" / name).write_bytes(b"x")
+
+    fix_project_images(tmp_path)
+    text = html.read_text(encoding="utf-8")
+
+    assert 'src="images/preview.jpg"' in text
+    assert 'data-original="images/full.jpg"' in text
+    assert 'data-img-zoom-url="images/zoom.jpg"' in text
+    assert 'background-image:url("images/hero.jpg")' in text
+    assert 'background-image:url("images/zoom2.jpg")' in text
