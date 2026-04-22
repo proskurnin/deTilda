@@ -93,6 +93,58 @@ def _apply_replace_rules(text: str, rules: Iterable[tuple[re.Pattern[str], str]]
         total += count
     return text, total
 
+
+_JS_STRING_RE = re.compile(r"""(?P<quote>["'])(?P<inner>(?:\\.|(?!\1).)*)(?P=quote)""", re.DOTALL)
+_JS_REPLACE_HINT_RE = re.compile(
+    r"""
+    (?:
+        \bt-[a-z0-9_-]+
+        |data-tilda
+        |tildamodal:
+        |--t-[a-z0-9_-]+
+        |\btilda-[a-z0-9_.-]+
+        |\btild[a-z0-9_.-]*
+        |\bwindow\.Tilda\b
+        |\bTilda\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_JS_WINDOW_TILDA_RE = re.compile(r"\bwindow\.Tilda\b")
+_JS_TILDA_NAMESPACE_RE = re.compile(r"\bTilda(?=\.)")
+
+
+def _apply_replace_rules_js(text: str, rules: Iterable[tuple[re.Pattern[str], str]]) -> tuple[str, int]:
+    total = 0
+
+    def _string_replacer(match: re.Match[str]) -> str:
+        nonlocal total
+        quote = match.group("quote")
+        inner = match.group("inner")
+        if not _JS_REPLACE_HINT_RE.search(inner):
+            return match.group(0)
+        updated, count = _apply_replace_rules(inner, rules)
+        total += count
+        return f"{quote}{updated}{quote}"
+
+    text = _JS_STRING_RE.sub(_string_replacer, text)
+
+    text, window_count = _JS_WINDOW_TILDA_RE.subn("window.aida", text)
+    total += window_count
+    text, namespace_count = _JS_TILDA_NAMESPACE_RE.subn("aida", text)
+    total += namespace_count
+    return text, total
+
+
+def _apply_replace_rules_for_suffix(
+    text: str,
+    rules: Iterable[tuple[re.Pattern[str], str]],
+    suffix: str,
+) -> tuple[str, int]:
+    if suffix == ".js":
+        return _apply_replace_rules_js(text, rules)
+    return _apply_replace_rules(text, rules)
+
 def _apply_rename_map(text: str, rename_map: Dict[str, str]) -> tuple[str, int]:
     replacements = 0
     for old, new in sorted(rename_map.items(), key=lambda item: len(item[0]), reverse=True):
@@ -342,7 +394,7 @@ def update_all_refs_in_project(
             )
 
         text, rename_replacements = _apply_rename_map(text, rename_map)
-        text, rule_replacements = _apply_replace_rules(text, replace_rules)
+        text, rule_replacements = _apply_replace_rules_for_suffix(text, replace_rules, suffix)
 
         total_changes = fixed + rename_replacements + rule_replacements
         if total_changes and text != original:
