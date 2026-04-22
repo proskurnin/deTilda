@@ -229,6 +229,17 @@ def _increment_stat(stats: Any | None, field: str) -> None:
     setattr(stats, field, getattr(stats, field, 0) + 1)
 
 
+def _extract_alias_target(match: re.Match[str]) -> tuple[str, str] | None:
+    groups = match.groups()
+    if len(groups) < 2:
+        return None
+    alias = groups[0]
+    target = groups[-1]
+    if alias is None or target is None:
+        return None
+    return alias, target
+
+
 def collect_htaccess_routes(
     htaccess_path: Path,
     project_root: Path,
@@ -289,7 +300,11 @@ def collect_routes(
             continue
 
         for match in rewrite_re.finditer(text):
-            alias, target = match.groups()
+            extracted = _extract_alias_target(match)
+            if extracted is None:
+                logger.warn("[htaccess] Пропущено RewriteRule: не удалось извлечь alias/target")
+                continue
+            alias, target = extracted
             _store_route(
                 alias,
                 target,
@@ -302,7 +317,11 @@ def collect_routes(
             )
 
         for match in redirect_re.finditer(text):
-            alias, target = match.groups()
+            extracted = _extract_alias_target(match)
+            if extracted is None:
+                logger.warn("[htaccess] Пропущено Redirect: не удалось извлечь alias/target")
+                continue
+            alias, target = extracted
             _store_route(
                 alias,
                 target,
