@@ -6,110 +6,126 @@ from pathlib import Path
 from typing import Any
 
 from core import logger
-from core.project import ProjectContext
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.project import ProjectContext
 from core import utils
 
-try:
-    from lxml import etree, html
-except Exception:  # pragma: no cover - optional dependency resolution
-    etree = None  # type: ignore[assignment]
-    html = None  # type: ignore[assignment]
+_VOID_TAGS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+}
 
-try:
-    from bs4 import BeautifulSoup
-except Exception:  # pragma: no cover - optional dependency resolution
-    BeautifulSoup = None  # type: ignore[assignment]
+_RAW_BLOCK_RE = re.compile(
+    r"<(script|style|pre|textarea)\b[^>]*>.*?</\1\s*>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+_OPEN_TAG_RE = re.compile(r"^<([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>$")
+_CLOSE_TAG_RE = re.compile(r"^</([a-zA-Z][a-zA-Z0-9:-]*)\s*>$")
 
 
 def _iter_targets(project_root: Path) -> list[Path]:
-    root_html = sorted(path for path in project_root.glob("*.html") if path.is_file())
-    body_html = []
-    files_dir = project_root / "files"
-    if files_dir.exists():
-        body_html = sorted(path for path in files_dir.glob("*body.html") if path.is_file())
-    return root_html + body_html
+    return sorted(utils.list_files_recursive(project_root, extensions=(".html", ".htm")))
+
+
+def _normalize_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _mask_raw_blocks(text: str) -> tuple[str, dict[str, str]]:
+    replacements: dict[str, str] = {}
+
+    def _replace(match: re.Match[str]) -> str:
+        token = f"__DETILDA_RAW_BLOCK_{len(replacements)}__"
+        replacements[token] = match.group(0)
+        return token
+
+    return _RAW_BLOCK_RE.sub(_replace, text), replacements
+
+
+def _split_tag_boundaries(text: str) -> str:
+    # Split only on whitespace between tags to avoid changing meaningful text nodes.
+    return re.sub(r">\s*<", ">\n<", text)
+
+
+def _is_self_closing(tag_text: str) -> bool:
+    return tag_text.endswith("/>")
+
+
+def _restore_raw_blocks(text: str, replacements: dict[str, str]) -> str:
+    for token, original in replacements.items():
+        text = text.replace(token, original)
+    return text
 
 
 def _normalize_pretty_html(text: str) -> str:
-    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    compact: list[str] = []
-    previous_blank = False
-    for line in lines:
-        is_blank = line.strip() == ""
-        if is_blank and previous_blank:
+    normalized = _normalize_newlines(text)
+    masked, raw_blocks = _mask_raw_blocks(normalized)
+    split = _split_tag_boundaries(masked)
+
+    lines = split.split("\n")
+    pretty: list[str] = []
+    indent = 0
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if pretty and pretty[-1] != "":
+                pretty.append("")
             continue
-        compact.append(line)
-        previous_blank = is_blank
-    result = "\n".join(compact).strip("\n") + "\n"
-    return result
+
+        close_match = _CLOSE_TAG_RE.match(line)
+        if close_match:
+            indent = max(0, indent - 1)
+
+        pretty.append(f"{'  ' * indent}{line}")
+
+        open_match = _OPEN_TAG_RE.match(line)
+        if open_match:
+            tag_name = open_match.group(1).lower()
+            if (
+                not _is_self_closing(line)
+                and tag_name not in _VOID_TAGS
+                and not re.search(rf"</{re.escape(tag_name)}\s*>", line, flags=re.IGNORECASE)
+            ):
+                indent += 1
+
+    result = "\n".join(pretty).strip("\n") + "\n"
+    return _restore_raw_blocks(result, raw_blocks)
 
 
-def _extract_doctype(text: str) -> str | None:
-    match = re.match(r"(?is)^\s*(<!doctype[^>]*>)", text)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _prettify_html_with_lxml(text: str) -> str:
-    parser = html.HTMLParser(encoding="utf-8", recover=True, remove_comments=False)
-    tree = html.document_fromstring(text, parser=parser)
-    doctype = _extract_doctype(text)
-    pretty = etree.tostring(
-        tree,
-        method="html",
-        pretty_print=True,
-        encoding="unicode",
-        doctype=doctype,
-    )
-    return _normalize_pretty_html(pretty)
-
-
-def _prettify_html_with_bs4(text: str) -> str:
-    soup = BeautifulSoup(text, "html.parser")
-    pretty = soup.prettify()
-    return _normalize_pretty_html(pretty)
-
-
-def _resolve_prettify_engine() -> tuple[str | None, str | None]:
-    if etree is not None and html is not None:
-        return "lxml", None
-    if BeautifulSoup is not None:
-        return "bs4", "html_prettify: lxml not installed, using BeautifulSoup fallback"
-    return None, "html_prettify skipped: lxml not installed"
-
-
-def run(context: ProjectContext, stats: Any | None = None) -> int:
+def run(context: "ProjectContext", stats: Any | None = None) -> int:
     targets = _iter_targets(context.project_root)
-    engine, warning_message = _resolve_prettify_engine()
-    if warning_message:
-        logger.warn(f"[html_prettify] {warning_message}")
-        if stats is not None and hasattr(stats, "warnings"):
-            stats.warnings += 1
-    if engine is None:
-        if stats is not None and hasattr(stats, "html_prettify_skipped"):
-            stats.html_prettify_skipped = True
-        logger.info("[html_prettify] ✅ Завершено. Отформатировано файлов: 0")
-        return 0
-
     formatted = 0
+
     for path in targets:
         rel_path = utils.relpath(path, context.project_root)
         try:
             original = utils.safe_read(path)
-            if engine == "lxml":
-                updated = _prettify_html_with_lxml(original)
-            else:
-                updated = _prettify_html_with_bs4(original)
-            if updated != original.replace("\r\n", "\n").replace("\r", "\n"):
+            updated = _normalize_pretty_html(original)
+            if updated != _normalize_newlines(original):
                 utils.safe_write(path, updated)
                 formatted += 1
                 logger.info(f"🧼 HTML приведён в порядок: {rel_path}")
         except Exception as exc:
             logger.err(f"[html_prettify] Ошибка форматирования {rel_path}: {exc}")
-            if stats is not None:
-                if hasattr(stats, "errors"):
-                    stats.errors += 1
+            if stats is not None and hasattr(stats, "errors"):
+                stats.errors += 1
+
     if stats is not None and hasattr(stats, "formatted_html_files"):
         stats.formatted_html_files = getattr(stats, "formatted_html_files", 0) + formatted
     logger.info(f"[html_prettify] ✅ Завершено. Отформатировано файлов: {formatted}")
