@@ -19,7 +19,7 @@ def _fake_safe_load(_text: str, *_args, **_kwargs):
                 {"pattern": r"(?i)\btil", "replacement": "ai"},
             ],
             "ignore_prefixes": ["http://", "https://", "//", "data:", "mailto:", "tel:", "#"],
-            "text_extensions": [".html"],
+            "text_extensions": [".html", ".js"],
         },
         "images": {
             "comment_out_link_tags": {"rel_values": []},
@@ -75,3 +75,35 @@ def test_replace_rules_without_explicit_loader(tmp_path: Path) -> None:
     update_all_refs_in_project(tmp_path, {})
 
     assert "ai-rec" in other.read_text(encoding="utf-8")
+
+
+def test_js_replace_rules_keep_camel_case_and_regex_literals(tmp_path: Path) -> None:
+    script = tmp_path / "aida-blocks-1.min.js"
+    script.write_text(
+        "\n".join(
+            [
+                "const width = newImage.naturalWidth + sizerWidth + colAmount;",
+                "const re = /OS \\d/;",
+                "const selector = '.t-records .t-popup';",
+                "const attr = 'data-tilda-mode';",
+                "const eventName = 'tildamodal:show';",
+                "window.Tilda.sendEventToStatistics();",
+                "Tilda.sendEventToStatistics();",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    loader = ConfigLoader(ROOT)
+    update_all_refs_in_project(tmp_path, {}, loader)
+
+    result = script.read_text(encoding="utf-8")
+    assert "newImage.naturalWidth" in result
+    assert "sizerWidth" in result
+    assert "colAmount" in result
+    assert "/OS \\d/" in result
+    assert ".ai-records .ai-popup" in result
+    assert "data-aida-mode" in result
+    assert "aidamodal:show" in result
+    assert "window.aida.sendEventToStatistics()" in result
+    assert "aida.sendEventToStatistics()" in result
