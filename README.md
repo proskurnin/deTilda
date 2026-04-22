@@ -61,6 +61,18 @@ Detilda — офлайн-инструмент автоматизации, кот
 - Запуск тестов: `pytest` из корня репозитория.
 - При изменениях сборки рекомендуется запускать `python tools/sync_manifest.py` для обновления `manifest.json`.
 
+### Обновления за последние 2 дня (21–22 апреля 2026)
+
+- Улучшена обработка и локализация шрифтов Google Fonts для офлайн/GDPR-сценариев (`core/fonts_localizer.py`, `core/pipeline.py`).
+- Добавлена типизированная загрузка конфигурации через Pydantic-совместимые схемы (`core/schemas.py`, `core/config_loader.py`, `core/pydantic_compat.py`).
+- Переработана интеграция форм: `send_email.php` теперь копируется как универсальный шаблон без интерактивных запросов.
+- Усилена постобработка HTML: добавлен модуль prettify и улучшена стабильность/идемпотентность форматирования (`core/html_prettify.py`).
+- Расширены сводки конвейера: добавлены более честные счётчики предупреждений/ошибок, блок критичных находок и расширенная статистика.
+- Повышена отказоустойчивость `.htaccess`: добавлены fallback-маршруты, более строгая диагностика сломанных путей и отчётность.
+- Исправлен ряд регрессий в `main.py` и `core/pipeline.py` (обработка архивов, подсчёт форм, совместимость очистки и инъекции скриптов).
+- Улучшена работа с якорными ссылками в меню и покрытие регрессионными тестами (`tests/test_refs_anchor_links.py`).
+- Расширено тестовое покрытие ключевых модулей: формы, маршруты, форматирование HTML, checker и суммарная отчётность.
+
 ## Product description
 
 Detilda is an offline automation tool that tidies up exported [Tilda.cc](https://tilda.cc) projects before they are deployed on external hosting. The program extracts the site archive, normalizes filenames and folder structure, removes Tilda-specific artefacts, fixes internal links, and produces a final report. Detilda runs locally, requires no connection to Tilda, and delivers self-hosted builds ready to publish on any CDN or file server.
@@ -121,3 +133,15 @@ Detilda is an offline automation tool that tidies up exported [Tilda.cc](https:/
 - Dependencies: `PyYAML` for configuration parsing, `pytest` for tests.
 - Run the test suite with `pytest` from the repository root.
 - After build changes, run `python tools/sync_manifest.py` to refresh `manifest.json`.
+
+### Updates from the last 2 days (April 21–22, 2026)
+
+- Improved Google Fonts localization for offline/GDPR-friendly builds (`core/fonts_localizer.py`, `core/pipeline.py`).
+- Introduced typed configuration loading through Pydantic-compatible schemas (`core/schemas.py`, `core/config_loader.py`, `core/pydantic_compat.py`).
+- Reworked form integration: `send_email.php` is now copied as a universal template with no interactive prompts.
+- Strengthened HTML post-processing by adding prettify support and improving formatting stability/idempotence (`core/html_prettify.py`).
+- Expanded pipeline summaries with more honest warning/error counters, a critical findings block, and richer processing stats.
+- Improved `.htaccess` resilience with fallback route handling, stricter broken-route diagnostics, and better reporting.
+- Fixed multiple regressions in `main.py` and `core/pipeline.py` (archive flow, form counting, cleaner/inject compatibility).
+- Improved same-page menu anchor link rewriting and added stronger regression coverage (`tests/test_refs_anchor_links.py`).
+- Increased test coverage across forms, routes, HTML formatting, checker behavior, and summary reporting.
