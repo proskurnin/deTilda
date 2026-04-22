@@ -7,7 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.images import fix_project_images
+from core.images import (
+    fix_project_images,
+    is_preview_or_placeholder_asset,
+    normalize_background_image_from_data_original,
+    normalize_img_src_from_data_original,
+)
 
 
 def test_fix_project_images_promotes_only_placeholder_img_sources(tmp_path: Path) -> None:
@@ -31,6 +36,45 @@ def test_fix_project_images_promotes_only_placeholder_img_sources(tmp_path: Path
     assert "background-image:url('images/test.jpg')" in text
 
 
+def test_normalize_img_src_from_data_original_placeholder_empty(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "file_test.jpg").write_bytes(b"x")
+    source = '<img src="images/file_-_empty_test.jpg" data-original="images/file_test.jpg">'
+
+    updated, fixed, unresolved = normalize_img_src_from_data_original(source, tmp_path)
+
+    assert 'src="images/file_test.jpg"' in updated
+    assert fixed == 1
+    assert unresolved == 0
+
+
+def test_normalize_img_src_from_data_original_preview_resize(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "file_test.jpg").write_bytes(b"x")
+    source = '<img src="images/file_-_resize_20x_test.jpg" data-original="images/file_test.jpg">'
+
+    updated, fixed, unresolved = normalize_img_src_from_data_original(source, tmp_path)
+
+    assert 'src="images/file_test.jpg"' in updated
+    assert fixed == 1
+    assert unresolved == 0
+
+
+def test_normalize_background_image_from_data_original_preview(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "file_test.jpg").write_bytes(b"x")
+    source = (
+        '<div data-original="images/file_test.jpg" '
+        'style="background-image:url(\'images/file_-_resizeb_20x_test.jpg\');"></div>'
+    )
+
+    updated, fixed, unresolved = normalize_background_image_from_data_original(source, tmp_path)
+
+    assert "background-image:url('images/file_test.jpg')" in updated
+    assert fixed == 1
+    assert unresolved == 0
+
+
 def test_fix_project_images_skips_missing_full_image_candidates(tmp_path: Path) -> None:
     html = tmp_path / "page.html"
     html.write_text(
@@ -43,6 +87,25 @@ def test_fix_project_images_skips_missing_full_image_candidates(tmp_path: Path) 
     assert result.updated_files == 0
     assert result.unresolved_candidates == 1
     assert 'src="images/1x1.gif"' in html.read_text(encoding="utf-8")
+
+
+def test_normalize_img_src_from_data_original_skips_without_data_original(tmp_path: Path) -> None:
+    source = '<img src="images/file_-_resize_20x_test.jpg">'
+    updated, fixed, unresolved = normalize_img_src_from_data_original(source, tmp_path)
+    assert updated == source
+    assert fixed == 0
+    assert unresolved == 0
+
+
+def test_normalize_img_src_from_data_original_skips_external_url(tmp_path: Path) -> None:
+    source = (
+        '<img src="https://cdn.example.com/file_-_resize_20x_test.jpg" '
+        'data-original="images/file_test.jpg">'
+    )
+    updated, fixed, unresolved = normalize_img_src_from_data_original(source, tmp_path)
+    assert updated == source
+    assert fixed == 0
+    assert unresolved == 0
 
 
 def test_fix_project_images_does_not_override_existing_img_src(tmp_path: Path) -> None:
@@ -67,6 +130,19 @@ def test_fix_project_images_does_not_override_existing_img_src(tmp_path: Path) -
     assert "background:url('images/bg.jpg')" in text
 
 
+def test_normalize_background_image_from_data_original_skips_external_url(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "file_test.jpg").write_bytes(b"x")
+    source = (
+        '<div data-original="images/file_test.jpg" '
+        'style="background-image:url(\'https://cdn.example.com/resize_20x_bg.jpg\');"></div>'
+    )
+    updated, fixed, unresolved = normalize_background_image_from_data_original(source, tmp_path)
+    assert updated == source
+    assert fixed == 0
+    assert unresolved == 0
+
+
 def test_fix_project_images_keeps_normal_src_without_data_original(tmp_path: Path) -> None:
     html = tmp_path / "body.html"
     html.write_text('<img src="images/normal.jpg">', encoding="utf-8")
@@ -78,3 +154,20 @@ def test_fix_project_images_keeps_normal_src_without_data_original(tmp_path: Pat
     assert result.updated_files == 0
     assert result.img_tags_fixed == 0
     assert 'src="images/normal.jpg"' in html.read_text(encoding="utf-8")
+
+
+def test_normalize_img_src_from_data_original_skips_when_already_original(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "file_test.jpg").write_bytes(b"x")
+    source = '<img src="images/file_test.jpg" data-original="images/file_test.jpg">'
+    updated, fixed, unresolved = normalize_img_src_from_data_original(source, tmp_path)
+    assert updated == source
+    assert fixed == 0
+    assert unresolved == 0
+
+
+def test_is_preview_or_placeholder_asset_patterns() -> None:
+    assert is_preview_or_placeholder_asset("images/file_-_empty_test.jpg")
+    assert is_preview_or_placeholder_asset("images/file_-_resizeb_20x_test.jpg")
+    assert is_preview_or_placeholder_asset("images/1px.png")
+    assert not is_preview_or_placeholder_asset("images/file_test.jpg")
