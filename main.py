@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CLI entry point orchestrating the Detilda pipeline."""
+"""CLI entry point orchestrating the deTilda pipeline."""
 
 from __future__ import annotations
 from pathlib import Path
@@ -7,7 +7,7 @@ from pathlib import Path
 from core import logger
 from core.pipeline import DetildaPipeline
 from core.utils import ensure_dir, load_manifest
-from core.version import APP_VERSION
+from core.version import APP_TITLE, APP_VERSION
 
 VERSION = APP_VERSION
 
@@ -22,6 +22,7 @@ def _prompt(prompt: str) -> str:
 def _process_archive(
     archive_name: str,
     workdir: Path,
+    logs_dir: Path,
     version: str,
 ) -> bool:
     archive_path = workdir / archive_name
@@ -29,7 +30,7 @@ def _process_archive(
         print(f"❌ Архив не найден: {archive_path}")
         return False
 
-    pipeline = DetildaPipeline(version=version)
+    pipeline = DetildaPipeline(version=version, logs_dir=logs_dir)
     try:
         pipeline.run(archive_path)
         return True
@@ -41,10 +42,14 @@ def _process_archive(
 
 def main() -> None:
     manifest = load_manifest()
+    paths = manifest.get("paths", {})
     version = manifest.get("version", VERSION)
-    workdir = ensure_dir(Path(manifest.get("paths", {}).get("workdir", "_workdir")))
 
-    print(f"=== Detilda {version} ===")
+    repo_root = Path(__file__).resolve().parent
+    workdir = ensure_dir(repo_root / paths.get("workdir", "_workdir"))
+    logs_dir = ensure_dir(repo_root / paths.get("logs", "logs"))
+
+    print(f"=== {APP_TITLE} ===")
     print(f"Рабочая папка: {workdir.resolve()}")
 
     archive_prompt = (
@@ -67,7 +72,7 @@ def main() -> None:
             print("======================================")
             print(f"▶️  {index}/{len(archive_names)}: обработка архива {archive_name}")
 
-        processed_ok = _process_archive(archive_name, workdir, version)
+        processed_ok = _process_archive(archive_name, workdir, logs_dir, version)
         had_errors = had_errors or not processed_ok
 
     if had_errors:

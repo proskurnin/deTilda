@@ -1,24 +1,16 @@
 {
-  "name": "Detilda",
-  "version": "v4.7 Stable",
-  "release_date": "2025-10-24",
-  "description": "Offline Tilda cleanup and re-packaging automation tool.",
+  "name": "deTilda",
+  "version": "4.7.0",
+  "release_date": "2026-04-24",
+  "description": "Автоматическая подготовка Tilda-экспортов к деплою на собственный хостинг.",
   "authors": [
     "Roman Proskurnin"
   ],
-  "maintainer": "Roman Proskurnin",
   "license": "MIT",
   "entry_point": "main.py",
   "python": ">=3.10",
   "features": {
-    "archive_unpack": true,
-    "assets_cleanup": true,
-    "html_sanitizer": true,
-    "htaccess_parser": true,
-    "broken_link_fix": true,
-    "form_autogen": true,
-    "reports": false,
-    "logs": true
+    "reports": true
   },
   "paths": {
     "workdir": "_workdir",
@@ -26,24 +18,7 @@
     "config": "config",
     "core": "core"
   },
-  "log_format": "[{time}] {level} {message}",
-  "report_format": "text",
-  "default_email": "r@prororo.com",
   "build": {
-    "package_name": "detilda_v4.7_Stable.zip",
-    "include": [
-      "main.py",
-      "manifest.json",
-      "core/*.py",
-      "config/*.json",
-      "config/*.yaml"
-    ],
-    "exclude": [
-      "_workdir/*",
-      "logs/*",
-      "*.log",
-      "*.tmp",
-      "__pycache__/*"
-    ]
+    "package_name": "detilda_4.7.0.zip"
   }
 }

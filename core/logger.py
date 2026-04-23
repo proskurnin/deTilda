@@ -94,19 +94,27 @@ def module_scope(module_name: str) -> Iterator[None]:
         info(f"[{module_name}] ✅ Завершено за {duration:.2f} сек")
 
 
-def attach_to_project(project_root: Path) -> None:
-    """Initialise logging for *project_root*."""
+def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> None:
+    """Initialise logging for *project_root*.
+
+    logs_dir: путь к папке логов; если не передан — вычисляется относительно project_root.
+    """
 
     global _log_file, _project_name, _logs_dir
 
     project_root = Path(project_root)
     _project_name = project_root.name
-    base_dir = (
-        project_root.parent.parent
-        if project_root.parent.name == "_workdir"
-        else project_root.parent
-    )
-    _logs_dir = base_dir / "logs"
+
+    if logs_dir is not None:
+        _logs_dir = Path(logs_dir)
+    else:
+        base_dir = (
+            project_root.parent.parent
+            if project_root.parent.name == "_workdir"
+            else project_root.parent
+        )
+        _logs_dir = base_dir / "logs"
+
     _logs_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = _logs_dir / f"{_project_name}_detilda.log"
@@ -120,7 +128,7 @@ def attach_to_project(project_root: Path) -> None:
 
     header = (
         f"{'=' * 80}\n"
-        f"🕓 {_timestamp()} — Detilda log started for '{_project_name}'\n"
+        f"🕓 {_timestamp()} — deTilda log started for '{_project_name}'\n"
         f"{'=' * 80}\n"
     )
     _log_file.write(header)
@@ -143,7 +151,7 @@ def close() -> None:
         return
     footer = (
         f"{'=' * 80}\n"
-        f"🏁 Завершение Detilda для {_project_name}\n"
+        f"🏁 Завершение deTilda для {_project_name}\n"
         f"{'=' * 80}\n\n"
     )
     try:

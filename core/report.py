@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Final, Iterable, Tuple
 
 from core import logger, utils
-from core.version import APP_TITLE
+from core.version import APP_ENTRY_POINT, APP_LICENSE, APP_PYTHON, APP_RELEASE_DATE, APP_TITLE
 
 __all__ = ["generate_intermediate_report", "generate_final_report"]
 
@@ -102,8 +102,20 @@ def generate_final_report(
         status = f"⚠️ {APP_TITLE} — завершено с предупреждениями"
     else:
         status = f"✅ {APP_TITLE} — завершено успешно"
+    meta_parts = [APP_TITLE]
+    if APP_RELEASE_DATE:
+        meta_parts.append(f"выпуск {APP_RELEASE_DATE}")
+    if APP_LICENSE:
+        meta_parts.append(APP_LICENSE)
+    if APP_PYTHON:
+        meta_parts.append(f"Python {APP_PYTHON}")
+    if APP_ENTRY_POINT:
+        meta_parts.append(f"точка входа: {APP_ENTRY_POINT}")
+    meta_line = " | ".join(meta_parts)
+
     text = (
         f"=== {APP_TITLE} — Финальный отчёт ===\n"
+        f"{meta_line}\n"
         f"Проект: {project_root.name}\n"
         f"Путь: {project_root.resolve()}\n"
         f"Дата: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"

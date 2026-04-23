@@ -78,8 +78,9 @@ class PipelineStats:
 
 
 class DetildaPipeline:
-    def __init__(self, version: str = APP_VERSION) -> None:
+    def __init__(self, version: str = APP_VERSION, logs_dir: Path | None = None) -> None:
         self.version = version
+        self.logs_dir = logs_dir
 
     def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
@@ -89,10 +90,10 @@ class DetildaPipeline:
             raise RuntimeError("Не удалось распаковать архив")
 
         context = ProjectContext.from_project_root(project_root)
-        context.attach_logger()
+        context.attach_logger(logs_dir=self.logs_dir)
 
         try:
-            logger.info(f"=== Detilda {self.version} ===")
+            logger.info(f"=== deTilda {self.version} ===")
             logger.info(f"Рабочая папка: {archive_path.parent.resolve()}")
             logger.info(f"Дата запуска: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -230,7 +231,7 @@ class DetildaPipeline:
         effective_warnings = stats.warnings
         effective_errors = stats.errors
         status_message = self._status_message(stats)
-        logger.info(f"🎯  Detilda {self.version} — {status_message}")
+        logger.info(f"🎯  deTilda {self.version} — {status_message}")
         logger.info(f"📦 Переименовано ассетов: {stats.renamed_assets}")
         logger.info(f"🗑 Удалено ассетов: {stats.removed_assets}")
         logger.info(f"🧹 Очищено файлов: {stats.cleaned_files}")
@@ -257,11 +258,11 @@ class DetildaPipeline:
             logger.warn("⚠️ html_prettify пропущен из-за отсутствующей зависимости")
 
         if effective_errors > 0:
-            logger.err(f"❌ Detilda {self.version} — завершено с ошибками")
+            logger.err(f"❌ deTilda {self.version} — завершено с ошибками")
         elif effective_warnings > 0:
-            logger.warn(f"⚠️ Detilda {self.version} — завершено с предупреждениями")
+            logger.warn(f"⚠️ deTilda {self.version} — завершено с предупреждениями")
         else:
-            logger.ok(f"✅ Detilda {self.version} — завершено успешно")
+            logger.ok(f"✅ deTilda {self.version} — завершено успешно")
 
         critical_findings: list[str] = []
         if stats.broken_htaccess_routes > 0:

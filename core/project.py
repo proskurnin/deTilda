@@ -53,8 +53,9 @@ class ProjectContext:
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
 
-    def attach_logger(self) -> None:
-        logger.attach_to_project(self.project_root)
+    def attach_logger(self, logs_dir: Path | None = None) -> None:
+        resolved_logs_dir = logs_dir or self.ensure_logs_dir()
+        logger.attach_to_project(self.project_root, logs_dir=resolved_logs_dir)
 
     def update_rename_map(self, mapping: Dict[str, str]) -> None:
         self.rename_map.update(mapping)

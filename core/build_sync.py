@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict
 
@@ -67,6 +68,8 @@ def synchronize_manifest_with_build(
 
     if version:
         manifest["version"] = version
+
+    manifest["release_date"] = date.today().isoformat()
 
     build_section["package_name"] = package_path.name
     manifest["build"] = build_section
