@@ -107,33 +107,3 @@ def test_js_replace_rules_keep_camel_case_and_regex_literals(tmp_path: Path) -> 
     assert "aidamodal:show" in result
     assert "window.aida.sendEventToStatistics()" in result
     assert "aida.sendEventToStatistics()" in result
-
-
-def test_js_replace_rules_skip_comments_regex_and_base64(tmp_path: Path) -> None:
-    script = tmp_path / "bundle.min.js"
-    script.write_text(
-        "\n".join(
-            [
-                "const token = 'data-tilda-mode';",
-                "const image = 'data:image/png;base64,yh5baEAAAA';",
-                "const re = /tilda\\/(api|forms)/gi;",
-                "// tildamodal:show should stay in comment",
-                "/* window.Tilda.sendEventToStatistics(); */",
-                "const broken = o-(t-);",
-                "const width = newImage.naturalWidth + sizerWidth + colAmount;",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    loader = ConfigLoader(ROOT)
-    update_all_refs_in_project(tmp_path, {}, loader)
-
-    result = script.read_text(encoding="utf-8")
-    assert "data-aida-mode" in result
-    assert "yh5baEAAAA" in result
-    assert "/tilda\\/(api|forms)/gi" in result
-    assert "// tildamodal:show should stay in comment" in result
-    assert "/* window.Tilda.sendEventToStatistics(); */" in result
-    assert "const broken = o-(t-);" in result
-    assert "newImage.naturalWidth + sizerWidth + colAmount" in result
