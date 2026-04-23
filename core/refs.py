@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -111,9 +110,6 @@ _JS_REPLACE_HINT_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 _JS_TILDA_NAMESPACE_RE = re.compile(r"\bTilda(?=\.)")
-_JS_NAMESPACE_HINTS = ("Tilda", "tilda", "tild")
-_JS_SAFE_MODE_MINIFIED_SUFFIX = ".min.js"
-_JS_SAFE_MODE_SIZE_THRESHOLD = 250_000
 
 
 def _apply_replace_rules_in_string(
@@ -124,20 +120,12 @@ def _apply_replace_rules_in_string(
 
 
 def _replace_namespace_identifiers(code: str) -> tuple[str, int]:
-    if "Tilda" not in code:
-        return code, 0
     updated, count = _JS_TILDA_NAMESPACE_RE.subn("aida", code)
     return updated, count
 
 
-def _apply_replace_rules_js(
-    text: str,
-    rules: Iterable[tuple[re.Pattern[str], str]],
-) -> tuple[str, int, int, int, int]:
+def _apply_replace_rules_js(text: str, rules: Iterable[tuple[re.Pattern[str], str]]) -> tuple[str, int]:
     total = 0
-    namespace_replacements = 0
-    chunk_count = 0
-    max_chunk_size = 0
     out: list[str] = []
     i = 0
     n = len(text)
@@ -168,13 +156,9 @@ def _apply_replace_rules_js(
                     break
                 j += 1
             if j >= n:
-                tail = text[i:]
-                chunk_count += 1
-                max_chunk_size = max(max_chunk_size, len(tail))
-                code_chunk, chunk_replacements = _replace_namespace_identifiers(tail)
+                code_chunk, chunk_count = _replace_namespace_identifiers(text[i:])
                 out.append(code_chunk)
-                total += chunk_replacements
-                namespace_replacements += chunk_replacements
+                total += chunk_count
                 break
 
             raw_literal = text[i : j + 1]
@@ -183,8 +167,7 @@ def _apply_replace_rules_js(
                 out.append(raw_literal)
             else:
                 inner = raw_literal[1:-1]
-                inner_lower = inner.lower()
-                if any(hint in inner_lower for hint in ("tilda", "tild", "data-", "css/", "js/", "images/", "files/")) and _JS_REPLACE_HINT_RE.search(inner):
+                if _JS_REPLACE_HINT_RE.search(inner):
                     replaced_inner, count = _apply_replace_rules_in_string(inner, rules)
                     out.append(f"{quote}{replaced_inner}{quote}")
                     total += count
@@ -239,68 +222,33 @@ def _apply_replace_rules_js(
         j = i
         while j < n and text[j] not in quote_chars and text[j] != "/":
             j += 1
-        raw_chunk = text[i:j]
-        chunk_count += 1
-        max_chunk_size = max(max_chunk_size, len(raw_chunk))
-        code_chunk, chunk_replacements = _replace_namespace_identifiers(raw_chunk)
+        code_chunk, chunk_count = _replace_namespace_identifiers(text[i:j])
         out.append(code_chunk)
-        total += chunk_replacements
-        namespace_replacements += chunk_replacements
+        total += chunk_count
         i = j
 
-    return "".join(out), total, chunk_count, max_chunk_size, namespace_replacements
+    return "".join(out), total
 
 
 def _apply_replace_rules_for_suffix(
     text: str,
     rules: Iterable[tuple[re.Pattern[str], str]],
     suffix: str,
-    file_label: str = "",
-    safe_mode: bool = False,
 ) -> tuple[str, int]:
     if suffix == ".js":
-        logger.info(f"[refs] START JS file: {file_label or '<unknown>'}")
-        if safe_mode:
-            logger.info(f"[refs] JS safe mode enabled: {file_label or '<unknown>'}")
-            return _apply_replace_rules(text, rules)
-
-        has_namespace_hints = any(marker in text for marker in _JS_NAMESPACE_HINTS)
-        if has_namespace_hints:
-            logger.info(f"[refs] namespace replace start: {file_label or '<unknown>'}")
-        updated, replacements, chunk_count, max_chunk_size, namespace_replacements = _apply_replace_rules_js(text, rules)
-        logger.info(
-            f"[refs] JS chunk count: {chunk_count}; JS chunk size: {max_chunk_size}; file: {file_label or '<unknown>'}"
-        )
-        if has_namespace_hints:
-            logger.info(
-                f"[refs] namespace replace end: {file_label or '<unknown>'}; replacements: {namespace_replacements}"
-            )
-        return updated, replacements
+        return _apply_replace_rules_js(text, rules)
     return _apply_replace_rules(text, rules)
 
-def _apply_rename_map(
-    text: str,
-    rename_map: Dict[str, str],
-    rename_pattern: re.Pattern[str] | None = None,
-) -> tuple[str, int]:
-    if not rename_map or rename_pattern is None:
-        return text, 0
-    if rename_pattern.search(text) is None:
-        return text, 0
-
-    def _repl(match: re.Match[str]) -> str:
-        return rename_map[match.group(0)]
-
-    updated, replacements = rename_pattern.subn(_repl, text)
-    return updated, replacements
-
-
-def _build_rename_pattern(rename_map: Dict[str, str]) -> re.Pattern[str] | None:
-    keys = [key for key in rename_map if key]
-    if not keys:
-        return None
-    keys.sort(key=len, reverse=True)
-    return re.compile("|".join(re.escape(key) for key in keys))
+def _apply_rename_map(text: str, rename_map: Dict[str, str]) -> tuple[str, int]:
+    replacements = 0
+    for old, new in sorted(rename_map.items(), key=lambda item: len(item[0]), reverse=True):
+        if not old:
+            continue
+        escaped = re.escape(old)
+        pattern = re.compile(escaped)
+        text, count = pattern.subn(new, text)
+        replacements += count
+    return text, replacements
 
 
 def _cleanup_broken_markup(text: str) -> str:
@@ -490,7 +438,6 @@ def update_all_refs_in_project(
         ".txt",
     )
     replace_rules = _compile_replace_rules(patterns_cfg.get("replace_rules", []))
-    rename_pattern = _build_rename_pattern(rename_map)
 
     images_cfg = loader.images()
     link_rel_values = [
@@ -517,7 +464,6 @@ def update_all_refs_in_project(
     html_extensions = {".html", ".htm"}
     for path in utils.list_files_recursive(project_root, extensions=text_extensions):
         suffix = path.suffix.lower()
-        rel_path = utils.relpath(path, project_root)
         try:
             text = utils.safe_read(path)
         except Exception as exc:
@@ -541,28 +487,13 @@ def update_all_refs_in_project(
                 comment_patterns,
             )
 
-        file_start = time.perf_counter()
-        js_safe_mode = (
-            suffix == ".js"
-            and (path.name.lower().endswith(_JS_SAFE_MODE_MINIFIED_SUFFIX) or len(text) >= _JS_SAFE_MODE_SIZE_THRESHOLD)
-        )
-        text, rename_replacements = _apply_rename_map(text, rename_map, rename_pattern)
-        text, rule_replacements = _apply_replace_rules_for_suffix(
-            text,
-            replace_rules,
-            suffix,
-            file_label=rel_path,
-            safe_mode=js_safe_mode,
-        )
+        text, rename_replacements = _apply_rename_map(text, rename_map)
+        text, rule_replacements = _apply_replace_rules_for_suffix(text, replace_rules, suffix)
 
         total_changes = fixed + rename_replacements + rule_replacements
         if total_changes and text != original:
             utils.safe_write(path, text)
-            logger.info(f"🔗 Обновлены ссылки: {rel_path}")
-
-        elapsed = time.perf_counter() - file_start
-        if suffix == ".js" and elapsed > 2.0:
-            logger.warn(f"[refs] slow file warning: {rel_path} took {elapsed:.2f}s")
+            logger.info(f"🔗 Обновлены ссылки: {utils.relpath(path, project_root)}")
 
         fixed_total += fixed + rename_replacements + rule_replacements
         broken_total += broken
