@@ -72,15 +72,17 @@ patterns:
     - "(https?://|//)[^\\s'\"]*tildaapi\\.com[^\\s'\"]*"
 
 images:
-  # Физическое удаление файлов — assets.py
-  # after_rename: удаляются после того как были переименованы
-  # as_is: удаляются сразу без переименования
+  # Физическое удаление файлов сразу под оригинальным именем — assets.py
+  # Нет смысла сначала переименовывать мусорные файлы Tilda, а потом удалять —
+  # удаляем сразу по имени как они приходят в экспорте
   delete_physical_files:
-    after_rename:
+    as_is:
+      - "tildacopy.png"
+      - "tildacopy_black.png"
+      - "tildafavicon.ico"
       - "aidacopy.png"
       - "aidacopy_black.png"
       - "aidafavicon.ico"
-    as_is:
       - "logo404.png"
 
   # Ссылки на эти файлы комментируются в HTML (<!-- ... -->)
