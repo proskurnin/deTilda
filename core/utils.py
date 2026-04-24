@@ -1,19 +1,16 @@
-"""Reusable helper utilities for the Detilda toolkit."""
+"""Reusable helper utilities for the deTilda toolkit."""
 from __future__ import annotations
 
 import json
 import shutil
 import time
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from core import logger
 
 __all__ = [
-    "clear_file",
-    "count_lines",
     "ensure_dir",
-    "file_exists",
     "get_elapsed_time",
     "list_files_recursive",
     "load_manifest",
@@ -51,19 +48,6 @@ def safe_copy(src: Path | str, dst: Path | str) -> None:
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src_path, dst_path)
     logger.info(f"📄 Копия создана: {dst_path.name}")
-
-
-def clear_file(path: Path | str) -> None:
-    _to_path(path).write_text("", encoding="utf-8")
-    logger.info(f"🧹 Очищен файл: {path}")
-
-
-def count_lines(text: str) -> int:
-    return text.count("\n") + 1 if text else 0
-
-
-def file_exists(path: Path | str) -> bool:
-    return _to_path(path).exists()
 
 
 def safe_delete(path: Path | str) -> None:
@@ -108,7 +92,7 @@ def load_manifest() -> dict:
         return {}
     try:
         return json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # pragma: no cover - defensive parsing
+    except Exception as exc:
         logger.err(f"[utils.load_manifest] Ошибка чтения manifest.json: {exc}")
         return {}
 
