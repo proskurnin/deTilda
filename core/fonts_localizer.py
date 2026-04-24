@@ -1,17 +1,15 @@
 """Localize Google Fonts references in project CSS files."""
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import os
 import re
-import ssl
 import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from core import logger, utils
+from core.downloader import fetch_bytes, fetch_text
 
 __all__ = ["localize_google_fonts"]
 
@@ -22,64 +20,6 @@ _GOOGLE_IMPORT_RE = re.compile(
 _URL_RE = re.compile(r"url\((?P<quote>[\"']?)(?P<url>[^)\"']+)(?P=quote)\)", re.IGNORECASE)
 
 
-_SSL_FALLBACK_CONTEXT: ssl.SSLContext | None = None
-
-
-def _get_unverified_context() -> ssl.SSLContext:
-    global _SSL_FALLBACK_CONTEXT
-    if _SSL_FALLBACK_CONTEXT is None:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        _SSL_FALLBACK_CONTEXT = context
-    return _SSL_FALLBACK_CONTEXT
-
-
-def _fetch_text(url: str) -> str:
-    normalized = url if not url.startswith("//") else f"https:{url}"
-    request = urllib.request.Request(
-        normalized,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/css,*/*;q=0.1",
-        },
-    )
-    try:
-        with contextlib.closing(urllib.request.urlopen(request, timeout=20)) as response:  # type: ignore[arg-type]
-            raw = response.read()
-    except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), ssl.SSLError):
-            with contextlib.closing(
-                urllib.request.urlopen(request, timeout=20, context=_get_unverified_context())  # type: ignore[arg-type]
-            ) as response:
-                raw = response.read()
-        else:
-            raise
-    return raw.decode("utf-8", errors="replace")
-
-
-def _fetch_bytes(url: str) -> bytes:
-    normalized = url if not url.startswith("//") else f"https:{url}"
-    request = urllib.request.Request(
-        normalized,
-        headers={
-            "User-Agent": "Detilda/1.0",
-            "Accept": "font/woff2,*/*;q=0.1",
-        },
-    )
-    try:
-        with contextlib.closing(urllib.request.urlopen(request, timeout=20)) as response:  # type: ignore[arg-type]
-            return response.read()
-    except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), ssl.SSLError):
-            with contextlib.closing(
-                urllib.request.urlopen(request, timeout=20, context=_get_unverified_context())  # type: ignore[arg-type]
-            ) as response:
-                return response.read()
-        raise
 
 
 def _is_google_font_file(url: str) -> bool:
@@ -121,7 +61,7 @@ def _replace_font_urls(
             destination = _target_path(project_root, absolute)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
-                payload = _fetch_bytes(absolute)
+                payload = fetch_bytes(absolute)
                 destination.write_bytes(payload)
                 downloaded += 1
                 logger.info(
@@ -147,7 +87,7 @@ def _inline_google_imports(
     def _sub(match: re.Match[str]) -> str:
         nonlocal imports_inlined, downloaded
         import_url = _resolve_url("https://fonts.googleapis.com/", match.group("url"))
-        remote_css = _fetch_text(import_url)
+        remote_css = fetch_text(import_url)
         localized_css, downloaded_now = _replace_font_urls(remote_css, css_path, project_root, download_cache)
         downloaded += downloaded_now
         imports_inlined += 1

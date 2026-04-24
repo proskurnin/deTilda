@@ -88,6 +88,7 @@ def generate_final_report(
     ssl_bypass_downloads: int,
     forms_found: int,
     forms_hooked: int,
+    tilda_remnants: int,
     missing_htaccess_routes: Iterable[Tuple[str, str, str, str | None]],
     exec_time: float,
 ) -> None:
@@ -132,6 +133,7 @@ def generate_final_report(
         f"❌ Битых htaccess-маршрутов: {broken_htaccess_routes}\n"
         f"📝 Форм найдено: {forms_found}\n"
         f"🧩 Форм подключено к handler: {forms_hooked}\n"
+        f"{'✅' if tilda_remnants == 0 else '❌'} Остатков Tilda в ссылках: {tilda_remnants} (цель: 0)\n"
         f"⚠️ Предупреждений: {warnings}\n"
         f"⛔ Ошибок: {errors}\n"
         f"🕓 Время выполнения: {exec_time:.2f} сек\n"

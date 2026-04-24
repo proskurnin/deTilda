@@ -180,6 +180,10 @@ class DetildaPipeline:
             stats.warnings += link_check.broken
             stats.warnings += stats.broken_htaccess_routes
 
+            with logger.module_scope("tilda-remnants"):
+                remnants = checker.check_tilda_remnants(context.project_root, context.config_loader)
+            stats.warnings += remnants.total_occurrences
+
             stats.exec_time = time.time() - start_time
             with logger.module_scope("report"):
                 report.generate_final_report(
@@ -198,6 +202,7 @@ class DetildaPipeline:
                     ssl_bypass_downloads=stats.ssl_bypassed_downloads,
                     forms_found=stats.forms_found,
                     forms_hooked=stats.forms_hooked,
+                    tilda_remnants=remnants.total_occurrences,
                     missing_htaccess_routes=[
                         (item.alias, item.target, item.action, item.replacement)
                         for item in get_missing_routes()

@@ -1,14 +1,11 @@
 """Asset rename and cleanup utilities."""
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
-import ssl
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterable, Iterator, Tuple
@@ -16,6 +13,7 @@ from uuid import uuid4
 
 from core import logger, utils
 from core.config_loader import ConfigLoader, iter_section_list
+from core.downloader import fetch_bytes, resolve_download_folder
 from core.runtime_scripts import filter_removable_scripts
 
 if TYPE_CHECKING:  # pragma: no cover - type checking helper
@@ -101,80 +99,8 @@ def _lowercase_relative_links(text: str) -> tuple[str, bool]:
     return new_text, bool(count)
 
 
-def _resolve_download_target(url: str, rules: Iterable[Dict[str, object]]) -> Tuple[str, str] | None:
-    parsed = urllib.parse.urlsplit(url if not url.startswith("//") else f"https:{url}")
-    if parsed.scheme not in {"http", "https"}:
-        return None
-    filename = Path(urllib.parse.unquote(parsed.path)).name
-    if not filename:
-        return None
-    suffix = Path(filename).suffix.lower()
-    for rule in rules:
-        folder = str(rule.get("folder", "")).strip().strip("/")
-        if not folder:
-            continue
-        extensions = rule.get("extensions")
-        if extensions:
-            exts = {str(ext).lower() for ext in extensions if isinstance(ext, str)}
-            if suffix not in exts:
-                continue
-        return folder, filename
-    return None
 
 
-_SSL_FALLBACK_CONTEXT: ssl.SSLContext | None = None
-
-
-def _get_unverified_context() -> ssl.SSLContext:
-    global _SSL_FALLBACK_CONTEXT
-    if _SSL_FALLBACK_CONTEXT is None:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        _SSL_FALLBACK_CONTEXT = context
-    return _SSL_FALLBACK_CONTEXT
-
-
-def _fetch_with_ssl_fallback(request: urllib.request.Request, timeout: int) -> tuple[bytes, bool]:
-    try:
-        with contextlib.closing(
-            urllib.request.urlopen(request, timeout=timeout)  # type: ignore[arg-type]
-        ) as response:
-            return response.read(), False
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", None)
-        if not isinstance(reason, ssl.SSLError):
-            raise
-    except ssl.SSLError:
-        pass
-
-    with contextlib.closing(
-        urllib.request.urlopen(  # type: ignore[arg-type]
-            request,
-            timeout=timeout,
-            context=_get_unverified_context(),
-        )
-    ) as response:
-        return response.read(), True
-
-
-def _fetch_url(url: str) -> tuple[bytes, bool]:
-    normalized = url
-    if url.startswith("//"):
-        normalized = f"https:{url}"
-    request = urllib.request.Request(
-        normalized,
-        headers={
-            "User-Agent": "Detilda/1.0",
-            "Accept": "*/*",
-        },
-    )
-    payload, used_insecure_retry = _fetch_with_ssl_fallback(request, timeout=15)
-    if used_insecure_retry:
-        logger.warn(
-            f"[assets] SSL-проверка не удалась для {normalized}, повтор с отключённой проверкой"
-        )
-    return payload, used_insecure_retry
 
 
 def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[int, int, int]:
@@ -219,21 +145,19 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
     warnings = 0
     ssl_bypassed_downloads = 0
     for url in sorted(urls):
-        target = _resolve_download_target(url, rules)
-        if target is None:
+        result = resolve_download_folder(url, rules)
+        if result is None:
             continue
-        folder, filename = target
-        destination_dir = project_root / folder
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        destination_path = destination_dir / filename
+        folder, filename = result
+        destination_path = project_root / folder / filename
         if destination_path.exists():
             continue
         try:
-            payload, used_insecure_retry = _fetch_url(url)
+            payload, used_insecure_retry = fetch_bytes(url)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             logger.warn(f"[assets] Не удалось скачать {url}: {exc}")
             continue
-        except Exception as exc:  # pragma: no cover - сетевые сбои
+        except Exception as exc:  # pragma: no cover
             logger.warn(f"[assets] Неожиданная ошибка скачивания {url}: {exc}")
             continue
 
@@ -242,6 +166,7 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
             ssl_bypassed_downloads += 1
 
         try:
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
             destination_path.write_bytes(payload)
         except Exception as exc:
             logger.err(f"[assets] Ошибка записи {destination_path}: {exc}")

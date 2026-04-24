@@ -1,6 +1,7 @@
-"""Lightweight link checker for Detilda."""
+"""Lightweight link checker for deTilda."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,15 +10,22 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
+from core.downloader import download_to_project
 from core.htaccess import collect_routes, get_route_info
 
-__all__ = ["FormIntegrationResult", "LinkCheckerResult", "check_forms_integration", "check_links"]
+__all__ = ["FormIntegrationResult", "LinkCheckerResult", "TildaRemnantsResult", "check_forms_integration", "check_links", "check_tilda_remnants"]
 
 
 @dataclass
 class LinkCheckerResult:
     checked: int = 0
     broken: int = 0
+
+
+@dataclass
+class TildaRemnantsResult:
+    files_with_remnants: int = 0
+    total_occurrences: int = 0
 
 
 @dataclass
@@ -143,6 +151,116 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     logger.info(
         f"🔍 Проверка ссылок завершена. Проверено: {result.checked}, битых: {result.broken}"
     )
+    return result
+
+
+def _is_absolute_url(link: str) -> bool:
+    return link.startswith(("http://", "https://", "//"))
+
+
+def _apply_replace_rules(link: str, rules: list[dict]) -> str:
+    result = link
+    for rule in rules:
+        pattern = rule.get("pattern")
+        replacement = rule.get("replacement", "")
+        if not pattern:
+            continue
+        try:
+            result = re.sub(str(pattern), str(replacement), result)
+        except re.error:
+            pass
+    return result
+
+
+def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemnantsResult:
+    """Find and fix any links still containing 'tilda' after the pipeline.
+
+    - Absolute URLs (http/https//) → download locally, replace with relative path
+    - Local paths → apply replace_rules from config (til→ai)
+
+    Goal: zero tilda references in the final output.
+    """
+
+    project_root = Path(project_root)
+    patterns_cfg = loader.patterns()
+    service_cfg = loader.service_files()
+    link_patterns = patterns_cfg.get("links", [])
+    replace_rules = patterns_cfg.get("replace_rules", [])
+    download_rules = service_cfg.get("remote_assets", {}).get("rules", [])
+    text_extensions = tuple(patterns_cfg.get("text_extensions", [".html", ".htm", ".css", ".js"]))
+
+    result = TildaRemnantsResult()
+
+    for file_path in utils.list_files_recursive(project_root, extensions=text_extensions):
+        try:
+            text = utils.safe_read(file_path)
+        except Exception:
+            continue
+
+        original = text
+        file_hits = 0
+
+        for link in _iter_links(original, link_patterns):
+            if "tilda" not in link.lower():
+                continue
+
+            if _is_absolute_url(link):
+                # Скачиваем локально и заменяем URL на относительный путь
+                downloaded = download_to_project(link, project_root, download_rules)
+                if downloaded:
+                    dest_path, _ = downloaded
+                    rel = os.path.relpath(dest_path, file_path.parent).replace("\\", "/")
+                    text = text.replace(link, rel)
+                    logger.info(
+                        f"[tilda-remnants] Локализован: {link} → {rel} "
+                        f"в {utils.relpath(file_path, project_root)}"
+                    )
+                else:
+                    # Не удалось скачать — применяем replace_rules
+                    fixed = _apply_replace_rules(link, replace_rules)
+                    if fixed != link:
+                        text = text.replace(link, fixed)
+                        logger.warn(
+                            f"[tilda-remnants] Не скачан, применены правила замены: "
+                            f"{link} → {fixed} в {utils.relpath(file_path, project_root)}"
+                        )
+                    else:
+                        file_hits += 1
+                        logger.warn(
+                            f"[tilda-remnants] Не удалось исправить: {link} "
+                            f"в {utils.relpath(file_path, project_root)}"
+                        )
+            else:
+                # Локальный путь — применяем replace_rules
+                fixed = _apply_replace_rules(link, replace_rules)
+                if fixed != link:
+                    text = text.replace(link, fixed)
+                    logger.info(
+                        f"[tilda-remnants] Исправлен локальный путь: {link} → {fixed} "
+                        f"в {utils.relpath(file_path, project_root)}"
+                    )
+                else:
+                    file_hits += 1
+                    logger.warn(
+                        f"[tilda-remnants] Не удалось исправить: {link} "
+                        f"в {utils.relpath(file_path, project_root)}"
+                    )
+
+        if text != original:
+            utils.safe_write(file_path, text)
+
+        if file_hits:
+            result.files_with_remnants += 1
+            result.total_occurrences += file_hits
+
+    if result.total_occurrences:
+        logger.warn(
+            f"[tilda-remnants] ❌ Осталось неисправленных: {result.total_occurrences} "
+            f"в {result.files_with_remnants} файлах — требуется ручная проверка"
+        )
+    else:
+        logger.info("[tilda-remnants] ✓ Ссылок с 'tilda' не найдено")
+
     return result
 
 
