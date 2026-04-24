@@ -1,10 +1,9 @@
-"""High level orchestration for the Detilda toolchain."""
+"""High level orchestration for the deTilda toolchain."""
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from core import (
     archive,
@@ -21,7 +20,6 @@ from core import (
     refs,
     report,
     script_cleaner,
-    utils,
 )
 from core.project import ProjectContext
 from core.htaccess import get_missing_routes
@@ -51,30 +49,6 @@ class PipelineStats:
     images_background_fixed: int = 0
     images_unresolved: int = 0
     exec_time: float = 0.0
-
-    @property
-    def renamed(self) -> int:
-        return self.renamed_assets
-
-    @renamed.setter
-    def renamed(self, value: int) -> None:
-        self.renamed_assets = value
-
-    @property
-    def removed(self) -> int:
-        return self.removed_assets
-
-    @removed.setter
-    def removed(self, value: int) -> None:
-        self.removed_assets = value
-
-    @property
-    def cleaned(self) -> int:
-        return self.cleaned_files
-
-    @cleaned.setter
-    def cleaned(self, value: int) -> None:
-        self.cleaned_files = value
 
 
 class DetildaPipeline:
@@ -119,11 +93,6 @@ class DetildaPipeline:
 
             with logger.module_scope("forms"):
                 forms.generate_send_email_php(context)
-            try:
-                stats.forms_found = self._count_forms(context.project_root)
-            except Exception:
-                logger.exception("[forms] Ошибка подсчёта форм, значение будет установлено в 0")
-                stats.forms_found = 0
             with logger.module_scope("inject"):
                 stats.forms_hooked = inject.inject_form_scripts(context)
 
@@ -210,26 +179,11 @@ class DetildaPipeline:
                     exec_time=stats.exec_time,
                 )
 
-
             self._print_final_summary(stats, stats.exec_time)
 
             return stats
         finally:
             logger.close()
-
-    def _count_forms(self, project_root: Path) -> int:
-        """Count all ``<form`` tags in project HTML/HTM files."""
-
-        form_pattern = re.compile(r"<form\b", re.IGNORECASE)
-        forms_found = 0
-        for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
-            try:
-                content = utils.safe_read(file_path)
-            except Exception:
-                continue
-            forms_found += len(form_pattern.findall(content))
-        return forms_found
-
 
     def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
         logger.info("======================================")
