@@ -1,4 +1,9 @@
-"""Reusable helper utilities for the deTilda toolkit."""
+"""Reusable helper utilities for the deTilda toolkit.
+
+Набор низкоуровневых функций без бизнес-логики.
+Используются во всех модулях конвейера.
+Не импортируют ничего из других модулей core/, кроме logger.
+"""
 from __future__ import annotations
 
 import json
@@ -27,22 +32,26 @@ def _to_path(path: Path | str) -> Path:
 
 
 def safe_read(path: Path | str) -> str:
+    """Читает файл как UTF-8 строку. Обрабатывает BOM (utf-8-sig) как запасной вариант."""
     path_obj = _to_path(path)
     if not path_obj.exists():
         raise FileNotFoundError(f"Файл не найден: {path_obj}")
     try:
         return path_obj.read_text(encoding="utf-8")
     except UnicodeDecodeError:
+        # Некоторые Windows-редакторы сохраняют файлы с BOM-маркером
         return path_obj.read_text(encoding="utf-8-sig")
 
 
 def safe_write(path: Path | str, content: str) -> None:
+    """Записывает строку в файл UTF-8 с Unix-переносами. Создаёт папки если нужно."""
     path_obj = _to_path(path)
     path_obj.parent.mkdir(parents=True, exist_ok=True)
     path_obj.write_text(content, encoding="utf-8", newline="\n")
 
 
 def safe_copy(src: Path | str, dst: Path | str) -> None:
+    """Копирует файл, создавая целевую папку если нужно."""
     src_path = _to_path(src)
     dst_path = _to_path(dst)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +60,7 @@ def safe_copy(src: Path | str, dst: Path | str) -> None:
 
 
 def safe_delete(path: Path | str) -> None:
+    """Удаляет файл если он существует. Не падает если файла нет."""
     path_obj = _to_path(path)
     if path_obj.exists():
         path_obj.unlink()
@@ -58,6 +68,7 @@ def safe_delete(path: Path | str) -> None:
 
 
 def relpath(path: Path | str, base: Path | str) -> str:
+    """Возвращает путь к файлу относительно base. При ошибке — только имя файла."""
     path_obj = _to_path(path).resolve()
     base_obj = _to_path(base).resolve()
     try:
@@ -67,12 +78,18 @@ def relpath(path: Path | str, base: Path | str) -> str:
 
 
 def ensure_dir(path: Path | str) -> Path:
+    """Создаёт папку если не существует. Возвращает Path для удобства цепочек."""
     path_obj = _to_path(path)
     path_obj.mkdir(parents=True, exist_ok=True)
     return path_obj
 
 
 def list_files_recursive(base_dir: Path | str, extensions: Sequence[str] | None = None) -> list[Path]:
+    """Рекурсивно обходит папку и возвращает файлы с нужными расширениями.
+
+    extensions: например [".html", ".css"] — регистр не важен.
+    Если extensions не задан — возвращает все файлы.
+    """
     base_path = _to_path(base_dir)
     exts = {ext.lower() for ext in extensions or ()}
     result: list[Path] = []
@@ -86,6 +103,11 @@ def list_files_recursive(base_dir: Path | str, extensions: Sequence[str] | None 
 
 
 def load_manifest() -> dict:
+    """Загружает manifest.json из корня проекта.
+
+    Используется в main.py для чтения версии, путей и настроек.
+    При ошибке возвращает пустой dict — приложение продолжает работу с дефолтами.
+    """
     manifest_path = Path(__file__).resolve().parents[1] / "manifest.json"
     if not manifest_path.exists():
         logger.warn(f"⚠️ manifest.json не найден: {manifest_path}")
@@ -98,6 +120,7 @@ def load_manifest() -> dict:
 
 
 def get_elapsed_time(start_time: float) -> str:
+    """Форматирует прошедшее время в читаемую строку: '12.34s' или '2m 05s'."""
     elapsed = time.time() - start_time
     if elapsed < 60:
         return f"{elapsed:.2f}s"

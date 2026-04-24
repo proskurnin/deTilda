@@ -1,4 +1,17 @@
-"""Typed access helpers for :mod:`config/config.yaml`."""
+"""Typed access helpers for :mod:`config/config.yaml`.
+
+Единственная точка загрузки конфига в приложении.
+Модули конвейера получают типизированные объекты через ConfigLoader:
+
+    loader = ConfigLoader(repository_root)
+    links = loader.patterns().links          # List[str]
+    opts  = loader.service_files().html_inject_options  # HtmlInjectOptions
+
+Жизненный цикл:
+  - ConfigLoader создаётся в ProjectContext.from_project_root()
+  - Конфиг загружается лениво при первом обращении и кэшируется
+  - При ошибке загрузки возвращается AppConfig() с дефолтами
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,11 +33,14 @@ _DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Pre-process raw YAML before passing to Pydantic.
+    """Нормализует сырой YAML перед передачей в Pydantic.
 
-    Normalises readme_cleanup_patterns so every item is a dict
-    with 'pattern' and 'replacement' keys — Pydantic then maps
-    them cleanly to ReplaceRule objects.
+    readme_cleanup_patterns в config.yaml содержит смешанные типы:
+      - строки: "(?im)^.*Published on Tilda\\.cc.*\\n?"
+      - словари: {pattern: "...", replacement: "..."}
+
+    Pydantic ожидает только словари для маппинга в ReplaceRule.
+    Эта функция конвертирует строки в словари до валидации.
     """
     patterns = data.get("patterns")
     if not isinstance(patterns, dict):
@@ -48,6 +64,7 @@ def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _validate_config(data: Dict[str, Any]) -> AppConfig:
+    """Валидирует словарь через Pydantic-схему AppConfig."""
     data = _normalize_data(data)
     if hasattr(AppConfig, "model_validate"):
         return AppConfig.model_validate(data)  # type: ignore[attr-defined]
@@ -55,14 +72,19 @@ def _validate_config(data: Dict[str, Any]) -> AppConfig:
 
 
 class ConfigLoader:
-    """Loads and caches the unified ``config.yaml`` file."""
+    """Загружает и кэширует ``config/config.yaml``.
+
+    Принимает base_dir — корень репозитория (где лежит папка config/).
+    В рантайме создаётся в ProjectContext, передаётся во все модули конвейера.
+    """
 
     def __init__(self, base_dir: Path | None = None) -> None:
         self._base_dir = base_dir or _DEFAULT_BASE_DIR
-        self._cache: AppConfig | None = None
+        self._cache: AppConfig | None = None  # загружается лениво
 
     @property
     def base_dir(self) -> Path:
+        """Корень репозитория — нужен assets.py для поиска resources/."""
         return Path(self._base_dir)
 
     @property
@@ -70,6 +92,7 @@ class ConfigLoader:
         return Path(self._base_dir) / "config" / "config.yaml"
 
     def _load(self) -> AppConfig:
+        """Загружает конфиг при первом обращении, кэширует результат."""
         if self._cache is not None:
             return self._cache
 
@@ -79,6 +102,7 @@ class ConfigLoader:
             if not isinstance(data, dict):
                 raise ValueError("config.yaml должен содержать словарь")
             config = _validate_config(data)
+            # Проверяем все regex-паттерны сразу — невалидные логируются как warnings
             for error in validate_regex_patterns(config):
                 logger.warn(f"[config_loader] {error}")
         except FileNotFoundError:
@@ -96,13 +120,17 @@ class ConfigLoader:
 
     @property
     def config(self) -> AppConfig:
+        """Полный типизированный конфиг (используется в project.py)."""
         return self._load()
 
     def patterns(self) -> PatternsConfig:
+        """Секция patterns — ссылки, замены, расширения файлов."""
         return self._load().patterns
 
     def images(self) -> ImagesConfig:
+        """Секция images — правила обработки изображений."""
         return self._load().images
 
     def service_files(self) -> ServiceFilesConfig:
+        """Секция service_files — скрипты, ресурсы, настройки шагов."""
         return self._load().service_files

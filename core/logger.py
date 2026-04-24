@@ -1,4 +1,16 @@
-"""Simple logging utilities used across the deTilda toolchain."""
+"""Simple logging utilities used across the deTilda toolchain.
+
+Логгер — глобальный синглтон с состоянием на уровне модуля.
+Это сознательное решение: pipeline обрабатывает один архив за раз,
+поэтому один активный лог-файл всегда корректен.
+
+Жизненный цикл:
+  1. attach_to_project() — открывает лог-файл для текущего проекта
+  2. info/warn/err/ok/debug — пишут в консоль И в файл одновременно
+  3. close() — закрывает файл (вызывается в finally блоке pipeline)
+
+Имя лог-файла: logs/<project>_detilda.log
+"""
 from __future__ import annotations
 
 import sys
@@ -22,8 +34,10 @@ __all__ = [
     "warn",
 ]
 
-_LOG_SUFFIX = "detilda"  # суффикс имени лог-файла: <project>_detilda.log
+# Суффикс в имени лог-файла: <project>_detilda.log
+_LOG_SUFFIX = "detilda"
 
+# Глобальное состояние логгера — активно пока идёт обработка одного архива
 _log_file: Optional[TextIO] = None
 _project_name: str = ""
 _logs_dir: Optional[Path] = None
@@ -34,6 +48,7 @@ def _timestamp() -> str:
 
 
 def _write_line(level: str, message: str) -> None:
+    """Пишет строку одновременно в консоль и в лог-файл."""
     global _log_file
     line = f"{_timestamp()} {level} {message}"
     print(line)
@@ -42,7 +57,7 @@ def _write_line(level: str, message: str) -> None:
             _log_file.write(line + "\n")
             _log_file.flush()
         except Exception:
-            # Logging errors must never crash the pipeline.
+            # Ошибки логгера не должны останавливать pipeline.
             pass
 
 
@@ -72,7 +87,7 @@ def debug(message: str) -> None:
 
 
 def exception(message: str) -> None:
-    """Log *message* with the active traceback."""
+    """Логирует сообщение вместе с активным traceback."""
     _write_line("💥", message)
     tb = traceback.format_exc().rstrip()
     if tb and tb != "NoneType: None":
@@ -82,7 +97,7 @@ def exception(message: str) -> None:
 
 @contextmanager
 def module_scope(module_name: str) -> Iterator[None]:
-    """Log start and finish messages for a pipeline module."""
+    """Контекстный менеджер: логирует начало и конец шага конвейера с временем выполнения."""
     start = time.time()
     info(f"[{module_name}] ▶️ Начало работы")
     try:
@@ -93,18 +108,21 @@ def module_scope(module_name: str) -> Iterator[None]:
 
 
 def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> None:
-    """Initialise logging for *project_root*.
+    """Инициализирует логирование для конкретного проекта.
 
-    logs_dir: путь к папке логов; если не передан — вычисляется относительно project_root.
+    Вызывается в начале обработки каждого архива.
+    logs_dir: путь из manifest.json; если не передан — вычисляется автоматически.
     """
     global _log_file, _project_name, _logs_dir
 
     project_root = Path(project_root)
+    # Имя проекта = имя папки архива (например "hotelsargis")
     _project_name = project_root.name
 
     if logs_dir is not None:
         _logs_dir = Path(logs_dir)
     else:
+        # Если проект в _workdir/ — поднимаемся на два уровня до корня репо
         base_dir = (
             project_root.parent.parent
             if project_root.parent.name == "_workdir"
@@ -117,6 +135,7 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
     log_path = _logs_dir / f"{_project_name}_{_LOG_SUFFIX}.log"
 
     try:
+        # Открываем в режиме append — повторный прогон дописывает в тот же файл
         _log_file = log_path.open("a", encoding="utf-8")
     except Exception as exc:  # pragma: no cover - defensive fallback
         print(f"💥 Не удалось открыть файл лога {log_path}: {exc}", file=sys.stderr)
@@ -135,14 +154,17 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
 
 
 def get_project_name() -> str:
+    """Возвращает имя текущего проекта (используется в report.py для имени файла отчёта)."""
     return _project_name
 
 
 def get_logs_dir() -> Path:
+    """Возвращает папку логов (используется в assets.py для сохранения rename_map)."""
     return _logs_dir or Path("logs")
 
 
 def close() -> None:
+    """Закрывает лог-файл. Вызывается в finally блоке pipeline после обработки архива."""
     global _log_file
     if _log_file is None:
         return

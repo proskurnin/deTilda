@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
-"""CLI entry point orchestrating the deTilda pipeline."""
+"""CLI entry point orchestrating the deTilda pipeline.
+
+Точка входа приложения. Читает manifest.json, запрашивает у пользователя
+имена архивов и запускает DetildaPipeline для каждого из них.
+
+Запуск:
+    python main.py
+
+Поддерживает несколько архивов за один запуск (через запятую).
+При ошибке в одном архиве — переходит к следующему, не останавливается.
+Завершается с кодом 1 если хотя бы один архив завершился с ошибкой.
+"""
 
 from __future__ import annotations
 from pathlib import Path
@@ -13,6 +24,7 @@ VERSION = APP_VERSION
 
 
 def _prompt(prompt: str) -> str:
+    """Обёртка над input() — перехватывает EOFError при неинтерактивном запуске."""
     try:
         return input(prompt)
     except EOFError:
@@ -25,6 +37,7 @@ def _process_archive(
     logs_dir: Path,
     version: str,
 ) -> bool:
+    """Запускает pipeline для одного архива. Возвращает True если успешно."""
     archive_path = workdir / archive_name
     if not archive_path.exists():
         print(f"❌ Архив не найден: {archive_path}")
@@ -41,6 +54,7 @@ def _process_archive(
 
 
 def main() -> None:
+    # Читаем пути и версию из manifest.json
     manifest = load_manifest()
     paths = manifest.get("paths", {})
     version = manifest.get("version", VERSION)
@@ -52,11 +66,11 @@ def main() -> None:
     print(f"=== {APP_TITLE} ===")
     print(f"Рабочая папка: {workdir.resolve()}")
 
-    archive_prompt = (
+    archive_input = _prompt(
         "Введите имя архива в ./_workdir (например, projectXXXX.zip). "
         "Можно перечислить несколько через запятую: "
-    )
-    archive_input = _prompt(archive_prompt).strip()
+    ).strip()
+
     if not archive_input:
         print("❌ Имя архива не указано — завершение работы.")
         return
