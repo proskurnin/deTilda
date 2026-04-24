@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Iterable
+from typing import TYPE_CHECKING, Dict, Iterable, Iterator
 from uuid import uuid4
 
 from core import logger, utils
@@ -55,7 +55,6 @@ class ResourceCopyRule:
     source: Path
     destination: str
     originals: list[str] = field(default_factory=list)
-    applied: bool = False
 
 
 def _normalize_config_path(value: str) -> str:
@@ -112,8 +111,6 @@ def _lowercase_relative_links(text: str) -> tuple[str, bool]:
 
 
 
-
-
 def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[int, int, int]:
     remote_cfg = loader.service_files().remote_assets
     rules_raw = [{"folder": r.folder, "extensions": list(r.extensions)} for r in remote_cfg.rules]
@@ -133,12 +130,7 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
     urls: set[str] = set()
     for file_path in files:
         try:
-            text = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            try:
-                text = file_path.read_text(encoding="utf-8-sig")
-            except Exception:
-                continue
+            text = utils.safe_read(file_path)
         except Exception:
             continue
 
@@ -455,7 +447,21 @@ def rename_and_cleanup_assets(
             resource_lookup[original.lower()] = rule
             resource_name_lookup[Path(original).name.lower()] = rule
 
-    def _handle_resource_replacement(path: Path, relative: str) -> bool:
+    rename_map: Dict[str, str] = {}
+    stats = AssetStats(
+        downloaded=downloaded,
+        warnings=download_warnings,
+        ssl_bypassed_downloads=ssl_bypassed_downloads,
+    )
+
+    def _handle_resource_replacement(
+        path: Path, relative: str, rename_map: Dict[str, str], stats: AssetStats
+    ) -> bool:
+        """Проверяет заменяемые ресурсы (favicon.ico, ga.js).
+
+        Удаляет Tilda-версию файла и добавляет запись в rename_map
+        чтобы refs.py обновил ссылки на новый путь.
+        """
         normalized_relative = _normalize_config_path(relative)
         rule = resource_lookup.get(normalized_relative.lower()) or resource_name_lookup.get(
             path.name.lower()
@@ -467,20 +473,12 @@ def rename_and_cleanup_assets(
         except Exception as exc:
             logger.err(f"[assets] Ошибка удаления {path}: {exc}")
             return False
-        rule.applied = True
         stats.removed += 1
         rename_map[normalized_relative or path.name] = rule.destination
         logger.info(
             f"🧩 Заменён ресурс: {normalized_relative or path.name} → {rule.destination}"
         )
         return True
-
-    rename_map: Dict[str, str] = {}
-    stats = AssetStats(
-        downloaded=downloaded,
-        warnings=download_warnings,
-        ssl_bypassed_downloads=ssl_bypassed_downloads,
-    )
 
     # Главный цикл: обходим все файлы проекта в алфавитном порядке
     for path in sorted(project_root.rglob("*")):
@@ -491,7 +489,7 @@ def rename_and_cleanup_assets(
         relative_path = utils.relpath(path, project_root)
 
         # Шаг 1: замена ресурса (favicon.ico, ga.js) → удалить Tilda-версию, запомнить в rename_map
-        if _handle_resource_replacement(path, relative_path):
+        if _handle_resource_replacement(path, relative_path, rename_map, stats):
             continue
 
         # Шаг 2: немедленное удаление мусора (tildacopy.png, Tilda-скрипты и др.)
