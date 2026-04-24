@@ -30,10 +30,8 @@ class PatternsAssets(BaseModel):
 
 
 class PatternsConfig(BaseModel):
-    description: str = ""
     links: List[str] = Field(default_factory=list)
     replace_rules: List[ReplaceRule] = Field(default_factory=list)
-    comment_rules: List[str] = Field(default_factory=list)
     text_extensions: List[str] = Field(default_factory=list)
     ignore_prefixes: List[str] = Field(default_factory=list)
     robots_cleanup_patterns: List[str] = Field(default_factory=list)
@@ -57,7 +55,6 @@ class LinkTagRules(BaseModel):
 
 
 class ImagesConfig(BaseModel):
-    description: str = ""
     delete_physical_files: DeletePhysicalFiles = Field(default_factory=DeletePhysicalFiles)
     comment_out_links: PatternsList = Field(default_factory=PatternsList)
     comment_out_link_tags: LinkTagRules = Field(default_factory=LinkTagRules)
@@ -90,11 +87,8 @@ class ScriptsToRemoveFromProjectConfig(BaseModel):
 class HtmlInjectOptions(BaseModel):
     inject_handler_script: str = "form-handler.js"
     inject_after_marker: str = "</body>"
-
-
-class CheckerOptions(BaseModel):
-    allow_inline_base64_error: bool = False
-    extensions_to_check: List[str] = Field(default_factory=list)
+    inject_head_scripts: List[str] = Field(default_factory=list)
+    inject_head_marker: str = "</head>"
 
 
 class NormalizeCaseConfig(BaseModel):
@@ -126,16 +120,13 @@ class ResourceCopyConfig(BaseModel):
 
 
 class ServiceFilesConfig(BaseModel):
-    description: str = ""
     remote_assets: RemoteAssetsConfig = Field(default_factory=RemoteAssetsConfig)
     exclude_from_rename: FileListConfig = Field(default_factory=FileListConfig)
     scripts_to_delete: ScriptsToDeleteConfig = Field(default_factory=ScriptsToDeleteConfig)
     scripts_to_remove_from_project: ScriptsToRemoveFromProjectConfig = Field(
         default_factory=ScriptsToRemoveFromProjectConfig
     )
-    protected_files_in_refs_update: FileListConfig = Field(default_factory=FileListConfig)
     html_inject_options: HtmlInjectOptions = Field(default_factory=HtmlInjectOptions)
-    checker_options: CheckerOptions = Field(default_factory=CheckerOptions)
     pipeline_stages: PipelineStagesConfig = Field(default_factory=PipelineStagesConfig)
     cleaner_options: CleanerOptionsConfig = Field(default_factory=CleanerOptionsConfig)
     rename_map_output: RenameMapOutputConfig = Field(default_factory=RenameMapOutputConfig)
@@ -143,12 +134,10 @@ class ServiceFilesConfig(BaseModel):
 
     @property
     def scripts_to_remove(self) -> List[str]:
-        """Backward-friendly accessor for list of script filenames to remove."""
         return list(self.scripts_to_remove_from_project.filenames)
 
 
 class AppConfig(BaseModel):
-    meta: Dict[str, str] = Field(default_factory=dict)
     patterns: PatternsConfig = Field(default_factory=PatternsConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     service_files: ServiceFilesConfig = Field(default_factory=ServiceFilesConfig)
