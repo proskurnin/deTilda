@@ -1,4 +1,15 @@
-"""Helpers for injecting Detilda form scripts into HTML pages."""
+"""Script injection helpers for the deTilda pipeline.
+
+Шаг 5 конвейера. Tilda при экспорте не знает о наших скриптах —
+этот модуль вставляет их в каждый HTML-файл проекта.
+
+Два места вставки (настраиваются в config.yaml):
+  - перед </body>: form-handler.js — обработчик форм
+  - перед </head>: ga.js — Google Analytics (и другие head-скрипты)
+
+Идемпотентный: если скрипт уже есть в файле — не дублирует.
+Вызывается ПОСЛЕ forms.py (скрипты должны уже лежать в js/).
+"""
 from __future__ import annotations
 
 import re
@@ -12,12 +23,15 @@ __all__ = ["inject_form_scripts"]
 
 
 def _load_options(loader: ConfigLoader) -> tuple[str, str, list[str], str]:
+    """Читает настройки инъекции из config.yaml."""
     opts = loader.service_files().html_inject_options
+    # Если список head-скриптов пуст — используем ga.js как дефолт
     head_scripts = [s for s in opts.inject_head_scripts if s.strip()] or ["ga.js"]
     return opts.inject_handler_script, opts.inject_after_marker, head_scripts, opts.inject_head_marker
 
 
 def _resolve_inputs(context: Any, loader: ConfigLoader | None) -> tuple[Path, ConfigLoader]:
+    """Принимает ProjectContext или Path+ConfigLoader — возвращает пару (path, loader)."""
     if hasattr(context, "project_root"):
         project_root = Path(context.project_root)
         resolved_loader = loader or getattr(context, "config_loader", None)
@@ -30,19 +44,60 @@ def _resolve_inputs(context: Any, loader: ConfigLoader | None) -> tuple[Path, Co
             "inject_form_scripts требует loader при передаче только project_root. "
             "Передайте loader явно или используйте ProjectContext."
         )
-
     return project_root, resolved_loader
 
 
+def _ensure_body_script(
+    text: str,
+    script_name: str,
+    marker_pattern: re.Pattern[str],
+    marker: str,
+) -> tuple[str, bool]:
+    """Вставляет <script src="js/{script_name}"> перед marker (обычно </body>).
+
+    Если скрипт уже есть — не дублирует. Возвращает (новый текст, был ли добавлен).
+    """
+    tag = f'\n<script src="js/{script_name}"></script>'
+    if script_name in text:
+        return text, False
+    if marker_pattern.search(text):
+        return marker_pattern.sub(tag + marker, text), True
+    # marker не найден — добавляем в конец файла
+    return text + tag, True
+
+
+def _ensure_head_script(
+    text: str,
+    script_name: str,
+    head_marker_pattern: re.Pattern[str],
+    head_marker: str,
+) -> tuple[str, bool]:
+    """Вставляет <script src="js/{script_name}"> перед head_marker (обычно </head>).
+
+    Если скрипт уже есть — не дублирует. Если </head> не найден — пропускает файл.
+    Возвращает (новый текст, был ли добавлен).
+    """
+    tag = f'\n<script src="js/{script_name}"></script>'
+    if script_name in text:
+        return text, False
+    if head_marker_pattern.search(text):
+        return head_marker_pattern.sub(tag + head_marker, text), True
+    return text, False
+
+
 def inject_form_scripts(context: Any, loader: ConfigLoader | None = None) -> int:
+    """Вставляет скрипты во все HTML-файлы проекта.
+
+    Возвращает количество изменённых файлов.
+    """
     project_root, resolved_loader = _resolve_inputs(context, loader)
     handler, marker, head_scripts, head_marker = _load_options(resolved_loader)
-    processed = 0
 
     marker_pattern = re.compile(re.escape(marker), re.IGNORECASE)
     head_marker_pattern = re.compile(re.escape(head_marker), re.IGNORECASE)
 
-    for path in project_root.rglob("*.html"):
+    processed = 0
+    for path in utils.list_files_recursive(project_root, extensions=(".html",)):
         try:
             content = utils.safe_read(path)
         except Exception as exc:
@@ -50,30 +105,20 @@ def inject_form_scripts(context: Any, loader: ConfigLoader | None = None) -> int
             continue
 
         original = content
-
-        def _ensure_script(text: str, script_name: str) -> tuple[str, bool]:
-            tag = f'\n<script src="js/{script_name}"></script>'
-            if script_name in text:
-                return text, False
-            if marker_pattern.search(text):
-                return marker_pattern.sub(tag + marker, text), True
-            return text + tag, True
-
-        def _ensure_head_script(text: str, script_name: str) -> tuple[str, bool]:
-            tag = f'\n<script src="js/{script_name}"></script>'
-            if script_name in text:
-                return text, False
-            if head_marker_pattern.search(text):
-                return head_marker_pattern.sub(tag + head_marker, text), True
-            return text, False
-
         head_scripts_added: list[str] = []
+
+        # Вставляем head-скрипты (ga.js и др.) перед </head>
         for head_script in head_scripts:
-            content, added = _ensure_head_script(content, head_script)
+            content, added = _ensure_head_script(
+                content, head_script, head_marker_pattern, head_marker
+            )
             if added:
                 head_scripts_added.append(head_script)
 
-        content, added_handler = _ensure_script(content, handler)
+        # Вставляем обработчик форм перед </body>
+        content, added_handler = _ensure_body_script(
+            content, handler, marker_pattern, marker
+        )
 
         if content != original:
             utils.safe_write(path, content)
@@ -84,9 +129,7 @@ def inject_form_scripts(context: Any, loader: ConfigLoader | None = None) -> int
                 logger.info(f"🧩 Добавлен скрипт {handler} в {path.name}")
 
     if processed:
-        logger.info(
-            f"✓ Внедрение завершено. Обновлено файлов: {processed} (маркер: {marker})."
-        )
+        logger.info(f"✓ Внедрение завершено. Обновлено файлов: {processed} (маркер: {marker}).")
     else:
         logger.info("✓ Внедрение завершено. Изменений не требуется.")
     return processed
