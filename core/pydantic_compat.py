@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Union, get_args, get_origin, get_type_hints
 
 if importlib.util.find_spec("pydantic") is not None:
-    from pydantic import BaseModel, Field, ValidationError  # type: ignore
+    from pydantic import BaseModel, ConfigDict, Field, ValidationError  # type: ignore
 else:
+    def ConfigDict(**kwargs: Any) -> Dict[str, Any]:  # type: ignore[misc]
+        return kwargs
 
     class ValidationError(ValueError):
         pass

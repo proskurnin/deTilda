@@ -59,6 +59,8 @@ patterns:
     soft_fallback_to_404: false
     # Автоматически создавать заглушку для отсутствующего файла маршрута
     auto_stub_missing_routes: true
+    # Удалять маршруты из .htaccess если файл назначения не найден
+    remove_unresolved_routes: true
     fallback_target: "404.html"
 
   # Паттерн переименования файлов: til → ai в именах файлов (assets.py)
@@ -150,7 +152,7 @@ service_files:
   # Физическое удаление JS-файлов Tilda из папки проекта — assets.py
   # Удаляет сами файлы, а не теги в HTML
   scripts_to_delete:
-    after_rename:
+    files:
       - "aida-stat-1.0.min.js"
       - "tilda-stat-1.0.min.js"
       - "aida-forms-1.0.min.js"

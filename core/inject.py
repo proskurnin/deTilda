@@ -12,18 +12,9 @@ __all__ = ["inject_form_scripts"]
 
 
 def _load_options(loader: ConfigLoader) -> tuple[str, str, list[str], str]:
-    service_cfg = loader.service_files()
-    options = service_cfg.get("html_inject_options", {})
-    handler = str(options.get("inject_handler_script", "form-handler.js"))
-    marker = str(options.get("inject_after_marker", "</body>"))
-    head_marker = str(options.get("inject_head_marker", "</head>"))
-    head_scripts_raw = options.get("inject_head_scripts", ["ga.js"])
-    head_scripts = (
-        [script for script in head_scripts_raw if isinstance(script, str) and script.strip()]
-        if isinstance(head_scripts_raw, (list, tuple))
-        else ["ga.js"]
-    )
-    return handler, marker, head_scripts, head_marker
+    opts = loader.service_files().html_inject_options
+    head_scripts = [s for s in opts.inject_head_scripts if s.strip()] or ["ga.js"]
+    return opts.inject_handler_script, opts.inject_after_marker, head_scripts, opts.inject_head_marker
 
 
 def _resolve_inputs(context: Any, loader: ConfigLoader | None) -> tuple[Path, ConfigLoader]:

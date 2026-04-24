@@ -69,7 +69,10 @@ def _replace_static_prefix(url: str) -> str:
 def _compile_replace_rules(rules: Iterable[object]) -> list[tuple[re.Pattern[str], str]]:
     compiled: list[tuple[re.Pattern[str], str]] = []
     for rule in rules:
-        if isinstance(rule, dict):
+        if hasattr(rule, "pattern"):
+            pattern = rule.pattern  # type: ignore[union-attr]
+            replacement = str(getattr(rule, "replacement", ""))
+        elif isinstance(rule, dict):
             pattern = rule.get("pattern")
             replacement = str(rule.get("replacement", ""))
         elif isinstance(rule, str):
@@ -334,33 +337,16 @@ def update_all_refs_in_project(
         loader = ConfigLoader()
 
     patterns_cfg = loader.patterns()
-    ignore_prefixes = tuple(patterns_cfg.get("ignore_prefixes", []))
-    text_extensions = tuple(patterns_cfg.get("text_extensions", [])) or (
-        ".html",
-        ".htm",
-        ".css",
-        ".js",
-        ".php",
-        ".txt",
+    ignore_prefixes = tuple(patterns_cfg.ignore_prefixes)
+    text_extensions = tuple(patterns_cfg.text_extensions) or (
+        ".html", ".htm", ".css", ".js", ".php", ".txt",
     )
-    replace_rules = _compile_replace_rules(patterns_cfg.get("replace_rules", []))
+    replace_rules = _compile_replace_rules(patterns_cfg.replace_rules)
 
     images_cfg = loader.images()
-    link_rel_values = [
-        value
-        for value in images_cfg.get("comment_out_link_tags", {}).get("rel_values", [])
-        if isinstance(value, str)
-    ]
-    replace_patterns = [
-        value
-        for value in images_cfg.get("replace_links_with_1px", {}).get("patterns", [])
-        if isinstance(value, str)
-    ]
-    comment_patterns = [
-        value
-        for value in images_cfg.get("comment_out_links", {}).get("patterns", [])
-        if isinstance(value, str)
-    ]
+    link_rel_values = images_cfg.comment_out_link_tags.rel_values
+    replace_patterns = images_cfg.replace_links_with_1px.patterns
+    comment_patterns = images_cfg.comment_out_links.patterns
 
     routes = collect_routes(project_root, loader, stats=stats)
 

@@ -109,8 +109,8 @@ def _get_effective_base_directory(file_path: Path, project_root: Path) -> Path:
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
-    ignore_prefixes = tuple(patterns_cfg.get("ignore_prefixes", []))
-    link_patterns = patterns_cfg.get("links", [])
+    ignore_prefixes = tuple(patterns_cfg.ignore_prefixes)
+    link_patterns = patterns_cfg.links
 
     result = LinkCheckerResult()
     collect_routes(project_root, loader)
@@ -158,15 +158,14 @@ def _is_absolute_url(link: str) -> bool:
     return link.startswith(("http://", "https://", "//"))
 
 
-def _apply_replace_rules(link: str, rules: list[dict]) -> str:
+def _apply_replace_rules(link: str, rules: list) -> str:
     result = link
     for rule in rules:
-        pattern = rule.get("pattern")
-        replacement = rule.get("replacement", "")
-        if not pattern:
-            continue
         try:
-            result = re.sub(str(pattern), str(replacement), result)
+            pattern = rule.pattern if hasattr(rule, "pattern") else rule.get("pattern", "")
+            replacement = rule.replacement if hasattr(rule, "replacement") else rule.get("replacement", "")
+            if pattern:
+                result = re.sub(str(pattern), str(replacement), result)
         except re.error:
             pass
     return result
@@ -184,10 +183,10 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     service_cfg = loader.service_files()
-    link_patterns = patterns_cfg.get("links", [])
-    replace_rules = patterns_cfg.get("replace_rules", [])
-    download_rules = service_cfg.get("remote_assets", {}).get("rules", [])
-    text_extensions = tuple(patterns_cfg.get("text_extensions", [".html", ".htm", ".css", ".js"]))
+    link_patterns = patterns_cfg.links
+    replace_rules = patterns_cfg.replace_rules
+    download_rules = [{"folder": r.folder, "extensions": list(r.extensions)} for r in service_cfg.remote_assets.rules]
+    text_extensions = tuple(patterns_cfg.text_extensions) or (".html", ".htm", ".css", ".js")
 
     result = TildaRemnantsResult()
 

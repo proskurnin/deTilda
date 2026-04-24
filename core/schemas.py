@@ -1,17 +1,61 @@
 """Typed Pydantic models for ``config/config.yaml`` sections."""
 from __future__ import annotations
 
-from typing import Dict, List
+import re
+from typing import Any, List
 
 from core.pydantic_compat import BaseModel, Field
 
 
+def _validate_regex(pattern: str, context: str) -> str | None:
+    try:
+        re.compile(pattern)
+        return None
+    except re.error as exc:
+        return f"{context}: невалидный regex {pattern!r} — {exc}"
+
+
+def validate_regex_patterns(config: "AppConfig") -> list[str]:
+    """Validate all regex fields in config. Returns list of error messages."""
+    errors: list[str] = []
+
+    for i, link in enumerate(config.patterns.links):
+        err = _validate_regex(link, f"patterns.links[{i}]")
+        if err:
+            errors.append(err)
+
+    for i, rule in enumerate(config.patterns.replace_rules):
+        err = _validate_regex(rule.pattern, f"patterns.replace_rules[{i}].pattern")
+        if err:
+            errors.append(err)
+
+    for i, pattern in enumerate(config.patterns.robots_cleanup_patterns):
+        err = _validate_regex(pattern, f"patterns.robots_cleanup_patterns[{i}]")
+        if err:
+            errors.append(err)
+
+    for i, rule in enumerate(config.patterns.readme_cleanup_patterns):
+        err = _validate_regex(rule.pattern, f"patterns.readme_cleanup_patterns[{i}].pattern")
+        if err:
+            errors.append(err)
+
+    for i, pattern in enumerate(config.patterns.tilda_remnants_patterns):
+        err = _validate_regex(pattern, f"patterns.tilda_remnants_patterns[{i}]")
+        if err:
+            errors.append(err)
+
+    htaccess = config.patterns.htaccess_patterns
+    for field_name in ("rewrite_rule", "redirect"):
+        pattern = getattr(htaccess, field_name, "")
+        if pattern:
+            err = _validate_regex(pattern, f"patterns.htaccess_patterns.{field_name}")
+            if err:
+                errors.append(err)
+
+    return errors
+
+
 class ReplaceRule(BaseModel):
-    pattern: str
-    replacement: str = ""
-
-
-class ReadmeCleanupRule(BaseModel):
     pattern: str
     replacement: str = ""
 
@@ -35,14 +79,13 @@ class PatternsConfig(BaseModel):
     text_extensions: List[str] = Field(default_factory=list)
     ignore_prefixes: List[str] = Field(default_factory=list)
     robots_cleanup_patterns: List[str] = Field(default_factory=list)
-    readme_cleanup_patterns: List[ReadmeCleanupRule | str] = Field(default_factory=list)
+    readme_cleanup_patterns: List[ReplaceRule] = Field(default_factory=list)
     htaccess_patterns: HtaccessPatterns = Field(default_factory=HtaccessPatterns)
     assets: PatternsAssets = Field(default_factory=PatternsAssets)
     tilda_remnants_patterns: List[str] = Field(default_factory=list)
 
 
 class DeletePhysicalFiles(BaseModel):
-    after_rename: List[str] = Field(default_factory=list)
     as_is: List[str] = Field(default_factory=list)
 
 
@@ -76,7 +119,7 @@ class FileListConfig(BaseModel):
 
 
 class ScriptsToDeleteConfig(BaseModel):
-    after_rename: List[str] = Field(default_factory=list)
+    files: List[str] = Field(default_factory=list)
 
 
 class ScriptsToRemoveFromProjectConfig(BaseModel):
@@ -92,7 +135,7 @@ class HtmlInjectOptions(BaseModel):
 
 
 class NormalizeCaseConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     extensions: List[str] = Field(default_factory=list)
 
 

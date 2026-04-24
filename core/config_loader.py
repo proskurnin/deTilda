@@ -2,29 +2,56 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator
+from typing import Any, Dict
 
 import yaml
 from core.pydantic_compat import ValidationError
 
 from core import logger
-from core.schemas import AppConfig
+from core.schemas import (
+    AppConfig,
+    ImagesConfig,
+    PatternsConfig,
+    ServiceFilesConfig,
+    validate_regex_patterns,
+)
 
 _DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Pre-process raw YAML before passing to Pydantic.
+
+    Normalises readme_cleanup_patterns so every item is a dict
+    with 'pattern' and 'replacement' keys — Pydantic then maps
+    them cleanly to ReplaceRule objects.
+    """
+    patterns = data.get("patterns")
+    if not isinstance(patterns, dict):
+        return data
+
+    raw = patterns.get("readme_cleanup_patterns", [])
+    if not isinstance(raw, list):
+        return data
+
+    normalized = []
+    for item in raw:
+        if isinstance(item, str):
+            normalized.append({"pattern": item, "replacement": ""})
+        elif isinstance(item, dict):
+            normalized.append(item)
+        else:
+            normalized.append(item)
+
+    patterns["readme_cleanup_patterns"] = normalized
+    return data
+
+
 def _validate_config(data: Dict[str, Any]) -> AppConfig:
+    data = _normalize_data(data)
     if hasattr(AppConfig, "model_validate"):
         return AppConfig.model_validate(data)  # type: ignore[attr-defined]
     return AppConfig.parse_obj(data)
-
-
-def _model_dump(model: Any) -> Dict[str, Any]:
-    if hasattr(model, "model_dump"):
-        return model.model_dump()
-    return model.dict()
-
-
 
 
 class ConfigLoader:
@@ -52,13 +79,15 @@ class ConfigLoader:
             if not isinstance(data, dict):
                 raise ValueError("config.yaml должен содержать словарь")
             config = _validate_config(data)
+            for error in validate_regex_patterns(config):
+                logger.warn(f"[config_loader] {error}")
         except FileNotFoundError:
             logger.err(f"[config_loader] Не найден файл конфигурации: {path}")
             config = AppConfig()
         except ValidationError as exc:
             logger.err(f"[config_loader] Ошибка валидации {path}: {exc}")
             config = AppConfig()
-        except Exception as exc:  # pragma: no cover - defensive branch
+        except Exception as exc:
             logger.err(f"[config_loader] Ошибка чтения {path}: {exc}")
             config = AppConfig()
 
@@ -69,51 +98,11 @@ class ConfigLoader:
     def config(self) -> AppConfig:
         return self._load()
 
-    def as_dict(self) -> Dict[str, Any]:
-        return _model_dump(self.config)
+    def patterns(self) -> PatternsConfig:
+        return self._load().patterns
 
-    def patterns(self) -> Dict[str, Any]:
-        return _model_dump(self.config.patterns)
+    def images(self) -> ImagesConfig:
+        return self._load().images
 
-    def images(self) -> Dict[str, Any]:
-        return _model_dump(self.config.images)
-
-    def service_files(self) -> Dict[str, Any]:
-        return _model_dump(self.config.service_files)
-
-
-_loader = ConfigLoader()
-
-
-def get_master_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    loader = ConfigLoader(Path(script_dir) if script_dir else None)
-    return loader.as_dict()
-
-
-def get_patterns_config(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    loader = ConfigLoader(Path(script_dir) if script_dir else None)
-    return loader.patterns()
-
-
-def get_rules_images(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    loader = ConfigLoader(Path(script_dir) if script_dir else None)
-    return loader.images()
-
-
-def get_rules_service_files(script_dir: str | Path | None = None) -> Dict[str, Any]:
-    loader = ConfigLoader(Path(script_dir) if script_dir else None)
-    return loader.service_files()
-
-
-def iter_section_list(section: Dict[str, Any], *keys: str) -> Iterator[str]:
-    current: Any = section
-    for key in keys:
-        if not isinstance(current, dict):
-            return iter(())
-        current = current.get(key)
-    values: Iterable[Any]
-    if isinstance(current, list):
-        values = current
-    else:
-        values = []
-    return iter([value for value in values if isinstance(value, str)])
+    def service_files(self) -> ServiceFilesConfig:
+        return self._load().service_files

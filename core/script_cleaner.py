@@ -24,38 +24,22 @@ def can_remove_tilda_form_scripts(project_root: Path) -> bool:
 def _collect_script_rules(loader: ConfigLoader) -> tuple[list[str], list[re.Pattern[str]]]:
     """Return script names and additional regex patterns from the config."""
 
-    service_cfg = loader.service_files()
-    removal_cfg = service_cfg.get("scripts_to_remove_from_project", {})
-
-    names: list[str] = []
+    removal_cfg = loader.service_files().scripts_to_remove_from_project
+    names: list[str] = [v.strip() for v in removal_cfg.filenames if v.strip()]
     patterns: list[re.Pattern[str]] = []
 
-    if not isinstance(removal_cfg, dict):
-        return names, patterns
-
-    # Collect filenames (we will treat them as substrings when compiling regexes).
-    for value in removal_cfg.get("filenames", []):
-        if isinstance(value, str) and value.strip():
-            names.append(value.strip())
-
-    # Allow optional raw regex patterns in config for edge cases.
-    for raw_pattern in removal_cfg.get("patterns", []):
-        if not isinstance(raw_pattern, str) or not raw_pattern.strip():
+    for raw_pattern in removal_cfg.patterns:
+        if not raw_pattern.strip():
             continue
         try:
-            compiled = re.compile(raw_pattern.strip(), re.IGNORECASE)
+            patterns.append(re.compile(raw_pattern.strip(), re.IGNORECASE))
         except re.error as exc:
             logger.warn(
                 "[script_cleaner] Некорректный паттерн в конфиге scripts_to_remove_from_project: "
                 f"{raw_pattern!r} ({exc})"
             )
-            continue
-        patterns.append(compiled)
 
-    # Preserve ordering but remove duplicates to avoid redundant regex replacements.
-    deduped_names = list(dict.fromkeys(names))
-
-    return deduped_names, patterns
+    return list(dict.fromkeys(names)), patterns
 
 
 # def _compile_script_patterns(script_names: list[str]) -> list[re.Pattern[str]]:
@@ -160,14 +144,8 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
         logger.info("[script_cleaner] Список скриптов для удаления пуст — пропуск шага.")
         return 0
 
-    patterns_cfg = loader.patterns()
-    text_extensions = tuple(patterns_cfg.get("text_extensions", [])) or (
-        ".html",
-        ".htm",
-        ".php",
-        ".js",
-        ".css",
-        ".txt",
+    text_extensions = tuple(loader.patterns().text_extensions) or (
+        ".html", ".htm", ".php", ".js", ".css", ".txt",
     )
 
     logger.info(

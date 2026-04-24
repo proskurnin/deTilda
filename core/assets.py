@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, Iterator, Tuple
 from uuid import uuid4
 
 from core import logger, utils
-from core.config_loader import ConfigLoader, iter_section_list
+from core.config_loader import ConfigLoader
 from core.downloader import fetch_bytes, resolve_download_folder
 from core.runtime_scripts import filter_removable_scripts
 
@@ -53,9 +53,6 @@ def _normalize_config_path(value: str) -> str:
         normalized = normalized[1:]
     return normalized
 
-
-def _collect_lowercase_names(section: Dict[str, object], *keys: str) -> set[str]:
-    return {name.lower() for name in iter_section_list(section, *keys)}
 
 
 def _sanitize(name: str) -> str:
@@ -104,18 +101,16 @@ def _lowercase_relative_links(text: str) -> tuple[str, bool]:
 
 
 def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[int, int, int]:
-    service_cfg = loader.service_files()
-    remote_cfg = service_cfg.get("remote_assets", {})
-    rules = remote_cfg.get("rules", [])
-    if not rules:
+    remote_cfg = loader.service_files().remote_assets
+    rules_raw = [{"folder": r.folder, "extensions": list(r.extensions)} for r in remote_cfg.rules]
+    if not rules_raw:
         return 0, 0, 0
 
-    patterns_cfg = loader.patterns()
-    link_patterns = patterns_cfg.get("links", [])
+    link_patterns = loader.patterns().links
     if not link_patterns:
         return 0, 0, 0
 
-    scan_exts = remote_cfg.get("scan_extensions") or []
+    scan_exts = remote_cfg.scan_extensions or []
     if scan_exts:
         files = utils.list_files_recursive(project_root, extensions=tuple(scan_exts))
     else:
@@ -145,7 +140,7 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
     warnings = 0
     ssl_bypassed_downloads = 0
     for url in sorted(urls):
-        result = resolve_download_folder(url, rules)
+        result = resolve_download_folder(url, rules_raw)
         if result is None:
             continue
         folder, filename = result
@@ -409,17 +404,13 @@ def rename_and_cleanup_assets(
         project_root, loader
     )
 
-    regex_pattern = (
-        patterns_cfg.get("assets", {}).get("til_to_ai_filename")
-        if isinstance(patterns_cfg.get("assets"), dict)
-        else None
+    til_regex = re.compile(
+        str(patterns_cfg.assets.til_to_ai_filename or r"\btil"), re.IGNORECASE
     )
-    til_regex = re.compile(str(regex_pattern or r"\btil"), re.IGNORECASE)
 
-    exclude_from_rename = _collect_lowercase_names(service_cfg, "exclude_from_rename", "files")
-    delete_after_rename = _collect_lowercase_names(images_cfg, "delete_physical_files", "after_rename")
-    delete_immediately = _collect_lowercase_names(images_cfg, "delete_physical_files", "as_is")
-    delete_service_raw = list(iter_section_list(service_cfg, "scripts_to_delete", "after_rename"))
+    exclude_from_rename = {f.lower() for f in service_cfg.exclude_from_rename.files}
+    delete_immediately = {f.lower() for f in images_cfg.delete_physical_files.as_is}
+    delete_service_raw = list(service_cfg.scripts_to_delete.files)
     removable_service_scripts, preserved_service_scripts = filter_removable_scripts(
         delete_service_raw,
         project_root,
@@ -431,31 +422,17 @@ def rename_and_cleanup_assets(
         )
     delete_service = {name.lower() for name in removable_service_scripts}
 
-    resource_cfg = service_cfg.get("resource_copy", {})
     resource_rules: list[ResourceCopyRule] = []
     resource_lookup: dict[str, ResourceCopyRule] = {}
     resource_name_lookup: dict[str, ResourceCopyRule] = {}
     resources_dir = loader.base_dir / "resources"
-    for entry in resource_cfg.get("files", []) if isinstance(resource_cfg, dict) else []:
-        if not isinstance(entry, dict):
+    for item in service_cfg.resource_copy.files:
+        if not item.source or not item.destination:
             continue
-        source_name = str(entry.get("source", "")).strip()
-        destination_name = str(entry.get("destination", entry.get("target", ""))).strip()
-        if not source_name or not destination_name:
-            continue
-        originals_values = entry.get("originals", [])
-        originals: list[str] = []
-        if isinstance(originals_values, (list, tuple)):
-            for original in originals_values:
-                if not isinstance(original, str):
-                    continue
-                normalized = _normalize_config_path(original)
-                if not normalized:
-                    continue
-                originals.append(normalized)
-        destination = _normalize_config_path(destination_name) or Path(destination_name).name
+        originals = [_normalize_config_path(o) for o in item.originals if o]
+        destination = _normalize_config_path(item.destination) or Path(item.destination).name
         rule = ResourceCopyRule(
-            source=resources_dir / source_name,
+            source=resources_dir / item.source,
             destination=destination,
             originals=originals,
         )
@@ -532,11 +509,11 @@ def rename_and_cleanup_assets(
                 logger.err(f"[assets] Ошибка переименования {path}: {exc}")
                 continue
 
-        if name_lower in delete_after_rename or name_lower in delete_service:
+        if name_lower in delete_service:
             try:
                 path.unlink()
                 stats.removed += 1
-                logger.info(f"🗑 Удалён (after_rename): {path.name}")
+                logger.info(f"🗑 Удалён скрипт: {path.name}")
             except Exception as exc:
                 logger.err(f"[assets] Ошибка удаления {path}: {exc}")
 
@@ -550,25 +527,19 @@ def rename_and_cleanup_assets(
         )
         logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
 
-    mapping_cfg = service_cfg.get("rename_map_output", {})
+    mapping_cfg = service_cfg.rename_map_output
     project_name = logger.get_project_name()
-    mapping_name_template = mapping_cfg.get("filename")
-
-    if mapping_name_template:
-        try:
-            mapping_name = mapping_name_template.format(project=project_name)
-        except Exception:
-            mapping_name = mapping_name_template
-    else:
-        mapping_name = f"{project_name}_rename_map.json"
+    try:
+        mapping_name = mapping_cfg.filename.format(project=project_name)
+    except Exception:
+        mapping_name = mapping_cfg.filename or f"{project_name}_rename_map.json"
 
     if mapping_name == "rename_map.json":
         mapping_name = f"{project_name}_rename_map.json"
-    mapping_location = str(mapping_cfg.get("location", "logs")).strip()
-    if mapping_location.lower() == "logs":
+    if mapping_cfg.location.lower() == "logs":
         mapping_dir = logger.get_logs_dir()
     else:
-        mapping_dir = project_root / mapping_location
+        mapping_dir = project_root / mapping_cfg.location
     mapping_path = mapping_dir / mapping_name
 
     legacy_candidates = [project_root / "rename_map.json", mapping_dir / "rename_map.json"]

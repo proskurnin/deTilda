@@ -45,18 +45,14 @@ _missing_route_keys: set[tuple[str, str]] = set()
 
 
 def _load_patterns(loader: ConfigLoader) -> tuple[re.Pattern[str], re.Pattern[str]]:
-    patterns_cfg = loader.patterns().get("htaccess_patterns", {})
+    htaccess_cfg = loader.patterns().htaccess_patterns
     rewrite_re = re.compile(
-        patterns_cfg.get(
-            "rewrite_rule",
-            r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-        )
+        htaccess_cfg.rewrite_rule
+        or r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)"
     )
     redirect_re = re.compile(
-        patterns_cfg.get(
-            "redirect",
-            r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-        )
+        htaccess_cfg.redirect
+        or r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)"
     )
     return rewrite_re, redirect_re
 
@@ -314,11 +310,11 @@ def collect_routes(
     _missing_routes.clear()
     _missing_route_keys.clear()
     rewrite_re, redirect_re = _load_patterns(loader)
-    patterns_cfg = loader.patterns().get("htaccess_patterns", {})
-    soft_fallback_enabled = bool(patterns_cfg.get("soft_fallback_to_404", False))
-    auto_stub_enabled = bool(patterns_cfg.get("auto_stub_missing_routes", False))
-    remove_unresolved_enabled = bool(patterns_cfg.get("remove_unresolved_routes", True))
-    fallback_target = str(patterns_cfg.get("fallback_target", "404.html"))
+    htaccess_cfg = loader.patterns().htaccess_patterns
+    soft_fallback_enabled = htaccess_cfg.soft_fallback_to_404
+    auto_stub_enabled = htaccess_cfg.auto_stub_missing_routes
+    remove_unresolved_enabled = htaccess_cfg.remove_unresolved_routes
+    fallback_target = htaccess_cfg.fallback_target
 
     for file_path in _iter_htaccess_files(project_root):
         parsed_routes = collect_htaccess_routes(file_path, project_root, stats=stats)

@@ -79,26 +79,17 @@ def clean_text_files(project_root: Path, loader: ConfigLoader) -> CleanStats:
     patterns_cfg = loader.patterns()
     service_cfg = loader.service_files()
 
-    robots_patterns = _compile_patterns(patterns_cfg.get("robots_cleanup_patterns", []))
-    generic_patterns = _compile_patterns(patterns_cfg.get("tilda_remnants_patterns", []))
+    robots_patterns = _compile_patterns(patterns_cfg.robots_cleanup_patterns)
+    generic_patterns = _compile_patterns(patterns_cfg.tilda_remnants_patterns)
 
     readme_substitutions: list[tuple[re.Pattern[str], str]] = []
-    for item in patterns_cfg.get("readme_cleanup_patterns", []):
-        if isinstance(item, dict):
-            pattern = item.get("pattern")
-            replacement = item.get("replacement", "")
-            if isinstance(pattern, str):
-                try:
-                    readme_substitutions.append((re.compile(pattern, re.IGNORECASE), str(replacement)))
-                except re.error:
-                    logger.warn(f"[cleaners] Некорректный паттерн readme: {pattern}")
-        elif isinstance(item, str):
-            try:
-                readme_substitutions.append((re.compile(item, re.IGNORECASE), ""))
-            except re.error:
-                logger.warn(f"[cleaners] Некорректный паттерн readme: {item}")
+    for rule in patterns_cfg.readme_cleanup_patterns:
+        try:
+            readme_substitutions.append((re.compile(rule.pattern, re.IGNORECASE), rule.replacement))
+        except re.error:
+            logger.warn(f"[cleaners] Некорректный паттерн readme: {rule.pattern}")
 
-    files_to_clean = service_cfg.get("cleaner_options", {}).get("files_to_clean_tilda_refs", [])
+    files_to_clean = service_cfg.cleaner_options.files_to_clean_tilda_refs
     stats = CleanStats()
 
     for path in _iter_targets(project_root, files_to_clean):
