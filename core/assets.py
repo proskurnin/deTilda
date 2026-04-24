@@ -1,6 +1,19 @@
-"""Asset rename and cleanup utilities."""
+"""Asset rename and cleanup utilities for the deTilda pipeline.
+
+Шаг 1 конвейера — самый объёмный. Выполняет четыре задачи:
+
+  1. Скачивание удалённых ресурсов с CDN Tilda (CSS, JS, изображения)
+  2. Удаление мусорных файлов Tilda (tildacopy.png, скрипты статистики и др.)
+  3. Переименование файлов: til→ai в именах (tildablock → aidablock)
+  4. Нормализация регистра: все имена файлов приводятся к нижнему регистру
+
+Результат — AssetResult с:
+  - rename_map: {старый_путь: новый_путь} — используется в refs.py для обновления ссылок
+  - stats: счётчики переименований, удалений, загрузок
+"""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -8,7 +21,7 @@ import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Iterable, Iterator, Tuple
+from typing import TYPE_CHECKING, Dict, Iterable
 from uuid import uuid4
 
 from core import logger, utils
@@ -46,6 +59,7 @@ class ResourceCopyRule:
 
 
 def _normalize_config_path(value: str) -> str:
+    """Нормализует путь из конфига: убирает ./ и ведущие слеши."""
     normalized = value.strip().replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
@@ -54,8 +68,8 @@ def _normalize_config_path(value: str) -> str:
     return normalized
 
 
-
 def _sanitize(name: str) -> str:
+    """Очищает имя файла: убирает спецсимволы, схлопывает множественные подчёркивания."""
     sanitized = (
         name.replace(" ", "_")
         .replace("(", "")
@@ -175,30 +189,13 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
     return downloaded, warnings, ssl_bypassed_downloads
 
 
-def _normalize_case_enabled(service_cfg: Dict[str, object]) -> tuple[bool, set[str]]:
-    normalize_cfg: Dict[str, object] = {}
-    pipeline_cfg = service_cfg.get("pipeline_stages")
-    if isinstance(pipeline_cfg, dict):
-        raw_cfg = pipeline_cfg.get("normalize_case")
-        if isinstance(raw_cfg, dict):
-            normalize_cfg = raw_cfg
-        elif isinstance(raw_cfg, bool):
-            normalize_cfg = {"enabled": raw_cfg}
-
-    enabled = normalize_cfg.get("enabled")
-    if enabled is None:
-        enabled = True
-    else:
-        enabled = bool(enabled)
-
-    extensions = {
-        str(ext).lower()
-        for ext in normalize_cfg.get("extensions", [])
-        if isinstance(ext, str)
-    }
+def _normalize_case_enabled(service_cfg: object) -> tuple[bool, set[str]]:
+    """Читает настройки нормализации регистра из ServiceFilesConfig."""
+    normalize_cfg = service_cfg.pipeline_stages.normalize_case  # type: ignore[union-attr]
+    enabled = normalize_cfg.enabled
+    extensions = {ext.lower() for ext in normalize_cfg.extensions if isinstance(ext, str)}
     if not extensions:
         extensions = {".html", ".htm", ".css", ".js", ".php", ".txt"}
-
     return enabled, extensions
 
 
@@ -241,17 +238,21 @@ def _apply_case_normalization(
     project_root: Path,
     rename_map: Dict[str, str],
     stats: AssetStats,
-    patterns_cfg: Dict[str, object],
-    service_cfg: Dict[str, object],
+    patterns_cfg: object,
+    service_cfg: object,
 ) -> None:
+    """Приводит имена файлов к нижнему регистру и обновляет ссылки в текстовых файлах.
+
+    macOS нечувствительна к регистру, поэтому переименование через temp-файл.
+    После переименования обновляет все ссылки на эти файлы в HTML/CSS/JS.
+    """
     enabled, extensions = _normalize_case_enabled(service_cfg)
     if not enabled:
         logger.info("[assets] Нормализация регистра файлов отключена в конфиге")
         return
 
     text_extensions = tuple(
-        str(ext).lower()
-        for ext in patterns_cfg.get("text_extensions", [])
+        ext.lower() for ext in patterns_cfg.text_extensions  # type: ignore[union-attr]
         if isinstance(ext, str)
     )
     if not text_extensions:
@@ -386,8 +387,21 @@ def rename_and_cleanup_assets(
     project_root: Path | "ProjectContext",
     loader: ConfigLoader | None = None,
 ) -> AssetResult:
+    """Основная функция шага 1 конвейера.
+
+    Принимает ProjectContext или Path+ConfigLoader (для обратной совместимости).
+    Возвращает AssetResult с rename_map и статистикой.
+
+    Порядок обработки каждого файла:
+      1. Если файл — замена ресурса (favicon.ico, ga.js) → удалить старый, добавить в rename_map
+      2. Если файл — мусор Tilda (tildacopy.png, скрипты) → удалить
+      3. Если файл в exclude_from_rename (robots.txt, .htaccess) → пропустить
+      4. Если имя содержит 'til' → переименовать (til→ai)
+      5. После переименования: если файл — Tilda-скрипт → удалить
+    """
     context: ProjectContext | None = None
     if hasattr(project_root, "project_root") and not isinstance(project_root, Path):
+        # Принят ProjectContext — извлекаем из него нужные объекты
         context = project_root  # type: ignore[assignment]
         project_root = context.project_root
         loader = context.config_loader
@@ -468,6 +482,7 @@ def rename_and_cleanup_assets(
         ssl_bypassed_downloads=ssl_bypassed_downloads,
     )
 
+    # Главный цикл: обходим все файлы проекта в алфавитном порядке
     for path in sorted(project_root.rglob("*")):
         if not path.is_file():
             continue
@@ -475,9 +490,11 @@ def rename_and_cleanup_assets(
         name_lower = path.name.lower()
         relative_path = utils.relpath(path, project_root)
 
+        # Шаг 1: замена ресурса (favicon.ico, ga.js) → удалить Tilda-версию, запомнить в rename_map
         if _handle_resource_replacement(path, relative_path):
             continue
 
+        # Шаг 2: немедленное удаление мусора (tildacopy.png, Tilda-скрипты и др.)
         if name_lower in delete_immediately or name_lower in delete_service:
             try:
                 path.unlink()
@@ -487,9 +504,11 @@ def rename_and_cleanup_assets(
                 logger.err(f"[assets] Ошибка удаления {path}: {exc}")
             continue
 
+        # Шаг 3: защищённые файлы не переименовываем (robots.txt, .htaccess, send_email.php)
         if name_lower in exclude_from_rename:
             continue
 
+        # Шаг 4: переименование til→ai в имени файла
         new_name = path.name
         match = til_regex.search(path.stem)
         if match:
@@ -509,6 +528,7 @@ def rename_and_cleanup_assets(
                 logger.err(f"[assets] Ошибка переименования {path}: {exc}")
                 continue
 
+        # Шаг 5: если после переименования файл оказался Tilda-скриптом — удаляем
         if name_lower in delete_service:
             try:
                 path.unlink()
@@ -517,6 +537,7 @@ def rename_and_cleanup_assets(
             except Exception as exc:
                 logger.err(f"[assets] Ошибка удаления {path}: {exc}")
 
+    # Создаём прозрачный 1px PNG — используется как замена для логотипов Tilda в HTML
     placeholder = project_root / "images" / "1px.png"
     if not placeholder.exists():
         placeholder.parent.mkdir(parents=True, exist_ok=True)
