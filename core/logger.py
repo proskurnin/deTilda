@@ -1,4 +1,4 @@
-"""Simple logging utilities used across the Detilda toolchain."""
+"""Simple logging utilities used across the deTilda toolchain."""
 from __future__ import annotations
 
 import sys
@@ -12,7 +12,6 @@ __all__ = [
     "attach_to_project",
     "close",
     "debug",
-    "error",
     "err",
     "exception",
     "get_logs_dir",
@@ -23,8 +22,10 @@ __all__ = [
     "warn",
 ]
 
+_LOG_SUFFIX = "detilda"  # суффикс имени лог-файла: <project>_detilda.log
+
 _log_file: Optional[TextIO] = None
-_project_name: str = "detilda"
+_project_name: str = ""
 _logs_dir: Optional[Path] = None
 
 
@@ -63,7 +64,6 @@ def err(message: str) -> None:
 
 def error(message: str) -> None:
     """Backward-compatible alias for :func:`err`."""
-
     err(message)
 
 
@@ -73,7 +73,6 @@ def debug(message: str) -> None:
 
 def exception(message: str) -> None:
     """Log *message* with the active traceback."""
-
     _write_line("💥", message)
     tb = traceback.format_exc().rstrip()
     if tb and tb != "NoneType: None":
@@ -83,8 +82,7 @@ def exception(message: str) -> None:
 
 @contextmanager
 def module_scope(module_name: str) -> Iterator[None]:
-    """Log start and finish messages for a logical application module."""
-
+    """Log start and finish messages for a pipeline module."""
     start = time.time()
     info(f"[{module_name}] ▶️ Начало работы")
     try:
@@ -99,7 +97,6 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
 
     logs_dir: путь к папке логов; если не передан — вычисляется относительно project_root.
     """
-
     global _log_file, _project_name, _logs_dir
 
     project_root = Path(project_root)
@@ -117,7 +114,7 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
 
     _logs_dir.mkdir(parents=True, exist_ok=True)
 
-    log_path = _logs_dir / f"{_project_name}_detilda.log"
+    log_path = _logs_dir / f"{_project_name}_{_LOG_SUFFIX}.log"
 
     try:
         _log_file = log_path.open("a", encoding="utf-8")
