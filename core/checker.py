@@ -1,4 +1,21 @@
-"""Lightweight link checker for deTilda."""
+"""Link and form integrity checks for the deTilda pipeline.
+
+Три проверки выполняются в конце конвейера (шаги 12–14):
+
+  check_links (шаг 14):
+    Финальная проверка всех внутренних ссылок в HTML-файлах.
+    Цель: 0 битых ссылок. Логирует каждую битую ссылку как предупреждение.
+
+  check_tilda_remnants (шаг 13):
+    Находит и исправляет оставшиеся ссылки со словом 'tilda':
+    - Абсолютные URL → скачивает локально, заменяет на относительный путь
+    - Локальные пути → применяет replace_rules (til→ai)
+    Цель: 0 остатков. Неисправленные попадают в финальный отчёт.
+
+  check_forms_integration (шаг 12):
+    Статическая проверка: у каждой HTML-страницы с формой подключён
+    form-handler.js. Реальная отправка не тестируется — только наличие скрипта.
+"""
 from __future__ import annotations
 
 import os
@@ -13,7 +30,14 @@ from core.config_loader import ConfigLoader
 from core.downloader import download_to_project
 from core.htaccess import collect_routes, get_route_info
 
-__all__ = ["FormIntegrationResult", "LinkCheckerResult", "TildaRemnantsResult", "check_forms_integration", "check_links", "check_tilda_remnants"]
+__all__ = [
+    "FormIntegrationResult",
+    "LinkCheckerResult",
+    "TildaRemnantsResult",
+    "check_forms_integration",
+    "check_links",
+    "check_tilda_remnants",
+]
 
 
 @dataclass
@@ -25,17 +49,18 @@ class LinkCheckerResult:
 @dataclass
 class TildaRemnantsResult:
     files_with_remnants: int = 0
-    total_occurrences: int = 0
+    total_occurrences: int = 0  # ссылки которые не удалось исправить
 
 
 @dataclass
 class FormIntegrationResult:
     forms_found: int = 0
     forms_hooked: int = 0
-    warnings: int = 0
+    warnings: int = 0  # 1 если есть непривязанные формы, иначе 0
 
 
 def _iter_links(text: str, patterns: Iterable[str]) -> Iterable[str]:
+    """Извлекает ссылки из текста по list regex-паттернов из config.yaml."""
     for pattern in patterns:
         try:
             regex = re.compile(pattern)
@@ -49,8 +74,7 @@ def _iter_links(text: str, patterns: Iterable[str]) -> Iterable[str]:
 
 
 def _strip_cache_busting_param(link: str) -> str:
-    """Return *link* without the ``t`` query parameter and fragment."""
-
+    """Удаляет ?t=... (cache-busting параметр Tilda) и fragment из URL."""
     split = urlsplit(link)
     filtered_params = [
         (key, value)
@@ -62,8 +86,12 @@ def _strip_cache_busting_param(link: str) -> str:
 
 
 def _get_effective_base_directory(file_path: Path, project_root: Path) -> Path:
-    """Return a directory to use as a base for resolving relative links."""
+    """Возвращает базовую директорию для разрешения относительных ссылок.
 
+    Tilda хранит body-файлы в files/page123body.html — относительные ссылки
+    в них разрешаются относительно page123.html (родительского файла), а не
+    относительно files/. Эта функция находит правильную базовую директорию.
+    """
     stem = file_path.stem
     if not stem.endswith("body"):
         return file_path.parent
@@ -107,6 +135,11 @@ def _get_effective_base_directory(file_path: Path, project_root: Path) -> Path:
 
 
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
+    """Проверяет все внутренние ссылки в HTML-файлах проекта.
+
+    Внешние URL (http://, https://, //) и якори (#) игнорируются.
+    Каждая битая ссылка логируется как предупреждение.
+    """
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     ignore_prefixes = tuple(patterns_cfg.ignore_prefixes)
@@ -141,6 +174,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                     candidate = project_root / (link_path or normalized_link).lstrip("/")
             else:
                 candidate = (base_directory / (link_path or normalized_link)).resolve()
+
             result.checked += 1
             if not candidate.exists():
                 result.broken += 1
@@ -159,33 +193,34 @@ def _is_absolute_url(link: str) -> bool:
 
 
 def _apply_replace_rules(link: str, rules: list) -> str:
+    """Применяет replace_rules к ссылке (ReplaceRule объекты из config.yaml)."""
     result = link
     for rule in rules:
         try:
-            pattern = rule.pattern if hasattr(rule, "pattern") else rule.get("pattern", "")
-            replacement = rule.replacement if hasattr(rule, "replacement") else rule.get("replacement", "")
-            if pattern:
-                result = re.sub(str(pattern), str(replacement), result)
+            if hasattr(rule, "pattern") and rule.pattern:
+                result = re.sub(str(rule.pattern), str(getattr(rule, "replacement", "")), result)
         except re.error:
             pass
     return result
 
 
 def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemnantsResult:
-    """Find and fix any links still containing 'tilda' after the pipeline.
+    """Находит и исправляет оставшиеся ссылки со словом 'tilda'.
 
-    - Absolute URLs (http/https//) → download locally, replace with relative path
-    - Local paths → apply replace_rules from config (til→ai)
-
-    Goal: zero tilda references in the final output.
+    Абсолютные URL → скачивает локально, заменяет на относительный путь.
+    Локальные пути → применяет replace_rules (til→ai).
+    Неисправленные — логируются, попадают в total_occurrences.
+    Цель: 0.
     """
-
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     service_cfg = loader.service_files()
     link_patterns = patterns_cfg.links
     replace_rules = patterns_cfg.replace_rules
-    download_rules = [{"folder": r.folder, "extensions": list(r.extensions)} for r in service_cfg.remote_assets.rules]
+    download_rules = [
+        {"folder": r.folder, "extensions": list(r.extensions)}
+        for r in service_cfg.remote_assets.rules
+    ]
     text_extensions = tuple(patterns_cfg.text_extensions) or (".html", ".htm", ".css", ".js")
 
     result = TildaRemnantsResult()
@@ -215,7 +250,6 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
                         f"в {utils.relpath(file_path, project_root)}"
                     )
                 else:
-                    # Не удалось скачать — применяем replace_rules
                     fixed = _apply_replace_rules(link, replace_rules)
                     if fixed != link:
                         text = text.replace(link, fixed)
@@ -264,19 +298,19 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
 
 
 def check_forms_integration(project_root: Path) -> FormIntegrationResult:
-    """Verify that every HTML form has the form handler script on the same page."""
+    """Проверяет что каждая HTML-страница с формой имеет подключённый form-handler.js.
 
+    Проверка статическая — анализирует HTML, не отправляет реальные запросы.
+    warnings=1 если хотя бы одна форма не подключена к handler.
+    """
     project_root = Path(project_root)
-    html_files = list(project_root.rglob("*.html"))
-    files_dir = project_root / "files"
-    body_files = list(files_dir.glob("*body.html")) if files_dir.exists() else []
-
-    forms_found = 0
-    forms_hooked = 0
     form_pattern = re.compile(r"<form\b", re.IGNORECASE)
     handler_pattern = re.compile(r"form-handler\.js", re.IGNORECASE)
 
-    for file_path in html_files + body_files:
+    forms_found = 0
+    forms_hooked = 0
+
+    for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:
             content = utils.safe_read(file_path)
         except Exception:
