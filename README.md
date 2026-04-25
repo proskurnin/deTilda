@@ -1,5 +1,7 @@
 # deTilda
 
+[![Tests](https://github.com/proskurnin/deTilda/actions/workflows/tests.yml/badge.svg)](https://github.com/proskurnin/deTilda/actions/workflows/tests.yml)
+
 Офлайн-инструмент для подготовки сайтов, экспортированных с [Tilda.cc](https://tilda.cc),
 к развёртыванию на собственном хостинге.
 
