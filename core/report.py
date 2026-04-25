@@ -1,21 +1,41 @@
-"""Report generation utilities."""
+"""Report generation utilities for the deTilda pipeline.
+
+Два типа отчётов:
+
+  Промежуточный (generate_intermediate_report):
+    Вызывается трижды в pipeline после ключевых шагов.
+    Каждый вызов ПЕРЕЗАПИСЫВАЕТ предыдущий файл — показывает текущее состояние.
+    Файл: logs/<project>_detilda_report.txt
+
+  Финальный (generate_final_report):
+    Вызывается один раз в конце pipeline.
+    Содержит полную статистику всех шагов, метаданные приложения и статус.
+    Файл: logs/<project>_final_report.txt
+
+Отчёты можно отключить:
+  - manifest.json: features.reports = false
+  - Переменная окружения: DETILDA_DISABLE_REPORTS=1
+"""
 from __future__ import annotations
 
 import os
 import time
 from pathlib import Path
-from typing import Final, Iterable, Tuple
+from typing import Final, Iterable
 
 from core import logger, utils
+from core.htaccess import MissingRouteInfo
 from core.version import APP_ENTRY_POINT, APP_LICENSE, APP_PYTHON, APP_RELEASE_DATE, APP_TITLE
 
 __all__ = ["generate_intermediate_report", "generate_final_report"]
 
+# Кешируется при первом вызове — не сбрасывается между архивами (CLI запускает один процесс)
 _REPORTS_ENABLED: bool | None = None
 _ENV_DISABLE_REPORTS: Final[str] = "DETILDA_DISABLE_REPORTS"
 
 
 def _reports_enabled() -> bool:
+    """Читает настройку из manifest.json и env. Кеширует результат."""
     global _REPORTS_ENABLED
     if _REPORTS_ENABLED is not None:
         return _REPORTS_ENABLED
@@ -26,8 +46,8 @@ def _reports_enabled() -> bool:
     if isinstance(features, dict):
         enabled = bool(features.get("reports", True))
 
-    env_override = os.getenv(_ENV_DISABLE_REPORTS)
-    if env_override is not None:
+    # Переменная окружения всегда отключает отчёты если задана
+    if os.getenv(_ENV_DISABLE_REPORTS) is not None:
         enabled = False
 
     _REPORTS_ENABLED = enabled
@@ -37,6 +57,7 @@ def _reports_enabled() -> bool:
 
 
 def _report_path(suffix: str) -> Path:
+    """Возвращает путь к файлу отчёта в папке логов текущего проекта."""
     project_name = logger.get_project_name()
     logs_dir = logger.get_logs_dir()
     return logs_dir / f"{project_name}_{suffix}.txt"
@@ -48,10 +69,13 @@ def generate_intermediate_report(
     fixed_links: int,
     broken_links: int,
 ) -> None:
+    """Сохраняет промежуточный отчёт с текущей статистикой.
+
+    Перезаписывает файл при каждом вызове — показывает актуальное состояние.
+    Вызывается из pipeline после шагов: assets, cleaners, refs.
+    """
     if not _reports_enabled():
-        logger.debug(
-            "[report] Пропуск промежуточного отчёта (генерация отключена)"
-        )
+        logger.debug("[report] Пропуск промежуточного отчёта (генерация отключена)")
         return
 
     report_path = _report_path("detilda_report")
@@ -89,20 +113,25 @@ def generate_final_report(
     forms_found: int,
     forms_hooked: int,
     tilda_remnants: int,
-    missing_htaccess_routes: Iterable[Tuple[str, str, str, str | None]],
+    missing_htaccess_routes: Iterable[MissingRouteInfo],
     exec_time: float,
 ) -> None:
+    """Генерирует финальный отчёт со статистикой всех шагов конвейера."""
     if not _reports_enabled():
         logger.debug("[report] Пропуск финального отчёта (генерация отключена)")
         return
 
     report_path = _report_path("final_report")
+
+    # Статус зависит от наличия ошибок и предупреждений
     if errors > 0:
         status = f"❌ {APP_TITLE} — завершено с ошибками"
     elif warnings > 0:
         status = f"⚠️ {APP_TITLE} — завершено с предупреждениями"
     else:
         status = f"✅ {APP_TITLE} — завершено успешно"
+
+    # Шапка с метаданными приложения из manifest.json
     meta_parts = [APP_TITLE]
     if APP_RELEASE_DATE:
         meta_parts.append(f"выпуск {APP_RELEASE_DATE}")
@@ -141,15 +170,17 @@ def generate_final_report(
         f"{status}\n"
         f"{'=' * 70}\n"
     )
+
     missing_lines = list(missing_htaccess_routes)
     if missing_lines:
         text += "Потерянные htaccess-маршруты:\n"
-        for alias, target, action, replacement in missing_lines:
-            if replacement:
-                text += f"  - {alias} -> {target} [{action}: {replacement}]\n"
+        for item in missing_lines:
+            if item.replacement:
+                text += f"  - {item.alias} -> {item.target} [{item.action}: {item.replacement}]\n"
             else:
-                text += f"  - {alias} -> {target} [{action}]\n"
+                text += f"  - {item.alias} -> {item.target} [{item.action}]\n"
         text += f"{'=' * 70}\n"
+
     try:
         utils.safe_write(report_path, text)
         logger.ok(f"📊 Финальный отчёт сформирован: {report_path.name}")

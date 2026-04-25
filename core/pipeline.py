@@ -172,10 +172,7 @@ class DetildaPipeline:
                     forms_found=stats.forms_found,
                     forms_hooked=stats.forms_hooked,
                     tilda_remnants=remnants.total_occurrences,
-                    missing_htaccess_routes=[
-                        (item.alias, item.target, item.action, item.replacement)
-                        for item in get_missing_routes()
-                    ],
+                    missing_htaccess_routes=get_missing_routes(),
                     exec_time=stats.exec_time,
                 )
 
