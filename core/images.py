@@ -1,4 +1,24 @@
-"""Utilities for conservative post-processing of images/styles in exported HTML."""
+"""Post-processing of lazyload images in exported HTML.
+
+Шаг 10 конвейера — страховка для lazyload-атрибутов.
+
+Проблема: Tilda активно использует lazyload. Реальный src изображения часто
+лежит в data-original, а в src стоит placeholder (1px.png, spinner и др.).
+refs.py на шаге 9 обновляет ссылки по rename_map, но data-* атрибуты
+могут быть не покрыты паттернами из config.yaml.
+
+Что делает этот модуль:
+  1. normalize_img_src_from_data_original:
+     Если src — placeholder и data-original указывает на локальный файл →
+     заменяем src на data-original (promote).
+  2. normalize_background_image_from_data_original:
+     Если background-image — placeholder и data-original есть →
+     заменяем background-image на data-original.
+  3. normalize_inline_backgrounds:
+     Нормализует синтаксис: url("...") → url('...') для консистентности.
+
+Обрабатывает только HTML файлы — в CSS/JS lazyload не применяется.
+"""
 from __future__ import annotations
 
 import re
@@ -13,7 +33,6 @@ __all__ = [
     "fix_project_images",
     "is_preview_or_placeholder_asset",
     "normalize_background_image_from_data_original",
-    "normalize_inline_backgrounds",
     "normalize_img_src_from_data_original",
 ]
 
@@ -23,9 +42,10 @@ class ImageFixStats:
     updated_files: int = 0
     img_tags_fixed: int = 0
     background_tags_fixed: int = 0
-    unresolved_candidates: int = 0
+    unresolved_candidates: int = 0  # data-original указывает на несуществующий файл
 
 
+# Regex для поиска и обработки тегов и атрибутов
 _IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE | re.DOTALL)
 _ATTR_RE = re.compile(
     r"(?P<name>[a-zA-Z_:][a-zA-Z0-9_:\-\.]*)\s*=\s*"
@@ -40,6 +60,8 @@ _STYLE_BG_URL_RE = re.compile(
     r"(?P<prefix>background(?:-image)?\s*:\s*url\(\s*)(?P<quote>['\"]?)(?P<url>[^)\"']+)(?P=quote)(?P<suffix>\s*\))",
     re.IGNORECASE,
 )
+
+# Паттерны URL-заглушек которые lazyload ставит в src до загрузки
 _PLACEHOLDER_RE = re.compile(
     r"(?:"
     r"_-_empty_|"
@@ -59,6 +81,7 @@ _PLACEHOLDER_RE = re.compile(
 
 
 def _parse_attrs(attrs_chunk: str) -> dict[str, str]:
+    """Парсит атрибуты HTML тега в словарь {имя: значение}."""
     attrs: dict[str, str] = {}
     for match in _ATTR_RE.finditer(attrs_chunk):
         name = match.group("name").lower()
@@ -68,6 +91,7 @@ def _parse_attrs(attrs_chunk: str) -> dict[str, str]:
 
 
 def _local_url_exists(project_root: Path, url: str) -> bool:
+    """Проверяет что URL ведёт на существующий локальный файл."""
     if not url:
         return False
     split = urlsplit(url)
@@ -86,6 +110,7 @@ def _is_external_url(url: str) -> bool:
 
 
 def _looks_like_placeholder(url: str) -> bool:
+    """Возвращает True если URL похож на lazyload-заглушку."""
     if not url:
         return True
     split = urlsplit(url)
@@ -94,12 +119,12 @@ def _looks_like_placeholder(url: str) -> bool:
 
 
 def is_preview_or_placeholder_asset(url: str) -> bool:
-    """Return ``True`` for placeholder/preview image URLs used by lazy runtime."""
-
+    """Возвращает True для URL-заглушек используемых lazyload runtime."""
     return _looks_like_placeholder(url)
 
 
 def _replace_attr_value(tag: str, attr_name: str, new_value: str) -> tuple[str, bool]:
+    """Заменяет значение атрибута в HTML теге. Возвращает (новый тег, был ли изменён)."""
     pattern = re.compile(
         rf'(\b{re.escape(attr_name)}\s*=\s*)(?P<quote>["\'])(?P<value>.*?)(?P=quote)',
         re.IGNORECASE | re.DOTALL,
@@ -116,7 +141,7 @@ def _replace_attr_value(tag: str, attr_name: str, new_value: str) -> tuple[str, 
 
 
 def normalize_inline_backgrounds(text: str) -> tuple[str, int]:
-    """Normalize inline background/background-image url(\"...\") to url('...')."""
+    """Нормализует синтаксис: background: url("...") → url('...')."""
     fixed = 0
 
     def _replace(match: re.Match[str]) -> str:
@@ -131,7 +156,12 @@ def normalize_inline_backgrounds(text: str) -> tuple[str, int]:
 
 
 def normalize_img_src_from_data_original(text: str, project_root: Path) -> tuple[str, int, int]:
-    """Promote ``data-original`` to ``src`` only for placeholder/empty image sources."""
+    """Promote data-original → src для lazyload изображений с placeholder-заглушками.
+
+    Срабатывает только если:
+    - src пустой или является placeholder (1px.png, spinner и др.)
+    - data-original указывает на существующий локальный файл
+    """
     img_fixed = 0
     unresolved = 0
 
@@ -166,8 +196,12 @@ def normalize_img_src_from_data_original(text: str, project_root: Path) -> tuple
 def normalize_background_image_from_data_original(
     text: str, project_root: Path
 ) -> tuple[str, int, int]:
-    """Promote ``data-original`` into inline ``background-image`` for preview backgrounds."""
+    """Promote data-original → background-image для lazyload-блоков с фоновыми изображениями.
 
+    Срабатывает только если:
+    - у тега есть style с background-image: url(placeholder)
+    - data-original указывает на существующий локальный файл
+    """
     background_fixed = 0
     unresolved = 0
 
@@ -214,26 +248,19 @@ def normalize_background_image_from_data_original(
 
 
 def _transform_html_images(text: str, project_root: Path) -> tuple[str, int, int, int]:
+    """Применяет все три нормализации последовательно."""
     updated, inline_bg_fixed = normalize_inline_backgrounds(text)
     updated, img_fixed, unresolved_img = normalize_img_src_from_data_original(updated, project_root)
     updated, bg_fixed, unresolved_bg = normalize_background_image_from_data_original(updated, project_root)
     return updated, img_fixed, inline_bg_fixed + bg_fixed, unresolved_img + unresolved_bg
 
 
-def _should_process_file(path: Path) -> bool:
-    lower_name = path.name.lower()
-    if lower_name.endswith((".html", ".htm")):
-        return True
-    return "files" in {part.lower() for part in path.parts} and lower_name.endswith("body.html")
-
-
 def fix_project_images(project_root: Path) -> ImageFixStats:
+    """Обрабатывает все HTML файлы проекта — исправляет lazyload-изображения."""
     project_root = Path(project_root)
     stats = ImageFixStats()
 
     for path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
-        if not _should_process_file(path):
-            continue
         try:
             text = utils.safe_read(path)
         except Exception as exc:
@@ -251,12 +278,9 @@ def fix_project_images(project_root: Path) -> ImageFixStats:
             logger.info(f"🖼 Нормализованы изображения: {utils.relpath(path, project_root)}")
 
     logger.info(
-        "[images] Обработано файлов: %s, img исправлено: %s, bg исправлено: %s, unresolved: %s"
-        % (
-            stats.updated_files,
-            stats.img_tags_fixed,
-            stats.background_tags_fixed,
-            stats.unresolved_candidates,
-        )
+        f"[images] Обработано файлов: {stats.updated_files}, "
+        f"img исправлено: {stats.img_tags_fixed}, "
+        f"bg исправлено: {stats.background_tags_fixed}, "
+        f"unresolved: {stats.unresolved_candidates}"
     )
     return stats
