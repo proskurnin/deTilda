@@ -1,9 +1,22 @@
-"""Reference update utilities for project files."""
+"""Reference update utilities for project files.
+
+Шаг 9 конвейера — самый важный для корректности результата.
+
+Что делает update_all_refs_in_project для каждого файла:
+  1. HTML: обновляет href/src/action по rename_map и маршрутам .htaccess
+  2. HTML: комментирует теги <link rel="icon"> (иконки Tilda)
+  3. HTML: заменяет ссылки на логотипы Tilda на 1px.png
+  4. Все файлы: применяет rename_map (переименованные файлы)
+  5. Все файлы: применяет replace_rules (til→ai, t-→ai-)
+  6. JS: замены только внутри строковых литералов (безопасно для кода)
+
+Возвращает (fixed_total, broken_total) — счётчики для отчёта.
+"""
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from core import logger, utils
@@ -67,17 +80,12 @@ def _replace_static_prefix(url: str) -> str:
 
 
 def _compile_replace_rules(rules: Iterable[object]) -> list[tuple[re.Pattern[str], str]]:
+    """Компилирует ReplaceRule объекты в пары (pattern, replacement) для subn."""
     compiled: list[tuple[re.Pattern[str], str]] = []
     for rule in rules:
         if hasattr(rule, "pattern"):
             pattern = rule.pattern  # type: ignore[union-attr]
             replacement = str(getattr(rule, "replacement", ""))
-        elif isinstance(rule, dict):
-            pattern = rule.get("pattern")
-            replacement = str(rule.get("replacement", ""))
-        elif isinstance(rule, str):
-            pattern = rule
-            replacement = ""
         else:
             continue
         if not isinstance(pattern, str):
@@ -144,11 +152,22 @@ def _apply_replace_rules_for_suffix(
     rules: Iterable[tuple[re.Pattern[str], str]],
     suffix: str,
 ) -> tuple[str, int]:
+    """Применяет replace_rules с учётом типа файла.
+
+    JS-файлы обрабатываются через _apply_replace_rules_js — замены только
+    внутри строковых литералов, чтобы не сломать код.
+    """
     if suffix == ".js":
         return _apply_replace_rules_js(text, rules)
     return _apply_replace_rules(text, rules)
 
+
 def _apply_rename_map(text: str, rename_map: Dict[str, str]) -> tuple[str, int]:
+    """Применяет карту переименований к тексту.
+
+    Сортируем по длине убывающей — длинные совпадения имеют приоритет,
+    чтобы избежать частичных замен (например page1.html раньше page1).
+    """
     replacements = 0
     for old, new in sorted(rename_map.items(), key=lambda item: len(item[0]), reverse=True):
         if not old:
@@ -161,13 +180,18 @@ def _apply_rename_map(text: str, rename_map: Dict[str, str]) -> tuple[str, int]:
 
 
 def _cleanup_broken_markup(text: str) -> str:
+    """Убирает служебные маркеры data-detilda-broken="1" из HTML.
+
+    Маркеры добавляются в _update_links_in_html для битых ссылок —
+    после обработки их нужно удалить из финального HTML.
+    """
     text = re.sub(
-        r'(<img\\b[^>]*?)\\s+alt="[^"]*"([^>]*?\\sdata-detilda-broken="1")',
+        r'(<img\b[^>]*?)\s+alt="[^"]*"([^>]*?\sdata-detilda-broken="1")',
         lambda match: match.group(1) + match.group(2),
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(r"\\sdata-detilda-broken=\"1\"", "", text, flags=re.IGNORECASE)
+    text = re.sub(r'\sdata-detilda-broken="1"', "", text, flags=re.IGNORECASE)
     return text
 
 
@@ -204,7 +228,17 @@ def _update_links_in_html(
     link_rel_values: Iterable[str],
     replace_patterns: Iterable[str],
     comment_patterns: Iterable[str],
-) -> Tuple[str, int, int]:
+) -> tuple[str, int, int]:
+    """Обновляет все ссылки в HTML-файле.
+
+    Порядок обработки каждой ссылки:
+      1. Внутренние якори (#) — пропускаем
+      2. Ссылки на тот же корень (/#...) — упрощаем до якоря
+      3. Внешние URL (http, //) — пропускаем
+      4. Корневые пути (/) — ищем в маршрутах .htaccess, затем в rename_map
+      5. Относительные пути — ищем в rename_map, проверяем существование
+    Возвращает (новый текст, исправлено, битых).
+    """
     fixed = 0
     broken = 0
 
@@ -330,6 +364,11 @@ def update_all_refs_in_project(
     loader: ConfigLoader | None = None,
     stats: Any | None = None,
 ) -> tuple[int, int]:
+    """Обновляет все ссылки во всех текстовых файлах проекта.
+
+    rename_map: карта переименований из assets.py {старый→новый}
+    Возвращает (fixed_total, broken_total).
+    """
     project_root = Path(project_root)
     rename_map = dict(rename_map)
 
