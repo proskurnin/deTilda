@@ -1,8 +1,25 @@
-"""Small compatibility layer for Pydantic APIs used by Detilda.
+"""Минимальная замена pydantic для deTilda — без внешней зависимости.
 
-If the real ``pydantic`` package is installed, this module re-exports its
-classes. Otherwise it provides a minimal strict validator with a compatible
-subset of APIs used in this repository.
+Реализует подмножество API pydantic.v2, нужное в `core/schemas.py`:
+  - BaseModel: создание, model_validate(dict), model_dump(), parse_obj() (legacy)
+  - Field(default=..., default_factory=...) для дефолтов с фабрикой
+  - ValidationError при несоответствии типа
+  - ConfigDict — заглушка (no-op): pydantic-options не применяются
+
+Зачем своя реализация:
+  - Нулевые внешние зависимости (важно для упаковки через PyInstaller)
+  - Маленький размер дистрибутива
+  - Полный контроль над поведением валидации
+
+Если pydantic будет установлен — модуль автоматически импортирует его.
+Поведение должно совпадать в обоих случаях.
+
+Поддерживаемые типы в полях моделей:
+  - примитивы: str, bool, int, float
+  - контейнеры: List[T], Dict[K, V]
+  - Union[A, B] (включая Optional[T])
+  - вложенные BaseModel
+  - Any (без проверки)
 """
 from __future__ import annotations
 
