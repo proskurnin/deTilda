@@ -11,6 +11,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # Переход на Node.js 24 — Node.js 20 устарел в actions runner
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     steps:
       # Скачиваем код репозитория
       - uses: actions/checkout@v4
