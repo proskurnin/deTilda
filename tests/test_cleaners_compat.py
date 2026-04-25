@@ -15,24 +15,27 @@ if "yaml" not in sys.modules:
     sys.modules["yaml"] = yaml_stub
 
 from core.cleaners import clean_project_files
+from core.schemas import PatternsConfig, ServiceFilesConfig
 
 
 class _FakeLoader:
-    def patterns(self) -> dict[str, object]:
-        return {
+    def patterns(self) -> PatternsConfig:
+        return PatternsConfig.model_validate({
             "robots_cleanup_patterns": [
                 r"(?im)^\s*Disallow:\s*/tilda/(?:form).*\n?",
                 r"(?im)^\s*Disallow:\s*/\*_escaped_fragment_\*/\s*\n?",
             ],
             "readme_cleanup_patterns": [
-                r"(?im)^.*Published on Tilda\.cc.*\n?",
+                {"pattern": r"(?im)^.*Published on Tilda\.cc.*\n?", "replacement": ""},
                 {"pattern": r"(?i)\btilda\b", "replacement": "site"},
             ],
             "tilda_remnants_patterns": [r"(https?://|//)[^\s'\"]*tilda\.ws[^\s'\"]*"],
-        }
+        })
 
-    def service_files(self) -> dict[str, object]:
-        return {"cleaner_options": {"files_to_clean_tilda_refs": ["robots.txt", "readme.txt"]}}
+    def service_files(self) -> ServiceFilesConfig:
+        return ServiceFilesConfig.model_validate({
+            "cleaner_options": {"files_to_clean_tilda_refs": ["robots.txt", "readme.txt"]}
+        })
 
 
 def test_clean_project_files_cleans_robots_and_readme(tmp_path: Path) -> None:

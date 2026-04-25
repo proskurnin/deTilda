@@ -14,14 +14,15 @@ if yaml_stub is None:
     sys.modules["yaml"] = yaml_stub
 
 from core.htaccess import collect_routes, get_missing_routes, get_route_info
+from core.schemas import PatternsConfig
 
 
 class _Loader:
-    def __init__(self, htaccess_patterns: dict[str, object]) -> None:
-        self._htaccess_patterns = htaccess_patterns
+    def __init__(self, htaccess_patterns: dict) -> None:
+        self._cfg = PatternsConfig.model_validate({"htaccess_patterns": htaccess_patterns})
 
-    def patterns(self) -> dict[str, object]:
-        return {"htaccess_patterns": self._htaccess_patterns}
+    def patterns(self) -> PatternsConfig:
+        return self._cfg
 
 
 def test_collect_routes_soft_fallback_to_404(tmp_path: Path) -> None:
@@ -31,14 +32,12 @@ def test_collect_routes_soft_fallback_to_404(tmp_path: Path) -> None:
     )
     (tmp_path / "404.html").write_text("<h1>404</h1>", encoding="utf-8")
 
-    loader = _Loader(
-        {
-                "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-                "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "soft_fallback_to_404": True,
-            "fallback_target": "404.html",
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "soft_fallback_to_404": True,
+        "fallback_target": "404.html",
+    })
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
 
     assert routes["/broken"] == "404.html"
@@ -54,14 +53,12 @@ def test_collect_routes_without_soft_fallback_keeps_broken_target(tmp_path: Path
         encoding="utf-8",
     )
 
-    loader = _Loader(
-        {
-            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "soft_fallback_to_404": False,
-            "remove_unresolved_routes": False,
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "soft_fallback_to_404": False,
+        "remove_unresolved_routes": False,
+    })
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
 
     assert routes["/broken"] == "missing.html"
@@ -78,13 +75,11 @@ def test_collect_routes_removes_legacy_broken_route_by_default(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    loader = _Loader(
-        {
-            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "soft_fallback_to_404": False,
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "soft_fallback_to_404": False,
+    })
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
 
     assert "/legacy" not in routes
@@ -102,14 +97,12 @@ def test_collect_routes_auto_stub_creates_missing_file(tmp_path: Path) -> None:
     )
     (tmp_path / "404.html").write_text("<h1>404</h1>", encoding="utf-8")
 
-    loader = _Loader(
-        {
-            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "auto_stub_missing_routes": True,
-            "fallback_target": "404.html",
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "auto_stub_missing_routes": True,
+        "fallback_target": "404.html",
+    })
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
 
     assert routes["/broken"] == "missing.html"
@@ -128,14 +121,12 @@ def test_collect_routes_counts_initial_and_autofixed_routes(tmp_path: Path) -> N
     )
     (tmp_path / "404.html").write_text("<h1>404</h1>", encoding="utf-8")
 
-    loader = _Loader(
-        {
-            "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
-            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "auto_stub_missing_routes": True,
-            "fallback_target": "404.html",
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": r"(?im)^[ \t]*RewriteRule[ \t]+\^/?([a-z0-9\-_/]+)\??\$?[ \t]+([^ \t]+)",
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "auto_stub_missing_routes": True,
+        "fallback_target": "404.html",
+    })
     stats = SimpleNamespace(
         htaccess_routes_initially_broken=0,
         htaccess_routes_autofixed=0,
@@ -158,15 +149,13 @@ def test_collect_routes_handles_regex_with_extra_groups(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    loader = _Loader(
-        {
-            "rewrite_rule": (
-                r"(?im)^[ \t]*RewriteRule[ \t]+\^/?(([a-z0-9\-_/]+))\??\$?[ \t]+([^ \t]+)"
-            ),
-            "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
-            "remove_unresolved_routes": False,
-        }
-    )
+    loader = _Loader({
+        "rewrite_rule": (
+            r"(?im)^[ \t]*RewriteRule[ \t]+\^/?(([a-z0-9\-_/]+))\??\$?[ \t]+([^ \t]+)"
+        ),
+        "redirect": r"(?im)^[ \t]*Redirect(?:Permanent|[ \t]+3\d{2})?[ \t]+(/[^ \t]+)[ \t]+([^ \t]+)",
+        "remove_unresolved_routes": False,
+    })
     routes = collect_routes(tmp_path, loader)  # type: ignore[arg-type]
 
     assert routes["/broken"] == "missing.html"

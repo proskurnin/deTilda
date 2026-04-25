@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from core import fonts_localizer
+from core import downloader, fonts_localizer
 
 
 def test_localize_inlines_google_import_and_downloads_font(tmp_path, monkeypatch):
@@ -12,12 +12,18 @@ def test_localize_inlines_google_import_and_downloads_font(tmp_path, monkeypatch
         encoding="utf-8",
     )
 
+    # Патчим в downloader, потому что fonts_localizer импортирует оттуда
     monkeypatch.setattr(
-        fonts_localizer,
-        "_fetch_text",
-        lambda _url: "@font-face{src:url(https://fonts.gstatic.com/s/inter/v1/inter.woff2) format('woff2');}",
+        downloader,
+        "fetch_text",
+        lambda _url, **_kw: "@font-face{src:url(https://fonts.gstatic.com/s/inter/v1/inter.woff2) format('woff2');}",
     )
-    monkeypatch.setattr(fonts_localizer, "_fetch_bytes", lambda _url: b"font-data")
+    monkeypatch.setattr(
+        downloader, "fetch_bytes", lambda _url, **_kw: (b"font-data", False)
+    )
+    # Патчим импортированные имена в fonts_localizer
+    monkeypatch.setattr(fonts_localizer, "fetch_text", downloader.fetch_text)
+    monkeypatch.setattr(fonts_localizer, "fetch_bytes", downloader.fetch_bytes)
 
     updated, imports, downloaded = fonts_localizer.localize_google_fonts(tmp_path)
 
@@ -41,7 +47,10 @@ def test_localize_direct_gstatic_url(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(fonts_localizer, "_fetch_bytes", lambda _url: b"font-data")
+    monkeypatch.setattr(
+        downloader, "fetch_bytes", lambda _url, **_kw: (b"font-data", False)
+    )
+    monkeypatch.setattr(fonts_localizer, "fetch_bytes", downloader.fetch_bytes)
 
     updated, imports, downloaded = fonts_localizer.localize_google_fonts(tmp_path)
 

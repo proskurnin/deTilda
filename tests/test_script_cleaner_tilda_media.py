@@ -14,16 +14,17 @@ if "yaml" not in sys.modules:
     sys.modules["yaml"] = yaml_stub
 
 from core.script_cleaner import remove_disallowed_scripts
+from core.schemas import PatternsConfig, ServiceFilesConfig
 
 
 class _FakeLoader:
     config_path = Path("tests/fake-config.yaml")
 
-    def patterns(self) -> dict[str, object]:
-        return {"text_extensions": [".html"]}
+    def patterns(self) -> PatternsConfig:
+        return PatternsConfig.model_validate({"text_extensions": [".html"]})
 
-    def service_files(self) -> dict[str, object]:
-        return {
+    def service_files(self) -> ServiceFilesConfig:
+        return ServiceFilesConfig.model_validate({
             "scripts_to_remove_from_project": {
                 "filenames": [
                     "tilda-stat-1.0.min.js",
@@ -32,7 +33,7 @@ class _FakeLoader:
                     "tilda-fallback-1.0.min.js",
                 ]
             }
-        }
+        })
 
 
 def test_script_cleaner_keeps_tilda_media_runtime_for_youtube(tmp_path: Path) -> None:

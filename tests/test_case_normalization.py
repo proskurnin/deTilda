@@ -14,21 +14,27 @@ if "yaml" not in sys.modules:
     sys.modules["yaml"] = yaml_stub
 
 from core.assets import AssetStats, _apply_case_normalization
+from core.schemas import PatternsConfig, ServiceFilesConfig
 
 
-def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
-    project_root = tmp_path
-    rename_map: dict[str, str] = {}
-    stats = AssetStats()
-    patterns_cfg = {"text_extensions": [".html"]}
-    service_cfg = {
+def _make_configs() -> tuple[PatternsConfig, ServiceFilesConfig]:
+    patterns_cfg = PatternsConfig.model_validate({"text_extensions": [".html"]})
+    service_cfg = ServiceFilesConfig.model_validate({
         "pipeline_stages": {
             "normalize_case": {
                 "enabled": True,
                 "extensions": [".html"],
             }
         }
-    }
+    })
+    return patterns_cfg, service_cfg
+
+
+def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
+    project_root = tmp_path
+    rename_map: dict[str, str] = {}
+    stats = AssetStats()
+    patterns_cfg, service_cfg = _make_configs()
 
     (project_root / "Job.HTML").write_text("content", encoding="utf-8")
     (project_root / "main.html").write_text(
@@ -46,8 +52,11 @@ def test_case_normalization_updates_relative_links(tmp_path: Path) -> None:
     _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
 
     assert stats.renamed == 1
-    assert not (project_root / "Job.HTML").exists()
-    assert (project_root / "job.html").exists()
+    # На case-insensitive ФС (macOS) Job.HTML.exists() вернёт True для job.html —
+    # проверяем реальное имя файла через iterdir
+    actual_files = {p.name for p in project_root.iterdir() if p.is_file()}
+    assert "job.html" in actual_files
+    assert "Job.HTML" not in actual_files
 
     main_text = (project_root / "main.html").read_text(encoding="utf-8")
     assert "./job.html" in main_text
@@ -65,15 +74,7 @@ def test_case_normalization_lowercases_links_without_matching_files(tmp_path: Pa
     project_root = tmp_path
     rename_map: dict[str, str] = {}
     stats = AssetStats()
-    patterns_cfg = {"text_extensions": [".html"]}
-    service_cfg = {
-        "pipeline_stages": {
-            "normalize_case": {
-                "enabled": True,
-                "extensions": [".html"],
-            }
-        }
-    }
+    patterns_cfg, service_cfg = _make_configs()
 
     (project_root / "main.html").write_text(
         '<a href="/Job"></a><a href="./Sub/Job"></a><a href="..\\Job"></a>',

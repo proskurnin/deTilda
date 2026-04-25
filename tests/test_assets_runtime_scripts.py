@@ -14,21 +14,27 @@ if "yaml" not in sys.modules:
     sys.modules["yaml"] = yaml_stub
 
 from core.assets import rename_and_cleanup_assets
+from core.schemas import ImagesConfig, PatternsConfig, ServiceFilesConfig
 
 
 class _FakeLoader:
     base_dir = ROOT
 
-    def patterns(self) -> dict[str, object]:
-        return {"assets": {"til_to_ai_filename": r"\btil"}, "text_extensions": [".html"]}
+    def patterns(self) -> PatternsConfig:
+        return PatternsConfig.model_validate({
+            "assets": {"til_to_ai_filename": r"\btil"},
+            "text_extensions": [".html"],
+        })
 
-    def images(self) -> dict[str, object]:
-        return {"delete_physical_files": {"after_rename": [], "as_is": []}}
+    def images(self) -> ImagesConfig:
+        return ImagesConfig.model_validate({
+            "delete_physical_files": {"as_is": []},
+        })
 
-    def service_files(self) -> dict[str, object]:
-        return {
+    def service_files(self) -> ServiceFilesConfig:
+        return ServiceFilesConfig.model_validate({
             "scripts_to_delete": {
-                "after_rename": [
+                "files": [
                     "aida-stat-1.0.min.js",
                     "aida-forms-1.0.min.js",
                     "aida-fallback-1.0.min.js",
@@ -36,7 +42,7 @@ class _FakeLoader:
                 ]
             },
             "rename_map_output": {"filename": "{project}_rename_map.json", "location": "logs"},
-        }
+        })
 
 
 def test_assets_keep_runtime_scripts_when_media_markers_exist(tmp_path: Path) -> None:

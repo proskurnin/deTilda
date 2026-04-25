@@ -45,7 +45,7 @@ def test_replace_rules_patch_html(tmp_path: Path) -> None:
     )
 
     loader = ConfigLoader(ROOT)
-    assert loader.patterns()["replace_rules"], "replace_rules should be loaded from stub"
+    assert loader.patterns().replace_rules, "replace_rules should be loaded from stub"
     update_all_refs_in_project(tmp_path, {}, loader)
 
     content = html.read_text(encoding="utf-8")
@@ -62,7 +62,7 @@ def test_replace_rules_without_explicit_loader(tmp_path: Path) -> None:
     )
 
     loader = ConfigLoader(ROOT)
-    assert loader.patterns()["replace_rules"], "replace_rules should be loaded from stub"
+    assert loader.patterns().replace_rules, "replace_rules should be loaded from stub"
     update_all_refs_in_project(tmp_path, {}, loader)
 
     result = page.read_text(encoding="utf-8")
