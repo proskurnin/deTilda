@@ -1,34 +1,35 @@
-"""HTML formatting stage for final project output."""
+"""HTML formatting stage for final project output.
+
+Шаг 13 конвейера. Приводит HTML-файлы к читаемому виду с правильными отступами.
+
+Алгоритм:
+  1. Маскируем блоки <script>, <style>, <pre>, <textarea> токенами —
+     их содержимое не форматируется (иначе сломаем JS и CSS)
+  2. Разбиваем ><тег на отдельные строки
+  3. Добавляем отступы по открывающим/закрывающим тегам
+  4. Восстанавливаем замаскированные блоки
+
+Идемпотентный: повторный запуск не изменяет уже отформатированный файл.
+"""
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from core import logger
-from typing import TYPE_CHECKING
+from core import logger, utils
 
 if TYPE_CHECKING:
     from core.project import ProjectContext
-from core import utils
 
+# HTML-теги без закрывающего тега — не увеличивают отступ
 _VOID_TAGS = {
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
+    "area", "base", "br", "col", "embed", "hr",
+    "img", "input", "link", "meta", "param",
+    "source", "track", "wbr",
 }
 
+# Блоки которые нельзя переформатировать — содержат код или преформатированный текст
 _RAW_BLOCK_RE = re.compile(
     r"<(script|style|pre|textarea)\b[^>]*>.*?</\1\s*>",
     flags=re.IGNORECASE | re.DOTALL,
@@ -43,10 +44,16 @@ def _iter_targets(project_root: Path) -> list[Path]:
 
 
 def _normalize_newlines(text: str) -> str:
+    """Приводит переносы строк к Unix-формату (\n)."""
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _mask_raw_blocks(text: str) -> tuple[str, dict[str, str]]:
+    """Заменяет блоки <script/style/pre/textarea> уникальными токенами.
+
+    Это защищает содержимое этих блоков от переформатирования.
+    Токены восстанавливаются в _restore_raw_blocks после форматирования.
+    """
     replacements: dict[str, str] = {}
 
     def _replace(match: re.Match[str]) -> str:
@@ -58,7 +65,10 @@ def _mask_raw_blocks(text: str) -> tuple[str, dict[str, str]]:
 
 
 def _split_tag_boundaries(text: str) -> str:
-    # Split only on whitespace between tags to avoid changing meaningful text nodes.
+    """Разбивает смежные теги на отдельные строки (><tag → >\n<tag).
+
+    Только пробельные символы между тегами — не трогаем текстовые узлы.
+    """
     return re.sub(r">\s*<", ">\n<", text)
 
 
@@ -67,12 +77,14 @@ def _is_self_closing(tag_text: str) -> bool:
 
 
 def _restore_raw_blocks(text: str, replacements: dict[str, str]) -> str:
+    """Восстанавливает блоки script/style/pre/textarea из токенов."""
     for token, original in replacements.items():
         text = text.replace(token, original)
     return text
 
 
 def _normalize_pretty_html(text: str) -> str:
+    """Форматирует HTML: нормализует переносы, добавляет отступы по тегам."""
     normalized = _normalize_newlines(text)
     masked, raw_blocks = _mask_raw_blocks(normalized)
     split = _split_tag_boundaries(masked)
@@ -84,16 +96,19 @@ def _normalize_pretty_html(text: str) -> str:
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
+            # Одна пустая строка максимум — не дублируем
             if pretty and pretty[-1] != "":
                 pretty.append("")
             continue
 
+        # Закрывающий тег уменьшает отступ до строки
         close_match = _CLOSE_TAG_RE.match(line)
         if close_match:
             indent = max(0, indent - 1)
 
         pretty.append(f"{'  ' * indent}{line}")
 
+        # Открывающий тег увеличивает отступ для следующих строк
         open_match = _OPEN_TAG_RE.match(line)
         if open_match:
             tag_name = open_match.group(1).lower()
@@ -109,6 +124,11 @@ def _normalize_pretty_html(text: str) -> str:
 
 
 def run(context: "ProjectContext", stats: Any | None = None) -> int:
+    """Форматирует все HTML-файлы проекта.
+
+    stats: объект PipelineStats — обновляет formatted_html_files и errors.
+    Возвращает количество изменённых файлов.
+    """
     targets = _iter_targets(context.project_root)
     formatted = 0
 
