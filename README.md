@@ -1,147 +1,272 @@
-# Detilda
+# deTilda
 
-## Описание продукта
+Офлайн-инструмент для подготовки сайтов, экспортированных с [Tilda.cc](https://tilda.cc),
+к развёртыванию на собственном хостинге.
 
-Detilda — офлайн-инструмент автоматизации, который приводит в порядок экспортированные проекты [Tilda.cc](https://tilda.cc) перед развёртыванием на стороннем хостинге. Программа распаковывает архив сайта, нормализует имена файлов и структуру каталогов, удаляет фирменные артефакты Tilda, чинит внутренние ссылки и формирует итоговый отчёт. Конвейер Detilda работает локально, не требует подключения к Tilda и позволяет выпускать само-хостимые сборки, готовые к публикации на любом CDN или файловом сервере.
+[**English version**](#detilda-english)
 
-### Архитектура и ключевые возможности
+---
 
-- **Основной конвейер (`main.py`, `core/pipeline.py`)** — управляет стадиями обработки: распаковка архива, нормализация ассетов, очистка сервисных файлов, генерация форм, правка ссылок, удаление скриптов и финальная проверка ссылок. Настройки стадий подаются через единый YAML-конфиг.
-- **Контекст проекта (`core/project.py`, `core/config_loader.py`, `core/configuration.py`)** — описывает рабочие пути, лениво загружает конфигурацию, проверяет корректность параметров и передаёт их в остальные модули.
-- **Распаковка и подготовка (`core/archive.py`, `core/logger.py`)** — извлекает входной ZIP-архив во временную директорию, ведёт журнал выполнения и аккуратно очищает рабочее окружение при ошибках.
-- **Нормализация ассетов (`core/assets.py`)** — приводит имена файлов к нижнему регистру, скачивает удалённые ресурсы, копирует обязательные шаблоны из `resources/`, удаляет служебные файлы Tilda и сохраняет карту переименований для следующих стадий.
-- **Очистка текстов (`core/cleaners.py`, `core/page404.py`)** — удаляет из `robots.txt`, `readme.txt`, `404.html` и других текстовых файлов рекламные и служебные блоки Tilda, заменяя их на готовые шаблоны.
-- **Работа с формами (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** — генерирует PHP-обработчик и фронтенд-скрипт, внедряет подключение скрипта в HTML. `send_email.php` вычисляет основной адрес как `info@<домен_сайта_без_www>` автоматически; тестовые заявки (если `name` содержит `TEST`, регистр не важен) отправляются только на фиксированный список тестовых адресов.
-- **Правка ссылок и маршрутов (`core/refs.py`, `core/htaccess.py`)** — обновляет ссылки в HTML/CSS/JS/JSON, учитывает переименованные файлы, собирает маршруты из `.htaccess`, проверяет совпадение регистров и сообщает о нерешённых путях.
-- **Гигиена скриптов (`core/script_cleaner.py`)** — удаляет встроенные скрипты аналитики, обработки форм и другие элементы, которые не нужны в итоговой сборке.
-- **Проверка ссылок и отчётность (`core/checker.py`, `core/report.py`)** — проходит по итоговому проекту, находит битые ссылки, формирует промежуточные и финальные отчёты, синхронизируемые с настройками `manifest.json`.
-- **Конфигурация (`config/config.yaml`, `manifest.json`)** — задаёт правила переименования, списки запрещённых файлов, параметры вставки скриптов и флаги включённых функций. Файл `manifest.json` дополнительно хранит версию и описание сборки.
-- **Инструменты и тесты (`tools/sync_manifest.py`, `core/build_sync.py`, `tests/`)** — CLI-утилиты для синхронизации манифеста и pytest-наборы, проверяющие корректность нормализации регистров и обновления манифеста.
+## Описание
 
-### Типовой рабочий процесс
+deTilda распаковывает ZIP-архив с экспортированным сайтом Tilda и автоматически:
 
-1. Пользователь помещает экспортированный архив Tilda в каталог `_workdir/` (создаётся автоматически при первом запуске).
-2. Запускает `python main.py` и указывает имя архива (для форм используется `default_email` из `manifest.json`, если это требуется конфигом).
-3. Detilda распаковывает архив, последовательно выполняет все стадии и пишет подробный лог в консоль и `logs/`.
-4. В конце конвейера готовая сборка остаётся в `_workdir/<имя-архива>/` вместе с отчётами и картой переименований.
+- удаляет служебные файлы и скрипты Tilda (статистика, формы, аналитика)
+- скачивает удалённые ресурсы (CSS, JS, изображения, шрифты Google) локально
+- переименовывает файлы и обновляет все ссылки в проекте
+- генерирует свой обработчик форм (`send_email.php` + `form-handler.js`)
+- проверяет, что в финальной сборке не осталось ссылок на Tilda
+- формирует подробный отчёт со статистикой
 
-### Модули по каталогам
+Работает локально, не требует подключения к Tilda. Результат — готовая к публикации
+на любом хостинге папка с сайтом.
 
-- `core/`
-  - `archive.py` — отвечает за распаковку архивов и подготовку рабочей директории.
-  - `assets.py` — нормализует структуру ассетов, переименовывает и скачивает ресурсы.
-  - `build_sync.py` — синхронизирует сведения о сборке с `manifest.json`.
-  - `checker.py` — запускает проверку ссылок и фиксирует ошибки.
-  - `cleaners.py` — удаляет шаблонные артефакты Tilda из текстовых файлов.
-  - `configuration.py` — предоставляет типизированные обёртки над YAML-конфигом.
-  - `config_loader.py` — лениво читает `config/config.yaml` и кэширует секции.
-  - `forms.py` — создаёт обработчик почтовых форм и подключаемые ресурсы.
-  - `htaccess.py` — парсит `.htaccess`, извлекает маршруты и редиректы.
-  - `inject.py` — вставляет ссылки на фронтенд-скрипты обработчика форм.
-  - `logger.py` — настраивает формат логов, уровни и запись в файл.
-  - `page404.py` — нормализует страницу 404 и удаляет лишние блоки.
-  - `pipeline.py` — описывает стадии конвейера и последовательность выполнения.
-  - `project.py` — хранит пути проекта и предоставляет доступ к конфигурации.
-  - `refs.py` — переписывает ссылки на файлы с учётом переименований и маршрутов.
-  - `report.py` — формирует текстовые отчёты и сводки по конвейеру.
-  - `script_cleaner.py` — удаляет запрещённые JavaScript- и HTML-вставки.
-- `config/`
-  - `config.yaml` — центральный файл с правилами переименования, очистки и копирования ресурсов.
-- `resources/`
-  - `favicon.ico`, `send_email.php`, `js/form-handler.js` — статические шаблоны, которые копируются в итоговый проект при необходимости.
-- `tests/`
-  - Pytest-сценарии, проверяющие синхронизацию манифеста и корректность нормализации регистров.
-- `tools/`
-  - `sync_manifest.py` — CLI-утилита для обновления `manifest.json` на основе собранного архива.
+## Быстрый старт
 
-### Для разработчиков
+```bash
+# 1. Положите архив сайта в _workdir/
+mv ~/Downloads/project12345.zip _workdir/
 
-- Минимальная версия Python — 3.10 (проект проверяется на 3.11).
-- Зависимости: `PyYAML` для чтения конфигурации, `pytest` для тестов.
-- Запуск тестов: `pytest` из корня репозитория.
-- При изменениях сборки рекомендуется запускать `python tools/sync_manifest.py` для обновления `manifest.json`.
+# 2. Запустите обработку
+python main.py
+# Введите имя архива: project12345.zip
 
-### Обновления за последние 2 дня (21–22 апреля 2026)
+# 3. Готовый сайт окажется в _workdir/project12345/
+# 4. Лог и rename_map будут в logs/project12345_*.log/.json
+```
 
-- Улучшена обработка и локализация шрифтов Google Fonts для офлайн/GDPR-сценариев (`core/fonts_localizer.py`, `core/pipeline.py`).
-- Добавлена типизированная загрузка конфигурации через Pydantic-совместимые схемы (`core/schemas.py`, `core/config_loader.py`, `core/pydantic_compat.py`).
-- Переработана интеграция форм: `send_email.php` теперь копируется как универсальный шаблон без интерактивных запросов.
-- Усилена постобработка HTML: добавлен модуль prettify и улучшена стабильность/идемпотентность форматирования (`core/html_prettify.py`).
-- Расширены сводки конвейера: добавлены более честные счётчики предупреждений/ошибок, блок критичных находок и расширенная статистика.
-- Повышена отказоустойчивость `.htaccess`: добавлены fallback-маршруты, более строгая диагностика сломанных путей и отчётность.
-- Исправлен ряд регрессий в `main.py` и `core/pipeline.py` (обработка архивов, подсчёт форм, совместимость очистки и инъекции скриптов).
-- Улучшена работа с якорными ссылками в меню и покрытие регрессионными тестами (`tests/test_refs_anchor_links.py`).
-- Расширено тестовое покрытие ключевых модулей: формы, маршруты, форматирование HTML, checker и суммарная отчётность.
+Можно обработать несколько архивов за один запуск, перечислив их через запятую.
 
-## Product description
+## Архитектура: 14-шаговый конвейер
 
-Detilda is an offline automation tool that tidies up exported [Tilda.cc](https://tilda.cc) projects before they are deployed on external hosting. The program extracts the site archive, normalizes filenames and folder structure, removes Tilda-specific artefacts, fixes internal links, and produces a final report. Detilda runs locally, requires no connection to Tilda, and delivers self-hosted builds ready to publish on any CDN or file server.
+`core/pipeline.py` оркестрирует следующие шаги:
 
-### Architecture and key capabilities
+| # | Модуль | Что делает |
+|---|---|---|
+| 1 | `archive` | Распаковка ZIP в `_workdir/<имя>/` |
+| 2 | `assets` | Переименование файлов, скачивание удалённых ресурсов, удаление мусора Tilda, нормализация регистра |
+| 3 | `page404` | Очистка `404.html` от ссылок Tilda и скриптов |
+| 4 | `cleaners` | Очистка `robots.txt`, `readme.txt` от упоминаний Tilda |
+| 5 | `forms` | Копирование `send_email.php` и `form-handler.js` из `resources/` |
+| 6 | `inject` | Внедрение скриптов в HTML (form-handler перед `</body>`, ga.js перед `</head>`) |
+| 7 | `fonts_localizer` | Локализация Google Fonts (скачивание `.woff2`, инлайн `@import`) — GDPR-friendly |
+| 8 | `refs` | Обновление всех ссылок в HTML/CSS/JS по rename_map и маршрутам `.htaccess` |
+| 9 | `images` | Промоут `data-original` → `src` для lazyload изображений |
+| 10 | `script_cleaner` | Удаление встроенных скриптов Tilda из HTML |
+| 11 | `forms_check` | Проверка, что у каждой формы подключён `form-handler.js` |
+| 12 | `html_prettify` | Форматирование HTML с правильными отступами |
+| 13 | `checker` | Проверка всех внутренних ссылок, отчёт о битых |
+| 14 | `tilda-remnants` | Финальная проверка: ищет и исправляет остаточные упоминания Tilda |
 
-- **Main pipeline (`main.py`, `core/pipeline.py`)** – orchestrates the processing stages: archive extraction, asset normalization, service file cleanup, form generation, link rewriting, script removal, and final link checking. Stage settings are provided via a single YAML configuration.
-- **Project context (`core/project.py`, `core/config_loader.py`, `core/configuration.py`)** – defines working paths, lazily loads configuration data, validates parameters, and passes them to the other modules.
-- **Extraction and setup (`core/archive.py`, `core/logger.py`)** – unpacks the input ZIP archive into a temporary directory, logs progress, and gracefully cleans up the workspace on errors.
-- **Asset normalization (`core/assets.py`)** – converts filenames to lowercase, downloads remote resources, copies mandatory templates from `resources/`, removes Tilda service files, and stores a rename map for the following stages.
-- **Text cleanup (`core/cleaners.py`, `core/page404.py`)** – strips promotional and service blocks from `robots.txt`, `readme.txt`, `404.html`, and other text files, replacing them with ready-made templates.
-- **Form handling (`core/forms.py`, `core/inject.py`, `resources/send_email.php`, `resources/js/form-handler.js`)** – generates a PHP handler and frontend script and injects the script reference into HTML. `send_email.php` auto-builds the main recipient as `info@<site-domain-without-www>`; test submissions (`name` contains `TEST`, case-insensitive) are routed only to a fixed test-recipient list.
-- **Link and route repair (`core/refs.py`, `core/htaccess.py`)** – updates links across HTML/CSS/JS/JSON, respects renamed files, collects routes from `.htaccess`, enforces case matches, and reports unresolved paths.
-- **Script hygiene (`core/script_cleaner.py`)** – removes embedded analytics, form scripts, and other fragments that should not ship with the final package.
-- **Link checking and reporting (`core/checker.py`, `core/report.py`)** – scans the processed project for broken links, compiles interim and final reports, and aligns output with `manifest.json` settings.
-- **Configuration (`config/config.yaml`, `manifest.json`)** – defines rename rules, disallowed files, script injection parameters, and feature flags. `manifest.json` additionally stores the build version and description.
-- **Tooling and tests (`tools/sync_manifest.py`, `core/build_sync.py`, `tests/`)** – CLI helpers for manifest synchronization and pytest suites that verify case normalization and manifest updates.
+После всех шагов `report.generate_final_report` пишет финальный отчёт.
 
-### Typical workflow
+## Структура проекта
 
-1. Place the exported Tilda archive into the `_workdir/` directory (created automatically on the first run).
-2. Run `python main.py` and provide the archive name (forms use `default_email` from `manifest.json` if needed by config).
-3. Detilda extracts the archive, executes every stage in sequence, and writes detailed logs to the console and `logs/`.
-4. The finished build remains in `_workdir/<archive-name>/` along with reports and the rename map.
+```
+deTilda/
+├── main.py                    # Точка входа CLI
+├── manifest.json              # Версия, описание, пути
+├── config/config.yaml         # Все правила обработки
+├── core/                      # Модули конвейера
+│   ├── pipeline.py            # Оркестратор 14 шагов
+│   ├── project.py             # Контекст проекта (paths + config + rename_map)
+│   ├── archive.py             # Шаг 1: распаковка ZIP
+│   ├── assets.py              # Шаг 2: ассеты + rename_map
+│   ├── page404.py             # Шаг 3: очистка 404.html
+│   ├── cleaners.py            # Шаг 4: robots.txt, readme.txt
+│   ├── forms.py               # Шаг 5: копирование обработчиков форм
+│   ├── inject.py              # Шаг 6: внедрение скриптов
+│   ├── fonts_localizer.py     # Шаг 7: Google Fonts → локально
+│   ├── refs.py                # Шаг 8: обновление ссылок (главный для корректности)
+│   ├── htaccess.py            # Парсинг .htaccess + стратегии для битых маршрутов
+│   ├── images.py              # Шаг 9: lazyload-изображения
+│   ├── script_cleaner.py      # Шаг 10: удаление скриптов Tilda
+│   ├── checker.py             # Шаги 11, 13, 14: проверки и tilda-remnants
+│   ├── html_prettify.py       # Шаг 12: форматирование HTML
+│   ├── report.py              # Промежуточный и финальный отчёты
+│   ├── downloader.py          # Общий HTTP-клиент с SSL-fallback
+│   ├── runtime_scripts.py     # Защита runtime-скриптов от удаления
+│   ├── schemas.py             # Pydantic-модели для config.yaml
+│   ├── pydantic_compat.py     # Минимальная замена pydantic (без зависимостей)
+│   ├── config_loader.py       # Загрузка config.yaml в типизированные объекты
+│   ├── utils.py               # Файловые хелперы (safe_read, list_files и др.)
+│   ├── logger.py              # Логирование (синглтон с записью в файл)
+│   └── version.py             # Чтение версии и метаданных из manifest.json
+├── resources/                 # Шаблоны для копирования в проект
+│   ├── send_email.php         # Универсальный обработчик форм
+│   ├── js/form-handler.js     # Фронтенд для форм
+│   ├── ga.js                  # Шаблон Google Analytics
+│   └── favicon.ico            # Дефолтная иконка
+├── tools/
+│   └── bump_version.py        # SemVer bump + git тег
+├── tests/                     # 160 unit-тестов через pytest
+└── logs/                      # Логи и rename_map для каждого проекта
+```
 
-### Modules by directory
+## Конфигурация
 
-- `core/`
-  - `archive.py` – handles archive extraction and workspace preparation.
-  - `assets.py` – normalizes asset structure, renames files, and downloads resources.
-  - `build_sync.py` – synchronizes build metadata with `manifest.json`.
-  - `checker.py` – runs the link checker and records issues.
-  - `cleaners.py` – removes Tilda boilerplate from text files.
-  - `configuration.py` – provides typed wrappers around the YAML configuration.
-  - `config_loader.py` – lazily reads `config/config.yaml` and caches sections.
-  - `forms.py` – creates the mail form handler and bundled assets.
-  - `htaccess.py` – parses `.htaccess`, extracting routes and redirects.
-  - `inject.py` – injects frontend handler script references into HTML.
-  - `logger.py` – configures log format, levels, and file output.
-  - `page404.py` – normalizes the 404 page and removes extra blocks.
-  - `pipeline.py` – declares pipeline stages and their execution order.
-  - `project.py` – stores project paths and exposes configuration accessors.
-  - `refs.py` – rewrites links to account for renamed files and routes.
-  - `report.py` – produces textual reports and pipeline summaries.
-  - `script_cleaner.py` – removes forbidden JavaScript and HTML snippets.
-- `config/`
-  - `config.yaml` – central rule set for renaming, cleaning, and resource copying.
-- `resources/`
-  - `favicon.ico`, `send_email.php`, `js/form-handler.js` – static templates copied into the final project when required.
-- `tests/`
-  - Pytest scenarios that validate manifest synchronization and case normalization.
-- `tools/`
-  - `sync_manifest.py` – CLI utility for updating `manifest.json` from a packaged archive.
+### `manifest.json` — паспорт приложения
+
+Хранит версию (SemVer), пути, метаданные и build-настройки:
+
+```json
+{
+  "name": "deTilda",
+  "version": "4.8.1",
+  "release_date": "2026-04-25",
+  "description": "Автоматическая подготовка Tilda-экспортов...",
+  "license": "MIT",
+  "python": ">=3.10",
+  "features": {"reports": true},
+  "paths": {"workdir": "_workdir", "logs": "logs", "config": "config"},
+  "build": {"package_name": "detilda_4.8.1.zip"}
+}
+```
+
+### `config/config.yaml` — правила обработки
+
+Три секции:
+- **`patterns`** — regex для поиска ссылок, правила замен (`til→ai`), список расширений
+- **`images`** — какие файлы удалять, какие ссылки заменять на 1px-плейсхолдер
+- **`service_files`** — какие скрипты удалять, что копировать из `resources/`
+
+Все поля типизированы через Pydantic-схемы (`core/schemas.py`).
+
+## Универсальный обработчик форм
+
+`resources/send_email.php` работает без настройки:
+- определяет получателя автоматически: `info@<домен>` (определяется по `SERVER_NAME`)
+- в dev-окружении (`localhost`, `*.local`) использует тестовый адрес
+- в prod ставит BCC на страховочные адреса
+- автоматически переключается между TEST/PROD по env-переменной `SENDMAIL_MODE`
+
+Достаточно один раз сгенерировать на этапе deTilda, на любом домене будет работать корректно.
+
+## Для разработчиков
+
+### Версионирование
+
+Проект использует [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+Версия живёт в `manifest.json` и читается оттуда всеми модулями.
+
+Поднять версию:
+
+```bash
+python tools/bump_version.py patch   # 4.8.1 → 4.8.2 (баг-фикс)
+python tools/bump_version.py minor   # 4.8.1 → 4.9.0 (новая фича)
+python tools/bump_version.py major   # 4.8.1 → 5.0.0 (breaking change)
+```
+
+Скрипт обновляет `version`, `release_date`, `build.package_name` и создаёт git-тег.
+
+### Тесты
+
+```bash
+python -m pytest tests/ -q
+```
+
+Покрытие — 160 unit-тестов. Каждый модуль шага конвейера имеет свой тест-файл.
+Тесты используют типизированные fake-loader'ы для проверки модулей в изоляции.
+
+### Зависимости
+
+- Python 3.10+ (тестируется на 3.13)
+- `PyYAML` — чтение конфига
+- `pytest` — тесты
+
+Pydantic **не требуется** — `core/pydantic_compat.py` реализует нужное подмножество.
+Это сделано чтобы не тянуть тяжёлую зависимость в PyInstaller-сборку.
+
+### Структура тестов
+
+```
+tests/
+├── test_assets_main.py            # Главный flow rename_and_cleanup_assets
+├── test_assets_runtime_scripts.py # Защита runtime-скриптов
+├── test_archive.py                # ZIP-распаковка
+├── test_case_normalization.py     # Нормализация регистра имён
+├── test_checker_forms.py          # Проверка форм
+├── test_checker_remnants.py       # Финальная проверка tilda-остатков
+├── test_cleaners_compat.py        # Очистка robots.txt/readme.txt
+├── test_fonts_localizer.py        # Google Fonts локализация
+├── test_forms.py                  # Копирование send_email.php
+├── test_htaccess.py               # Парсинг .htaccess + стратегии
+├── test_html_prettify.py          # Форматирование HTML
+├── test_images_fix.py             # lazyload-изображения
+├── test_inject.py                 # Внедрение скриптов
+├── test_page404.py                # Очистка 404.html
+├── test_pipeline_summary.py       # Сводка пайплайна
+├── test_project.py                # ProjectContext
+├── test_pydantic_compat.py        # Наша замена pydantic
+├── test_refs_anchor_links.py      # Якорные ссылки
+├── test_refs_main.py              # Главный flow update_all_refs_in_project
+├── test_refs_replace_rules.py     # Применение replace_rules
+├── test_report.py                 # Генерация отчётов
+├── test_runtime_scripts.py        # Детекция media-маркеров
+├── test_script_cleaner_tilda_media.py  # Защита скриптов от удаления
+├── test_utils.py                  # Файловые хелперы
+└── test_version.py                # Метаданные из manifest.json
+```
+
+---
+
+## deTilda (English)
+
+Offline tool for preparing [Tilda.cc](https://tilda.cc) site exports for self-hosting.
+
+### Description
+
+deTilda extracts a Tilda site ZIP archive and automatically:
+
+- removes Tilda service files and scripts (analytics, forms, tracking)
+- downloads remote resources (CSS, JS, images, Google Fonts) locally
+- renames files and updates all links in the project
+- generates a custom form handler (`send_email.php` + `form-handler.js`)
+- checks that no Tilda references remain in the final build
+- produces a detailed statistics report
+
+Runs locally, no Tilda connection required. The result is a deployment-ready
+site folder for any hosting.
+
+### Quick start
+
+```bash
+# 1. Place the site archive into _workdir/
+mv ~/Downloads/project12345.zip _workdir/
+
+# 2. Run processing
+python main.py
+# Enter archive name: project12345.zip
+
+# 3. Finished site appears in _workdir/project12345/
+# 4. Logs and rename_map go to logs/project12345_*.log/.json
+```
+
+Multiple archives can be processed in one run by listing them comma-separated.
+
+### Pipeline (14 steps)
+
+`core/pipeline.py` orchestrates these steps:
+
+| # | Module | Purpose |
+|---|---|---|
+| 1 | `archive` | Extract ZIP into `_workdir/<name>/` |
+| 2 | `assets` | Rename files, download remote resources, remove Tilda junk, normalize case |
+| 3 | `page404` | Clean Tilda links and scripts from `404.html` |
+| 4 | `cleaners` | Clean Tilda mentions from `robots.txt`, `readme.txt` |
+| 5 | `forms` | Copy `send_email.php` and `form-handler.js` from `resources/` |
+| 6 | `inject` | Inject scripts into HTML (form-handler before `</body>`, ga.js before `</head>`) |
+| 7 | `fonts_localizer` | Localize Google Fonts (download `.woff2`, inline `@import`) — GDPR-friendly |
+| 8 | `refs` | Update all links in HTML/CSS/JS via rename_map and `.htaccess` routes |
+| 9 | `images` | Promote `data-original` → `src` for lazyload images |
+| 10 | `script_cleaner` | Remove Tilda inline scripts from HTML |
+| 11 | `forms_check` | Verify every form has `form-handler.js` attached |
+| 12 | `html_prettify` | Format HTML with proper indentation |
+| 13 | `checker` | Validate all internal links, report broken ones |
+| 14 | `tilda-remnants` | Final check: find and fix remaining Tilda references |
 
 ### For developers
 
-- Minimum Python version: 3.10 (validated on 3.11).
-- Dependencies: `PyYAML` for configuration parsing, `pytest` for tests.
-- Run the test suite with `pytest` from the repository root.
-- After build changes, run `python tools/sync_manifest.py` to refresh `manifest.json`.
-
-### Updates from the last 2 days (April 21–22, 2026)
-
-- Improved Google Fonts localization for offline/GDPR-friendly builds (`core/fonts_localizer.py`, `core/pipeline.py`).
-- Introduced typed configuration loading through Pydantic-compatible schemas (`core/schemas.py`, `core/config_loader.py`, `core/pydantic_compat.py`).
-- Reworked form integration: `send_email.php` is now copied as a universal template with no interactive prompts.
-- Strengthened HTML post-processing by adding prettify support and improving formatting stability/idempotence (`core/html_prettify.py`).
-- Expanded pipeline summaries with more honest warning/error counters, a critical findings block, and richer processing stats.
-- Improved `.htaccess` resilience with fallback route handling, stricter broken-route diagnostics, and better reporting.
-- Fixed multiple regressions in `main.py` and `core/pipeline.py` (archive flow, form counting, cleaner/inject compatibility).
-- Improved same-page menu anchor link rewriting and added stronger regression coverage (`tests/test_refs_anchor_links.py`).
-- Increased test coverage across forms, routes, HTML formatting, checker behavior, and summary reporting.
+- **Versioning**: [SemVer](https://semver.org/) — bump via `python tools/bump_version.py {patch,minor,major}`
+- **Tests**: `python -m pytest tests/ -q` (160 unit tests)
+- **Dependencies**: Python 3.10+, `PyYAML`, `pytest`. Pydantic **not required** — `core/pydantic_compat.py` provides a minimal replacement for PyInstaller compatibility.
