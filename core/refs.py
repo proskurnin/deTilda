@@ -308,27 +308,9 @@ def _update_links_in_html(
 
         return match.group(0)
 
-    pattern = re.compile(
-        r'(?P<attr>href|src|data-src|data-href|action)\s*=\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
-        re.IGNORECASE,
-    )
-    text = pattern.sub(repl, text)
-
-    # Комментируем <link rel="icon"> и <link rel="apple-touch-icon"> — иконки Tilda
-    def _link_replacer(match: re.Match[str]) -> str:
-        nonlocal fixed
-        tag = match.group(1)
-        if "<!--" in tag and "-->" in tag:
-            return tag
-        fixed += 1
-        return f"<!-- {tag} -->"
-
-    for rel_value in link_rel_values:
-        link_pattern = re.compile(
-            rf"(<link[^>]+rel=\"{re.escape(rel_value)}\"[^>]*>)",
-            re.IGNORECASE,
-        )
-        text = link_pattern.sub(_link_replacer, text)
+    # ВАЖНО: replace_patterns и comment_patterns обрабатываются ДО главного цикла,
+    # чтобы заведомо известные мусорные ссылки (логотипы Tilda) были заменены
+    # ДО того как broken-handler пометит их как битые (если файл уже удалён).
 
     # Заменяем ссылки на логотипы Tilda на прозрачный 1px.png
     for pattern_str in replace_patterns:
@@ -358,6 +340,29 @@ def _update_links_in_html(
             logger.warn(f"[refs] Некорректный паттерн комментирования: {pattern_str}")
             continue
         text = comment_re.sub(_comment_replacer, text)
+
+    # Главный цикл: обновление и проверка ссылок (rename_map, маршруты, broken-handling)
+    pattern = re.compile(
+        r'(?P<attr>href|src|data-src|data-href|action)\s*=\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
+        re.IGNORECASE,
+    )
+    text = pattern.sub(repl, text)
+
+    # Комментируем <link rel="icon"> и <link rel="apple-touch-icon"> — иконки Tilda
+    def _link_replacer(match: re.Match[str]) -> str:
+        nonlocal fixed
+        tag = match.group(1)
+        if "<!--" in tag and "-->" in tag:
+            return tag
+        fixed += 1
+        return f"<!-- {tag} -->"
+
+    for rel_value in link_rel_values:
+        link_pattern = re.compile(
+            rf"(<link[^>]+rel=\"{re.escape(rel_value)}\"[^>]*>)",
+            re.IGNORECASE,
+        )
+        text = link_pattern.sub(_link_replacer, text)
 
     text = _cleanup_broken_markup(text)
     return text, fixed, broken
@@ -426,8 +431,9 @@ def update_all_refs_in_project(
         text, rename_replacements = _apply_rename_map(text, rename_map)
         text, rule_replacements = _apply_replace_rules_for_suffix(text, replace_rules, suffix)
 
-        total_changes = fixed + rename_replacements + rule_replacements
-        if total_changes and text != original:
+        # Сохраняем файл если содержимое изменилось — даже если изменения
+        # связаны только с broken-маркерами (которые потом очищены).
+        if text != original:
             utils.safe_write(path, text)
             logger.info(f"🔗 Обновлены ссылки: {utils.relpath(path, project_root)}")
 
