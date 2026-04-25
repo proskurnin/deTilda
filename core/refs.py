@@ -196,8 +196,11 @@ def _cleanup_broken_markup(text: str) -> str:
 
 
 def _split_url(url: str) -> tuple[str, str]:
-    """Split *url* into a base path and sanitized suffix."""
+    """Разделяет URL на базовый путь и суффикс (query + fragment).
 
+    Параметр ?t=... удаляется — Tilda использует его для cache-busting,
+    он не несёт смысловой нагрузки и мешает сравнению ссылок.
+    """
     split = urlsplit(url)
     base_url = urlunsplit((split.scheme, split.netloc, split.path, "", ""))
 
@@ -311,22 +314,23 @@ def _update_links_in_html(
     )
     text = pattern.sub(repl, text)
 
+    # Комментируем <link rel="icon"> и <link rel="apple-touch-icon"> — иконки Tilda
+    def _link_replacer(match: re.Match[str]) -> str:
+        nonlocal fixed
+        tag = match.group(1)
+        if "<!--" in tag and "-->" in tag:
+            return tag
+        fixed += 1
+        return f"<!-- {tag} -->"
+
     for rel_value in link_rel_values:
         link_pattern = re.compile(
             rf"(<link[^>]+rel=\"{re.escape(rel_value)}\"[^>]*>)",
             re.IGNORECASE,
         )
-
-        def _link_replacer(match: re.Match[str]) -> str:
-            nonlocal fixed
-            tag = match.group(1)
-            if "<!--" in tag and "-->" in tag:
-                return tag
-            fixed += 1
-            return f"<!-- {tag} -->"
-
         text = link_pattern.sub(_link_replacer, text)
 
+    # Заменяем ссылки на логотипы Tilda на прозрачный 1px.png
     for pattern_str in replace_patterns:
         try:
             replace_re = re.compile(pattern_str, re.IGNORECASE)
@@ -338,25 +342,26 @@ def _update_links_in_html(
             fixed += count
             text = new_text
 
+    # Комментируем ссылки на файлы Tilda (aidacopy.png и др.)
+    def _comment_replacer(match: re.Match[str]) -> str:
+        nonlocal fixed
+        snippet = match.group(0)
+        if "<!--" in snippet and "-->" in snippet:
+            return snippet
+        fixed += 1
+        return f"<!-- {snippet} -->"
+
     for pattern_str in comment_patterns:
         try:
             comment_re = re.compile(pattern_str, re.IGNORECASE)
         except re.error:
             logger.warn(f"[refs] Некорректный паттерн комментирования: {pattern_str}")
             continue
-
-        def _comment_replacer(match: re.Match[str]) -> str:
-            nonlocal fixed
-            snippet = match.group(0)
-            if "<!--" in snippet and "-->" in snippet:
-                return snippet
-            fixed += 1
-            return f"<!-- {snippet} -->"
-
         text = comment_re.sub(_comment_replacer, text)
 
     text = _cleanup_broken_markup(text)
     return text, fixed, broken
+
 
 def update_all_refs_in_project(
     project_root: Path,
