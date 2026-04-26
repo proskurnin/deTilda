@@ -240,3 +240,30 @@ def test_cleanup_removes_stylesheet_link_with_cdn(tmp_path: Path) -> None:
     cdn_localizer.cleanup_unresolved_cdn_references(tmp_path)
     text = html.read_text(encoding="utf-8")
     assert "aidacdn.com" not in text
+
+
+def test_negative_cache_skips_repeated_failed_path(tmp_path: Path, monkeypatch) -> None:
+    """Один и тот же неудачный path не качается повторно (negative cache)."""
+    import urllib.error
+
+    # Два файла, оба ссылаются на одну и ту же недоступную картинку
+    (tmp_path / "a.html").write_text(
+        '<link href="https://static.tildacdn.com/missing/x.png">', encoding="utf-8"
+    )
+    (tmp_path / "b.html").write_text(
+        '<link href="https://static.tildacdn.com/missing/x.png">', encoding="utf-8"
+    )
+
+    call_count = {"n": 0}
+    def _always_404(_url, **_kw):
+        call_count["n"] += 1
+        raise urllib.error.HTTPError(_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _always_404)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    # Один URL → одна попытка с aida path → одна с reverse path = 2 запроса всего
+    # А не 4 (двойное обращение от двух файлов)
+    assert call_count["n"] <= 2, f"Слишком много повторных попыток: {call_count['n']}"

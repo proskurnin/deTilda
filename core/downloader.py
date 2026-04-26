@@ -30,6 +30,10 @@ _BROWSER_UA = (
 
 _SSL_FALLBACK_CONTEXT: ssl.SSLContext | None = None
 
+# Хосты у которых SSL уже сломан — сразу используем unverified context.
+# Без этого каждый URL делает SSL handshake → fail → retry без проверки = двойной timeout.
+_SSL_BROKEN_HOSTS: set[str] = set()
+
 
 def _get_unverified_context() -> ssl.SSLContext:
     global _SSL_FALLBACK_CONTEXT
@@ -67,14 +71,25 @@ def fetch_bytes(url: str, *, user_agent: str = _DEFAULT_UA, timeout: int = 20) -
     """Download *url* and return ``(data, ssl_bypassed)``.
 
     On SSL error retries once with certificate verification disabled.
+    Запоминает хосты с битым SSL — следующие URL на тот же хост сразу идут
+    без верификации (избегаем двойной timeout на каждый URL).
     Automatically decompresses gzip-encoded responses.
     """
     normalized = _normalize_url(url)
-    # Не отправляем Accept-Encoding — пусть сервер решает, мы умеем gzip
     request = urllib.request.Request(
         normalized,
         headers={"User-Agent": user_agent, "Accept": "*/*"},
     )
+
+    host = urllib.parse.urlsplit(normalized).hostname or ""
+
+    # Если для этого хоста SSL уже ломался — сразу без проверки
+    if host in _SSL_BROKEN_HOSTS:
+        with contextlib.closing(
+            urllib.request.urlopen(request, timeout=timeout, context=_get_unverified_context())  # type: ignore[arg-type]
+        ) as resp:
+            return _decode_response(resp), True
+
     try:
         with contextlib.closing(urllib.request.urlopen(request, timeout=timeout)) as resp:  # type: ignore[arg-type]
             return _decode_response(resp), False
@@ -84,7 +99,8 @@ def fetch_bytes(url: str, *, user_agent: str = _DEFAULT_UA, timeout: int = 20) -
     except ssl.SSLError:
         pass
 
-    logger.warn(f"[downloader] SSL-проверка не удалась для {normalized}, повтор без проверки")
+    logger.warn(f"[downloader] SSL-проверка не удалась для {host}, повтор без проверки (для всех URL этого хоста)")
+    _SSL_BROKEN_HOSTS.add(host)
     with contextlib.closing(
         urllib.request.urlopen(request, timeout=timeout, context=_get_unverified_context())  # type: ignore[arg-type]
     ) as resp:

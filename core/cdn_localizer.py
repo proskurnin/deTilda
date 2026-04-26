@@ -97,10 +97,14 @@ def _extract_path_from_url(url: str) -> str | None:
     return match.group(1).lstrip("/")
 
 
+# Sentinel для negative cache (path известен как недоступный — не пробуем снова)
+_DOWNLOAD_FAILED = object()
+
+
 def _download_to_local(
     path: str,
     project_root: Path,
-    cache: dict[str, Path],
+    cache: dict[str, object],
 ) -> Path | None:
     """Скачивает path с реального tildacdn.com в project_root/path с сохранением структуры.
 
@@ -108,10 +112,17 @@ def _download_to_local(
     Если 404 — применяет обратное преобразование aida→tilda и пробует снова
     (URL был переименован refs.py, но файл на CDN под оригинальным именем).
 
+    Negative cache: если путь не скачался — больше не пробуем (кеш _DOWNLOAD_FAILED).
+    Это критично — без него один и тот же битый URL будет пытаться скачаться
+    на каждой из десятков HTML/CSS страниц проекта (минуты лишнего ожидания).
+
     Файл сохраняется по path как он стоит в JS — JS будет его искать именно так.
     """
-    if path in cache:
-        return cache[path]
+    cached = cache.get(path)
+    if cached is _DOWNLOAD_FAILED:
+        return None
+    if isinstance(cached, Path):
+        return cached
 
     # Пробуем оригинальный путь (если til→ai не затронул)
     candidates = [path]
@@ -123,7 +134,8 @@ def _download_to_local(
     for candidate in candidates:
         real_url = f"https://{_REAL_CDN_HOST}/{candidate}"
         try:
-            data, _ = fetch_bytes(real_url)
+            # Короткий timeout — для невалидных URL не ждём 20 секунд
+            data, _ = fetch_bytes(real_url, timeout=8)
             break
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             logger.warn(f"[cdn] Не удалось скачать {real_url}: {exc}")
@@ -133,6 +145,8 @@ def _download_to_local(
             continue
 
     if data is None:
+        # Запоминаем что путь недоступен — не пробуем повторно
+        cache[path] = _DOWNLOAD_FAILED
         return None
 
     destination = project_root / path
@@ -156,7 +170,7 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
     """
     project_root = Path(project_root)
     result = CdnLocalizationResult()
-    download_cache: dict[str, Path] = {}
+    download_cache: dict[str, object] = {}
 
     for file_path in utils.list_files_recursive(project_root, extensions=_TARGET_EXTENSIONS):
         try:
