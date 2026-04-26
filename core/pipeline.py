@@ -8,6 +8,7 @@ from pathlib import Path
 from core import (
     archive,
     assets,
+    cdn_localizer,
     checker,
     cleaners,
     forms,
@@ -108,6 +109,13 @@ class DetildaPipeline:
             report.generate_intermediate_report(
                 stats.renamed_assets, stats.cleaned_files, stats.fixed_links, stats.broken_links
             )
+
+            with logger.module_scope("cdn_localizer"):
+                cdn_result = cdn_localizer.localize_cdn_urls(context.project_root)
+            stats.warnings += cdn_result.download_failures
+
+            with logger.module_scope("cdn_cleanup"):
+                cdn_localizer.cleanup_unresolved_cdn_references(context.project_root)
 
             with logger.module_scope("images"):
                 image_fix = images.fix_project_images(context.project_root)

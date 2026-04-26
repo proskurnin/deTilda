@@ -6,6 +6,7 @@ and checker.py so the logic lives in one place.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import ssl
 import urllib.error
 import urllib.parse
@@ -45,19 +46,38 @@ def _normalize_url(url: str) -> str:
     return f"https:{url}" if url.startswith("//") else url
 
 
+def _decode_response(resp) -> bytes:
+    """Читает тело ответа с распаковкой gzip если сервер вернул сжатый контент.
+
+    Tilda CDN отдаёт многие JS/CSS файлы gzip-сжатыми с Content-Encoding: gzip.
+    Браузер распакует автоматически, urllib — нет. Без распаковки файлы
+    сохраняются битыми и не работают на статическом хостинге.
+    """
+    raw = resp.read()
+    encoding = resp.headers.get("Content-Encoding", "").lower()
+    if encoding == "gzip":
+        try:
+            raw = gzip.decompress(raw)
+        except OSError as exc:
+            logger.warn(f"[downloader] Не удалось распаковать gzip: {exc}")
+    return raw
+
+
 def fetch_bytes(url: str, *, user_agent: str = _DEFAULT_UA, timeout: int = 20) -> tuple[bytes, bool]:
     """Download *url* and return ``(data, ssl_bypassed)``.
 
     On SSL error retries once with certificate verification disabled.
+    Automatically decompresses gzip-encoded responses.
     """
     normalized = _normalize_url(url)
+    # Не отправляем Accept-Encoding — пусть сервер решает, мы умеем gzip
     request = urllib.request.Request(
         normalized,
         headers={"User-Agent": user_agent, "Accept": "*/*"},
     )
     try:
         with contextlib.closing(urllib.request.urlopen(request, timeout=timeout)) as resp:  # type: ignore[arg-type]
-            return resp.read(), False
+            return _decode_response(resp), False
     except urllib.error.URLError as exc:
         if not isinstance(getattr(exc, "reason", None), ssl.SSLError):
             raise
@@ -68,7 +88,7 @@ def fetch_bytes(url: str, *, user_agent: str = _DEFAULT_UA, timeout: int = 20) -
     with contextlib.closing(
         urllib.request.urlopen(request, timeout=timeout, context=_get_unverified_context())  # type: ignore[arg-type]
     ) as resp:
-        return resp.read(), True
+        return _decode_response(resp), True
 
 
 def fetch_text(url: str, *, user_agent: str = _BROWSER_UA, timeout: int = 20) -> str:
