@@ -33,6 +33,7 @@ __all__ = [
     "fix_project_images",
     "is_preview_or_placeholder_asset",
     "normalize_background_image_from_data_original",
+    "normalize_css_preview_urls",
     "normalize_img_src_from_data_original",
 ]
 
@@ -247,12 +248,68 @@ def normalize_background_image_from_data_original(
     return updated, background_fixed, unresolved
 
 
+# Маркеры preview-файлов Tilda внутри пути:
+#   _-_resize_20x_, _-_resizeb_20x_, _-_resize_240x_ и т.п. — миниатюры разных размеров
+#   _-_empty_ — placeholder-заглушка
+_CSS_PREVIEW_MARKER_RE = re.compile(
+    r"_-_(?:resize[a-z]?_\d+x|empty)_",
+    re.IGNORECASE,
+)
+
+# url(...) с одинарной/двойной/без кавычек
+_CSS_URL_RE = re.compile(
+    r"url\(\s*(?P<quote>['\"]?)(?P<url>[^)\"']+)(?P=quote)\s*\)",
+    re.IGNORECASE,
+)
+
+
+def normalize_css_preview_urls(text: str, project_root: Path) -> tuple[str, int]:
+    """Заменяет url(preview.jpg) на url(full.jpg) в CSS если полная версия существует.
+
+    Tilda использует pattern: в <style> блоках background-image указывает
+    на 20x-миниатюру, а lazyload-скрипт подменяет на полную из data-original.
+    Без скрипта остаётся размытая 20x-картинка.
+
+    Эта функция ищет url() с маркерами preview (_-_resize_20x_, _-_empty_ и т.д.),
+    проверяет существует ли файл без этого маркера, и заменяет если да.
+    Применяется ко всему тексту HTML — работает и в <style>, и в inline style="".
+    """
+    fixed = 0
+
+    def _replace(match: re.Match[str]) -> str:
+        nonlocal fixed
+        url = match.group("url").strip()
+        quote = match.group("quote")
+
+        # Только локальные пути
+        if _is_external_url(url) or url.startswith("data:"):
+            return match.group(0)
+        if not _CSS_PREVIEW_MARKER_RE.search(url):
+            return match.group(0)
+
+        # Убираем preview-маркер и проверяем что файл существует
+        full_url = _CSS_PREVIEW_MARKER_RE.sub("_", url)
+        if not _local_url_exists(project_root, full_url):
+            return match.group(0)  # полной версии нет — оставляем preview
+
+        fixed += 1
+        return f"url({quote}{full_url}{quote})"
+
+    return _CSS_URL_RE.sub(_replace, text), fixed
+
+
 def _transform_html_images(text: str, project_root: Path) -> tuple[str, int, int, int]:
-    """Применяет все три нормализации последовательно."""
+    """Применяет все нормализации последовательно."""
     updated, inline_bg_fixed = normalize_inline_backgrounds(text)
     updated, img_fixed, unresolved_img = normalize_img_src_from_data_original(updated, project_root)
     updated, bg_fixed, unresolved_bg = normalize_background_image_from_data_original(updated, project_root)
-    return updated, img_fixed, inline_bg_fixed + bg_fixed, unresolved_img + unresolved_bg
+    updated, css_preview_fixed = normalize_css_preview_urls(updated, project_root)
+    return (
+        updated,
+        img_fixed,
+        inline_bg_fixed + bg_fixed + css_preview_fixed,
+        unresolved_img + unresolved_bg,
+    )
 
 
 def fix_project_images(project_root: Path) -> ImageFixStats:

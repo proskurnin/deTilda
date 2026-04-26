@@ -171,3 +171,71 @@ def test_is_preview_or_placeholder_asset_patterns() -> None:
     assert is_preview_or_placeholder_asset("images/file_-_resizeb_20x_test.jpg")
     assert is_preview_or_placeholder_asset("images/1px.png")
     assert not is_preview_or_placeholder_asset("images/file_test.jpg")
+
+
+# ----- Тесты для нового normalize_css_preview_urls -----
+
+def test_css_preview_url_replaced_with_full(tmp_path: Path) -> None:
+    """20x preview в <style> CSS заменяется на полную версию если она существует."""
+    html = tmp_path / "index.html"
+    html.write_text(
+        "<style>"
+        "#rec1 .carrier { background-image: url('images/aid_-_resize_20x_pic.jpg'); }"
+        "</style>",
+        encoding="utf-8",
+    )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "aid_pic.jpg").write_bytes(b"full")
+    (tmp_path / "images" / "aid_-_resize_20x_pic.jpg").write_bytes(b"preview")
+
+    fix_project_images(tmp_path)
+    text = html.read_text(encoding="utf-8")
+    assert "_-_resize_20x_" not in text
+    assert "url('images/aid_pic.jpg')" in text
+
+
+def test_css_resizeb_preview_also_replaced(tmp_path: Path) -> None:
+    """Маркер _-_resizeb_20x_ тоже обрабатывается."""
+    html = tmp_path / "index.html"
+    html.write_text(
+        "<style>div { background-image: url('images/aid_-_resizeb_20x_x.jpeg'); }</style>",
+        encoding="utf-8",
+    )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "aid_x.jpeg").write_bytes(b"full")
+
+    fix_project_images(tmp_path)
+    text = html.read_text(encoding="utf-8")
+    assert "url('images/aid_x.jpeg')" in text
+
+
+def test_css_preview_kept_if_full_missing(tmp_path: Path) -> None:
+    """Если полной версии нет — preview оставляется как есть."""
+    html = tmp_path / "index.html"
+    html.write_text(
+        "<style>div { background-image: url('images/aid_-_resize_20x_only.jpg'); }</style>",
+        encoding="utf-8",
+    )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "aid_-_resize_20x_only.jpg").write_bytes(b"x")
+    # full version doesn't exist
+
+    fix_project_images(tmp_path)
+    text = html.read_text(encoding="utf-8")
+    # Preview сохранилось — fallback корректен
+    assert "_-_resize_20x_only.jpg" in text
+
+
+def test_css_preview_with_double_quotes(tmp_path: Path) -> None:
+    """url("...") с двойными кавычками тоже обрабатывается."""
+    html = tmp_path / "index.html"
+    html.write_text(
+        '<style>div { background-image: url("images/aid_-_resize_20x_q.jpg"); }</style>',
+        encoding="utf-8",
+    )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "aid_q.jpg").write_bytes(b"x")
+
+    fix_project_images(tmp_path)
+    text = html.read_text(encoding="utf-8")
+    assert "_-_resize_20x_" not in text
