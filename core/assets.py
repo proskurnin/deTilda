@@ -353,9 +353,14 @@ def _apply_case_normalization(
             if count:
                 changed = True
 
-        new_text, lowered = _lowercase_relative_links(new_text)
-        if lowered:
-            changed = True
+        # _lowercase_relative_links применять ТОЛЬКО к HTML/CSS — в JS он
+        # ошибочно lowercase'ит identifiers (например `colAmount/sizerWidth` →
+        # `colAmount/sizerwidth`) и payload base64-строк
+        # (`/yH5BAEAAAA` → `/yh5baeaaa`), что ломает скрипты.
+        if file_path.suffix.lower() not in (".js", ".php"):
+            new_text, lowered = _lowercase_relative_links(new_text)
+            if lowered:
+                changed = True
 
         if changed and new_text != original_text:
             utils.safe_write(file_path, new_text)

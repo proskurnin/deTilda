@@ -31,6 +31,7 @@ class _FakeLoader:
                     "tilda-forms-1.0.min.js",
                     "tilda-events-1.0.min.js",
                     "tilda-fallback-1.0.min.js",
+                    "aida-stat-1.0.min.js",
                 ]
             }
         })
@@ -80,3 +81,31 @@ def test_script_cleaner_removes_all_configured_scripts_without_media_markers(tmp
     assert removed == 4
     assert "tilda-events-1.0.min.js" not in text
     assert "tilda-fallback-1.0.min.js" not in text
+
+
+def test_removes_inline_script_referencing_deleted_file(tmp_path: Path) -> None:
+    """Inline <script> с динамической загрузкой удалённого файла должен удаляться.
+
+    Tilda кладёт аналитику через setTimeout(...) который создаёт <script src="js/aida-stat.js">.
+    Сам файл мы удалили в assets, но inline-загрузчик остался → 404 в браузере.
+    """
+    html = tmp_path / "page.html"
+    html.write_text(
+        '<html><body>\n'
+        '<script type="text/javascript">'
+        "setTimeout(function(){var s=document.createElement('script');"
+        "s.src='js/aida-stat-1.0.min.js';document.body.appendChild(s);},2000);"
+        "</script>\n"
+        '<script src="js/normal.js"></script>\n'
+        '</body></html>',
+        encoding="utf-8",
+    )
+
+    loader = _FakeLoader()
+    removed = remove_disallowed_scripts(tmp_path, loader)
+    text = html.read_text(encoding="utf-8")
+    # Inline-скрипт с aida-stat удалён
+    assert "aida-stat" not in text
+    # Обычный скрипт не тронут
+    assert "normal.js" in text
+    assert removed >= 1

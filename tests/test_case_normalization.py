@@ -89,3 +89,33 @@ def test_case_normalization_lowercases_links_without_matching_files(tmp_path: Pa
     assert '..\\job' in main_text
     assert stats.renamed == 0
     assert rename_map == {}
+
+
+def test_case_normalization_does_not_break_js_identifiers(tmp_path: Path) -> None:
+    """JS identifiers вроде /sizerWidth не должны lowercased в _apply_case_normalization.
+
+    Регекс _RELATIVE_LINK_LOWERCASE_PATTERN matches `/sizerWidth` как path,
+    но в JS это не путь к файлу, а математическое выражение или часть
+    base64-строки. Lowercasing ломает minified JS.
+    """
+    project_root = tmp_path
+    rename_map: dict[str, str] = {}
+    stats = AssetStats()
+    patterns_cfg, service_cfg = _make_configs()
+
+    # JS файл — должен остаться нетронутым
+    (project_root / "code.js").write_text(
+        "var x = colAmount/sizerWidth + 1;\n"
+        "var img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';",
+        encoding="utf-8",
+    )
+    # Тестовый patterns_cfg включает только .html — добавим .js
+    patterns_cfg = PatternsConfig.model_validate({"text_extensions": [".html", ".js"]})
+
+    _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
+
+    js_text = (project_root / "code.js").read_text(encoding="utf-8")
+    # JS identifiers сохранены
+    assert "sizerWidth" in js_text
+    # base64 payload сохранён
+    assert "yH5BAEAAAA" in js_text

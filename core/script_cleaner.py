@@ -219,6 +219,19 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
                 remove_block = True
             elif match_comment:
                 remove_block = True
+            else:
+                # Проверка имени файла внутри ТЕЛА скрипта (не только src):
+                # для inline-скриптов которые динамически загружают удалённые
+                # файлы через setTimeout/createElement (например aida-stat).
+                lowered_block = block.lower()
+                for name in lowered_names:
+                    # Имя должно быть окружено кавычками или слешем — не часть
+                    # большего идентификатора. Это уменьшает риск false-positive.
+                    if (f'"{name}"' in lowered_block
+                            or f"'{name}'" in lowered_block
+                            or f"/{name}" in lowered_block):
+                        remove_block = True
+                        break
 
             if remove_block:
                 if match_comment:
