@@ -301,3 +301,81 @@ def test_does_not_overwrite_existing_local_file(tmp_path: Path, monkeypatch) -> 
     assert ".ai-input-rec" in text
     # URL внутри JS обновлён на относительный путь
     assert "tildacdn.com" not in text
+
+
+def test_concat_url_handles_double_quote_inside_single_quote_string(tmp_path: Path, monkeypatch) -> None:
+    """JS-литерал с double-quotes внутри single-quotes должен корректно обрабатываться.
+
+    Real-world Tilda phone-mask содержит:
+      'background-image:url(https://static.tildacdn.' + zone() + '/lib/flags/flags7.png);background-repeat:no-repeat;...flag="np"]{...}'
+    Внутри одинарной строки есть "np" (двойные кавычки). Регекс не должен
+    захватить эту "np" как закрывающую кавычку второй строки —
+    он должен дойти до настоящей закрывающей одинарной кавычки.
+    """
+    js = tmp_path / "phone-mask.js"
+    # Симулируем minified Tilda JS structure
+    js.write_text(
+        "var s = 'background-image:url(https://static.tildacdn.\" + zone() + \"/lib/flags/flags7.png);"
+        'background-repeat:no-repeat}.t-flag[data-phonemask-flag=\"np\"]{width:16}\';\n'
+        "var t = {ad: '-5px'};",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(downloader, "fetch_bytes", lambda _url, **_kw: (b"png", False))
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    text = js.read_text(encoding="utf-8")
+    # tildacdn URL заменён на относительный
+    assert "tildacdn.com" not in text
+    assert "lib/flags/flags7.png" in text
+    # `data-phonemask-flag="np"` СОХРАНЁН — это часть JS-строки
+    assert 'data-phonemask-flag="np"' in text
+    # Кавычки сбалансированы: количество ' и " не меньше чем должно быть
+    assert text.count("'") >= 4  # var s='...';var t={ad:'-5px'};
+    # JS должен быть syntactically valid (нет orphan кавычек)
+    # Проверяем что после замены второй var не пострадал
+    assert "var t = {ad: '-5px'};" in text
+
+
+def test_concat_url_with_mixed_quote_types_preserves_balance(tmp_path: Path, monkeypatch) -> None:
+    """Реальный кейс tilda-phone-mask: q1 и q2 РАЗНЫХ типов.
+
+    JS:  ".css...background-image:url(https://static.tildacdn." + zone() + "/path...flag=\"np\"]...}"
+    где первая строка открыта `"`, закрыта `"` (q1=`"`), а вторая строка
+    открыта `'` и закрыта `'` (q2=`'`).
+
+    Если replacement отбрасывает q1 — открывающая `"` слева остаётся
+    без пары и Node.js падает с `Unexpected identifier 'np'`.
+
+    Корректное поведение: replacement сохраняет q1, добавляет `+` и
+    эмитит новый литерал q2 path suffix q2.
+    """
+    js = tmp_path / "phone-mask.js"
+    # Минимизированный кусок реального Tilda JS — q1=", q2='
+    js.write_text(
+        'var css = ".t-input{padding:0}.t-phone-mask__flag{background-image:'
+        'url(https://static.tildacdn." + t_zone() + '
+        "'/lib/flags/flags7.png);background-repeat:no-repeat}"
+        '.t-phone-mask__flag[data-phonemask-flag=\"np\"]{width:16px}\';\n'
+        'var palette = {ad:"-5px"};',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(downloader, "fetch_bytes", lambda _url, **_kw: (b"png", False))
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    text = js.read_text(encoding="utf-8")
+    # URL заменён на локальный путь
+    assert "tildacdn." not in text
+    assert "lib/flags/flags7.png" in text
+    # q1 (закрывающая `"` первой строки) сохранена — кавычки сбалансированы
+    # Подсчёт unescaped кавычек: должно быть чётное число каждого типа
+    unescaped_dq = sum(1 for i, c in enumerate(text) if c == '"' and (i == 0 or text[i-1] != '\\'))
+    unescaped_sq = sum(1 for i, c in enumerate(text) if c == "'" and (i == 0 or text[i-1] != '\\'))
+    assert unescaped_dq % 2 == 0, f"unbalanced double quotes: {unescaped_dq}"
+    assert unescaped_sq % 2 == 0, f"unbalanced single quotes: {unescaped_sq}"
+    # Хвост файла не пострадал
+    assert 'var palette = {ad:"-5px"};' in text

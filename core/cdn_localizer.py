@@ -49,18 +49,27 @@ _DIRECT_URL_RE = re.compile(
 )
 
 # Конкатенация в JS:
-#   prefix..."https://static.aidacdn." + funcCall() + "/path/file.ext"...suffix
-# Открывающая кавычка может быть очень далеко слева (внутри минифицированной CSS-строки),
-# поэтому не пытаемся её захватить.
-# Пример: ...flag{background-image:url(https://static.tildacdn." + zone() + "/lib/flags/flags7.png)"...
+#   "...prefix...https://static.aidacdn." + funcCall() + "/path/file.ext"...suffix...
+#
+# Структура: открывающая `"` далеко слева → текст до URL → закрывающая `"` (q1)
+# → JS-конкатенация `+ var() +` → открывающая `'` (q2) → path → закрывающая `'`.
+#
+# Пример: 'background-image:url(https://static.tildacdn." + zone() + "/lib/flags/flags7.png);...}'
+#
+# КРИТИЧНО: q1 и q2 могут быть РАЗНЫХ типов (`"..."` и `'...'`).
+# Внутри второй строки могут быть кавычки другого типа (например `flag="np"`),
+# поэтому для второй части используем backreference (?P=q2) — match идёт ДО
+# именно той же кавычки что открывала, а не до первой попавшейся.
+#
+# Замена должна сохранить q1 + concat + q2 чтобы баланс кавычек в файле не сломался.
 _CONCAT_URL_RE = re.compile(
     r"""
     https?://static\.(?:tilda|aida)cdn\.
-    ['"]                                # закрывающая кавычка первой части
-    \s*\+\s*[^+]+?\+\s*                 # + variable() +
-    ['"]                                # открывающая кавычка второй части
-    (?P<rest>[^'"]+)                    # path + suffix (до первой кавычки)
-    (?P<endquote>['"])                  # закрывающая кавычка второй части
+    (?P<q1>['"])                        # закрывающая кавычка первой части
+    (?P<concat>\s*\+\s*[^+]+?\+\s*)     # + variable() +
+    (?P<q2>['"])                        # открывающая кавычка второй части
+    (?P<rest>(?:(?!(?P=q2)).)+)         # path + suffix — всё кроме q2
+    (?P=q2)                             # закрывающая кавычка второй части
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -191,7 +200,8 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
         # 1. Обрабатываем JS-конкатенации первыми (они длиннее, чтобы не схлопнуться в прямой URL)
         def _replace_concat(match: re.Match[str]) -> str:
             rest = match.group("rest")
-            endquote = match.group("endquote")
+            q1 = match.group("q1")  # закрывающая кавычка первой строки
+            q2 = match.group("q2")  # кавычка второй строки (открывающая = закрывающая)
 
             # rest = "/lib/flags/flags7.png)" → path="lib/flags/flags7.png", suffix=")"
             path_match = _PATH_AND_SUFFIX_RE.match(rest)
@@ -207,9 +217,16 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
                 return match.group(0)
 
             result.urls_localized += 1
-            # Заменяем "https://...cdn." + var + "path)" на "path)" — оставляем
-            # закрывающую кавычку чтобы не сломать литерал, открывающая остаётся слева
-            return f"{path}{suffix}{endquote}"
+            # Заменяем `https://...cdn.q1 +var()+ q2 rest q2` на `q1+q2 path suffix q2`.
+            # Это:
+            #  • Закрывает первую строку (q1) — иначе её открывающая кавычка
+            #    далеко слева останется без пары и сломает синтаксис.
+            #  • Конкатенирует через `+` — заменяет вызов функции (var() == TLD)
+            #    нашим локальным path. Функция больше не нужна — путь относительный.
+            #  • Открывает новую строку (q2) с path и закрывает (q2). Тип q2
+            #    выбран чтобы не конфликтовать с возможными q1-кавычками внутри
+            #    rest (например `flag="np"` внутри `'...'`-строки).
+            return f"{q1}+{q2}{path}{suffix}{q2}"
 
         text = _CONCAT_URL_RE.sub(_replace_concat, text)
 
