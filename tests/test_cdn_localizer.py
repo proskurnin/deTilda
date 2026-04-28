@@ -267,3 +267,37 @@ def test_negative_cache_skips_repeated_failed_path(tmp_path: Path, monkeypatch) 
     # Один URL → одна попытка с aida path → одна с reverse path = 2 запроса всего
     # А не 4 (двойное обращение от двух файлов)
     assert call_count["n"] <= 2, f"Слишком много повторных попыток: {call_count['n']}"
+
+
+def test_does_not_overwrite_existing_local_file(tmp_path: Path, monkeypatch) -> None:
+    """Если файл уже существует локально — cdn_localizer его не должен скачивать.
+
+    Иначе перезатирается обработанная refs.py версия (с til→ai в селекторах)
+    свежей оригинальной с CDN, и querySelector в JS перестаёт находить
+    переименованные CSS-классы.
+    """
+    # Локальный JS уже существует с обработанным содержимым
+    js = tmp_path / "js" / "phone-mask.js"
+    js.parent.mkdir()
+    js.write_text(
+        'var sel = "https://static.tildacdn.com/lib/x.png"; var c = ".ai-input-rec";',
+        encoding="utf-8",
+    )
+
+    fetched_urls: list[str] = []
+    def _fetch(url, **_kw):
+        fetched_urls.append(url)
+        return (b"new-content-from-cdn", False)
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fetch)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    # Файл скачался для нового пути lib/x.png (его не было)
+    assert (tmp_path / "lib" / "x.png").exists()
+    # Но JS-файл НЕ перезаписан (наша обработанная версия сохранена)
+    text = js.read_text(encoding="utf-8")
+    assert ".ai-input-rec" in text
+    # URL внутри JS обновлён на относительный путь
+    assert "tildacdn.com" not in text

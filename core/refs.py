@@ -106,15 +106,24 @@ def _apply_replace_rules(text: str, rules: Iterable[tuple[re.Pattern[str], str]]
 
 
 _JS_STRING_RE = re.compile(r"""(?P<quote>["'])(?P<inner>(?:\\.|(?!\1).)*)(?P=quote)""", re.DOTALL)
+
+# Подсказка что строка содержит Tilda-маркеры и нужно применять replace_rules.
+# КРИТИЧНО: regex для строковых литералов в minified JS ненадёжен — он может
+# захватить кусок кода между двумя разными литералами как одну "строку".
+# Поэтому hint должен быть консервативным:
+# - `t-something` matches ТОЛЬКО если перед ним не JS-operator (арифметика
+#   `(t-this._x)` не matches, но CSS класс `'t-rec'`, `.t-popup` matches)
+# - `tilda-something` тоже под защитой того же lookbehind
+_JS_OPERATOR_LOOKBEHIND = r"(?<![(\[,+\-*/<>=&|!?:])"
 _JS_REPLACE_HINT_RE = re.compile(
     r"""
     (?:
-        \bt-[a-z0-9_-]+
+        """ + _JS_OPERATOR_LOOKBEHIND + r"""\bt-[a-z0-9_-]+
         |data-tilda
         |tildamodal:
         |--t-[a-z0-9_-]+
-        |\btilda-[a-z0-9_.-]+
-        |\btild[a-z0-9_.-]*
+        |""" + _JS_OPERATOR_LOOKBEHIND + r"""\btilda-[a-z0-9_.-]+
+        |""" + _JS_OPERATOR_LOOKBEHIND + r"""\btild[a-z0-9_.-]*
         |\bwindow\.Tilda\b
         |\bTilda\b
     )
@@ -125,8 +134,35 @@ _JS_WINDOW_TILDA_RE = re.compile(r"\bwindow\.Tilda\b")
 _JS_TILDA_NAMESPACE_RE = re.compile(r"\bTilda(?=\.)")
 
 
+def _make_js_safe_rules(
+    rules: Iterable[tuple[re.Pattern[str], str]]
+) -> list[tuple[re.Pattern[str], str]]:
+    """Оборачивает каждый pattern в negative lookbehind на JS-operators.
+
+    В minified JS regex для строк может ошибочно захватить код между двумя
+    разными литералами как одну строку. Внутри такой "псевдо-строки" наш
+    pattern \\bt- заменяет identifier `t-this` (где `t` — переменная,
+    `-` — минус) на `ai-this` → ReferenceError в браузере.
+
+    Lookbehind гарантирует что замена применяется только когда перед
+    pattern стоит безопасный символ (кавычка, точка, начало строки и т.д.),
+    но НЕ когда стоит JS-оператор `(`, `[`, `,`, `+`, `-` и т.д.
+    """
+    safe: list[tuple[re.Pattern[str], str]] = []
+    for pattern, replacement in rules:
+        src = pattern.pattern
+        flags = pattern.flags
+        try:
+            safe_pattern = re.compile(_JS_OPERATOR_LOOKBEHIND + src, flags)
+            safe.append((safe_pattern, replacement))
+        except re.error:
+            safe.append((pattern, replacement))  # fallback на оригинал
+    return safe
+
+
 def _apply_replace_rules_js(text: str, rules: Iterable[tuple[re.Pattern[str], str]]) -> tuple[str, int]:
     total = 0
+    js_safe_rules = _make_js_safe_rules(rules)
 
     def _string_replacer(match: re.Match[str]) -> str:
         nonlocal total
@@ -134,7 +170,9 @@ def _apply_replace_rules_js(text: str, rules: Iterable[tuple[re.Pattern[str], st
         inner = match.group("inner")
         if not _JS_REPLACE_HINT_RE.search(inner):
             return match.group(0)
-        updated, count = _apply_replace_rules(inner, rules)
+        # Применяем безопасные правила — даже если строка не настоящий литерал,
+        # а склеена regex'ом из двух разных, identifiers в коде не пострадают
+        updated, count = _apply_replace_rules(inner, js_safe_rules)
         total += count
         return f"{quote}{updated}{quote}"
 

@@ -124,6 +124,15 @@ def _download_to_local(
     if isinstance(cached, Path):
         return cached
 
+    # КРИТИЧНО: если файл уже существует локально — НЕ скачивать.
+    # Иначе мы перезапишем версию обработанную refs.py (где til→ai в строках)
+    # свежей оригинальной с CDN — и идентификаторы CSS-классов в JS снова
+    # станут .t-* вместо .ai-*, ломая querySelector в браузере.
+    destination = project_root / path
+    if destination.exists() and destination.stat().st_size > 0:
+        cache[path] = destination
+        return destination
+
     # Пробуем оригинальный путь (если til→ai не затронул)
     candidates = [path]
     reversed_path = _reverse_path_for_real_cdn(path)
@@ -149,7 +158,6 @@ def _download_to_local(
         cache[path] = _DOWNLOAD_FAILED
         return None
 
-    destination = project_root / path
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         destination.write_bytes(data)

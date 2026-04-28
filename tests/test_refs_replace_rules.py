@@ -107,3 +107,52 @@ def test_js_replace_rules_keep_camel_case_and_regex_literals(tmp_path: Path) -> 
     assert "aidamodal:show" in result
     assert "window.aida.sendEventToStatistics()" in result
     assert "aida.sendEventToStatistics()" in result
+
+
+def test_js_replace_does_not_break_arithmetic_identifiers(tmp_path: Path) -> None:
+    """В minified JS выражения вроде (t-this._x) не должны трогаться til→ai.
+
+    Регекс для строковых литералов в minified коде может ошибочно склеить
+    разные литералы. Если внутри захваченного куска есть и CSS-класс
+    (`'t-rec'`) и арифметика (`t-this._previousLoopTime`), наш replace
+    \\bt- → ai- ломает identifier (`t-this` → `ai-this` → ReferenceError).
+    """
+    js = tmp_path / "lazy.min.js"
+    # Симулируем minified код где между двумя литералами есть math expression
+    js.write_text(
+        'var x="t-rec";function f(t){return o-(t-this._previousLoopTime)}var y="t-popup"',
+        encoding="utf-8",
+    )
+
+    loader = ConfigLoader(ROOT)
+    update_all_refs_in_project(tmp_path, {}, loader)
+
+    text = js.read_text(encoding="utf-8")
+    # CSS-классы в строках переименованы (это правильно)
+    assert '"ai-rec"' in text
+    assert '"ai-popup"' in text
+    # Identifier t-this НЕ тронут (после `(` это арифметика)
+    assert "(t-this._previousLoopTime)" in text
+    assert "ai-this" not in text
+
+
+def test_js_replace_protects_base64_in_strings(tmp_path: Path) -> None:
+    """base64 строки внутри JS-литералов не должны портиться til→ai.
+
+    Если в литерале есть base64 с подстрокой til (например fragment '/yH5...'),
+    наш replace может его повредить. Lookbehind защищает от ложных срабатываний.
+    """
+    js = tmp_path / "code.js"
+    js.write_text(
+        'var x="t-rec";var img="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";',
+        encoding="utf-8",
+    )
+
+    loader = ConfigLoader(ROOT)
+    update_all_refs_in_project(tmp_path, {}, loader)
+
+    text = js.read_text(encoding="utf-8")
+    # CSS класс заменён
+    assert '"ai-rec"' in text
+    # Base64 не должен потерять/исказить байты
+    assert "R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" in text
