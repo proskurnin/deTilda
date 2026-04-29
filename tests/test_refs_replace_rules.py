@@ -6,10 +6,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-yaml_stub = sys.modules.get("yaml")
-if yaml_stub is None:
+# Сначала пробуем настоящий PyYAML — если установлен, оригинальный safe_load
+# нужен тестам, которые проверяют production-конфиг (а не моки).
+try:
+    import yaml as _real_yaml  # noqa: F401
+    _real_yaml_safe_load = _real_yaml.safe_load
+    yaml_stub = _real_yaml
+except ImportError:
     yaml_stub = types.ModuleType("yaml")
     sys.modules["yaml"] = yaml_stub
+    _real_yaml_safe_load = None
+
 
 def _fake_safe_load(_text: str, *_args, **_kwargs):
     return {
@@ -33,6 +40,46 @@ yaml_stub.safe_load = _fake_safe_load
 
 from core.config_loader import ConfigLoader
 from core.refs import update_all_refs_in_project
+
+
+def test_msapplication_tile_meta_tags_not_renamed(tmp_path: Path) -> None:
+    """msapplication-TileColor/TileImage — стандарт Microsoft, til→ai ломает.
+
+    Без защиты `\\btil` matches `Til` в `TileColor` (после `-` граница слова),
+    и метатеги превращаются в `msapplication-aieColor`/`msapplication-aieImage`,
+    которые Edge/IE не понимают. Lookahead в config.yaml должен это
+    предотвращать.
+    """
+    import pytest
+    if _real_yaml_safe_load is None or _real_yaml_safe_load is _fake_safe_load:
+        pytest.skip("Тест требует настоящий PyYAML для чтения production-конфига")
+
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<head>'
+        '<meta name="msapplication-TileColor" content="#ffffff">'
+        '<meta name="msapplication-TileImage" content="images/tild-favicon.png">'
+        '<div class="t-rec">tilda</div>'
+        '</head>',
+        encoding="utf-8",
+    )
+
+    yaml_stub.safe_load = _real_yaml_safe_load
+    try:
+        # ConfigLoader кэширует AppConfig — для production-конфига нужен новый loader
+        loader = ConfigLoader(ROOT)
+        update_all_refs_in_project(tmp_path, {}, loader)
+    finally:
+        yaml_stub.safe_load = _fake_safe_load
+
+    text = page.read_text(encoding="utf-8")
+    # Microsoft-стандарт нетронут
+    assert 'msapplication-TileColor' in text
+    assert 'msapplication-TileImage' in text
+    assert 'msapplication-aie' not in text
+    # Tilda-токены переименованы как обычно
+    assert '"ai-rec"' in text
+    assert 'aida' in text  # tilda → aida
 
 
 def test_replace_rules_patch_html(tmp_path: Path) -> None:

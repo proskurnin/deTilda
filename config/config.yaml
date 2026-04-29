@@ -15,9 +15,11 @@ patterns:
     - "(?i)\\bdata-src\\s*=\\s*[\"''](?P<link>[^\"'']+)[\"'']"
 
   # Замены текста по всему проекту — применяются в refs.py
-  # til → ai переименовывает классы/файлы Tilda в нейтральные
+  # til → ai переименовывает классы/файлы Tilda в нейтральные.
+  # Negative lookahead защищает Microsoft-стандарт msapplication-TileColor /
+  # msapplication-TileImage — это не Tilda-наследие, ломать нельзя.
   replace_rules:
-    - pattern: "(?i)\\btil"
+    - pattern: "(?i)\\btil(?!eColor\\b|eImage\\b)"
       replacement: "ai"
     - pattern: "(?i)\\bt-"
       replacement: "ai-"
