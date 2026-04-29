@@ -49,11 +49,10 @@ def test_msapplication_tile_meta_tags_not_renamed(tmp_path: Path) -> None:
     и метатеги превращаются в `msapplication-aieColor`/`msapplication-aieImage`,
     которые Edge/IE не понимают. Lookahead в config.yaml должен это
     предотвращать.
-    """
-    import pytest
-    if _real_yaml_safe_load is None or _real_yaml_safe_load is _fake_safe_load:
-        pytest.skip("Тест требует настоящий PyYAML для чтения production-конфига")
 
+    conftest._restore_yaml_safe_load (autouse) гарантирует настоящий
+    yaml.safe_load перед запуском — больше не нужен ручной патч.
+    """
     page = tmp_path / "index.html"
     page.write_text(
         '<head>'
@@ -64,13 +63,8 @@ def test_msapplication_tile_meta_tags_not_renamed(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    yaml_stub.safe_load = _real_yaml_safe_load
-    try:
-        # ConfigLoader кэширует AppConfig — для production-конфига нужен новый loader
-        loader = ConfigLoader(ROOT)
-        update_all_refs_in_project(tmp_path, {}, loader)
-    finally:
-        yaml_stub.safe_load = _fake_safe_load
+    loader = ConfigLoader(ROOT)
+    update_all_refs_in_project(tmp_path, {}, loader)
 
     text = page.read_text(encoding="utf-8")
     # Microsoft-стандарт нетронут
