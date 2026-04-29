@@ -124,3 +124,59 @@ def test_returns_asset_result_with_stats(tmp_path: Path) -> None:
     assert hasattr(result.stats, "renamed")
     assert hasattr(result.stats, "removed")
     assert hasattr(result.stats, "downloaded")
+
+
+class _FaviconFallbackLoader(_FakeLoader):
+    """Loader с правилами resource_copy для проверки if_missing."""
+
+    def service_files(self) -> ServiceFilesConfig:
+        return ServiceFilesConfig.model_validate({
+            "exclude_from_rename": {"files": []},
+            "scripts_to_delete": {"files": []},
+            "rename_map_output": {"filename": "{project}_rename_map.json", "location": "logs"},
+            "resource_copy": {
+                "files": [
+                    # Жёсткое копирование (без if_missing) — всегда перезаписывает
+                    {"source": "favicon.ico", "destination": "images/favicon.ico"},
+                    # Фолбэк в корень — копируется только если файла нет
+                    {
+                        "source": "favicon.ico",
+                        "destination": "favicon.ico",
+                        "if_missing": True,
+                    },
+                ],
+            },
+        })
+
+
+def test_favicon_root_fallback_uses_resources_when_missing(tmp_path: Path) -> None:
+    """if_missing=true — нет корневого favicon → копируем из resources/."""
+    rename_and_cleanup_assets(tmp_path, loader=_FaviconFallbackLoader())
+
+    target = tmp_path / "favicon.ico"
+    assert target.exists()
+    # Это файл из resources/, не пользовательский
+    assert target.read_bytes() == (ROOT / "resources" / "favicon.ico").read_bytes()
+
+
+def test_favicon_root_fallback_keeps_existing_user_file(tmp_path: Path) -> None:
+    """if_missing=true — пользовательский favicon в корне не перезаписывается."""
+    user_favicon = b"USER_FAVICON_BYTES"
+    (tmp_path / "favicon.ico").write_bytes(user_favicon)
+
+    rename_and_cleanup_assets(tmp_path, loader=_FaviconFallbackLoader())
+
+    target = tmp_path / "favicon.ico"
+    assert target.read_bytes() == user_favicon
+
+
+def test_resource_copy_without_if_missing_overwrites(tmp_path: Path) -> None:
+    """Без if_missing — старый файл перетирается (текущее поведение)."""
+    target_dir = tmp_path / "images"
+    target_dir.mkdir()
+    (target_dir / "favicon.ico").write_bytes(b"OLD_BYTES")
+
+    rename_and_cleanup_assets(tmp_path, loader=_FaviconFallbackLoader())
+
+    # images/favicon.ico — без if_missing, должен быть перетёрт
+    assert (target_dir / "favicon.ico").read_bytes() != b"OLD_BYTES"

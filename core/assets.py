@@ -55,6 +55,7 @@ class ResourceCopyRule:
     source: Path
     destination: str
     originals: list[str] = field(default_factory=list)
+    if_missing: bool = False  # копировать только если destination не существует
 
 
 def _normalize_config_path(value: str) -> str:
@@ -446,6 +447,7 @@ def rename_and_cleanup_assets(
             source=resources_dir / item.source,
             destination=destination,
             originals=originals,
+            if_missing=bool(item.if_missing),
         )
         resource_rules.append(rule)
         for original in originals:
@@ -584,6 +586,12 @@ def rename_and_cleanup_assets(
             if not rule.source.exists():
                 logger.warn(
                     f"[assets] Ресурс для копирования не найден: {rule.source}"  # pragma: no cover
+                )
+            elif rule.if_missing and destination_path.exists():
+                # Пользовательский файл уже в проекте (например, корневой
+                # /favicon.ico из Tilda) — наш дефолт не перетираем.
+                logger.info(
+                    f"⏭ Ресурс {rule.destination} уже существует — пропускаем копирование"
                 )
             else:
                 utils.safe_copy(rule.source, destination_path)

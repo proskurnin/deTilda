@@ -209,6 +209,7 @@ service_files:
     location: "logs"
 
   # Файлы из resources/, которые копируются в проект — assets.py
+  # if_missing: true — не перетирать если файл уже есть (пользовательский фолбэк)
   resource_copy:
     files:
       - source: "favicon.ico"
@@ -216,6 +217,13 @@ service_files:
         originals:
           - "images/tildafavicon.ico"
           - "tildafavicon.ico"
+      # Корневой /favicon.ico — Tilda обычно вставляет
+      # <link rel="shortcut icon" href="/favicon.ico">; если архив без этого
+      # файла, кладём наш дефолт. Если у пользователя свой favicon в корне —
+      # не трогаем.
+      - source: "favicon.ico"
+        destination: "favicon.ico"
+        if_missing: true
       - source: "ga.js"
         destination: "js/ga.js"
 

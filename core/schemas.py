@@ -251,6 +251,7 @@ class ResourceCopyItem(BaseModel):
     source: str        # имя файла в resources/
     destination: str   # путь назначения в проекте
     originals: List[str] = Field(default_factory=list)  # старые имена → добавляются в rename_map
+    if_missing: bool = False  # копировать только если destination не существует (фолбэк)
 
 
 class ResourceCopyConfig(BaseModel):
