@@ -11,6 +11,7 @@ from core import (
     cdn_localizer,
     checker,
     cleaners,
+    font_substitute,
     forms,
     fonts_localizer,
     html_prettify,
@@ -96,6 +97,9 @@ class DetildaPipeline:
                 forms.generate_send_email_php(context)
             with logger.module_scope("inject"):
                 stats.forms_hooked = inject.inject_form_scripts(context)
+
+            with logger.module_scope("font_substitute"):
+                font_substitute.substitute_tilda_fonts(context.project_root)
 
             with logger.module_scope("fonts"):
                 fonts_localizer.localize_google_fonts(context.project_root)
