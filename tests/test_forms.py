@@ -69,3 +69,83 @@ def test_generate_overwrites_existing_file(tmp_path: Path) -> None:
     content = target.read_text(encoding="utf-8")
     assert "OLD CONTENT" not in content
     assert "<?php" in content
+
+
+def _make_context_with_recipients(project_root: Path, recipients):
+    """Контекст с config_loader, возвращающим заданные test_recipients."""
+    from core.schemas import FormsConfig
+
+    class FakeLoader:
+        def forms(self):
+            return FormsConfig(test_recipients=list(recipients))
+
+    class FakeContext:
+        pass
+
+    ctx = FakeContext()
+    ctx.project_root = project_root
+    ctx.config_loader = FakeLoader()
+    return ctx
+
+
+def test_send_email_test_recipients_replaced_from_config(tmp_path: Path) -> None:
+    """forms.test_recipients из конфига подставляются в const TEST_RECIPIENTS."""
+    from core.config_loader import ConfigLoader
+
+    # Реальный ConfigLoader, чтобы isinstance-проверка прошла
+    class _Loader(ConfigLoader):
+        def forms(self):
+            from core.schemas import FormsConfig
+            return FormsConfig(test_recipients=["alice@example.com", "bob@example.com"])
+
+    class FakeContext:
+        project_root = tmp_path
+        config_loader = _Loader(ROOT)
+
+    generate_send_email_php(FakeContext())
+
+    content = (tmp_path / "send_email.php").read_text(encoding="utf-8")
+    assert "'alice@example.com'" in content or '"alice@example.com"' in content
+    assert "'bob@example.com'" in content or '"bob@example.com"' in content
+    # Дефолтный адрес из шаблона должен быть заменён
+    assert "'r@prororo.com'" not in content
+
+
+def test_send_email_keeps_template_default_when_recipients_empty(tmp_path: Path) -> None:
+    """Пустой test_recipients — шаблон копируется как есть, без подмены."""
+    from core.config_loader import ConfigLoader
+
+    class _Loader(ConfigLoader):
+        def forms(self):
+            from core.schemas import FormsConfig
+            return FormsConfig(test_recipients=[])
+
+    class FakeContext:
+        project_root = tmp_path
+        config_loader = _Loader(ROOT)
+
+    generate_send_email_php(FakeContext())
+
+    content = (tmp_path / "send_email.php").read_text(encoding="utf-8")
+    # Дефолт из шаблона сохранён
+    assert "r@prororo.com" in content
+
+
+def test_send_email_recipients_quotes_are_escaped(tmp_path: Path) -> None:
+    """Email с потенциально опасными символами не ломает PHP-литерал."""
+    from core.config_loader import ConfigLoader
+
+    class _Loader(ConfigLoader):
+        def forms(self):
+            from core.schemas import FormsConfig
+            return FormsConfig(test_recipients=['weird"quote@example.com'])
+
+    class FakeContext:
+        project_root = tmp_path
+        config_loader = _Loader(ROOT)
+
+    generate_send_email_php(FakeContext())
+
+    content = (tmp_path / "send_email.php").read_text(encoding="utf-8")
+    # json.dumps экранирует кавычку как \"
+    assert '\\"' in content

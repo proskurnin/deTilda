@@ -8,7 +8,8 @@
   AppConfig
   ├── PatternsConfig        — regex, правила замен, расширения файлов
   ├── ImagesConfig          — обработка изображений и иконок
-  └── ServiceFilesConfig    — скрипты, ресурсы, настройки шагов конвейера
+  ├── ServiceFilesConfig    — скрипты, ресурсы, настройки шагов конвейера
+  └── FormsConfig           — настройки send_email.php и smoke-теста
 
 config_loader.py загружает YAML → валидирует через AppConfig → отдаёт
 типизированные объекты модулям конвейера.
@@ -279,6 +280,19 @@ class ServiceFilesConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Секция forms
+# ---------------------------------------------------------------------------
+
+class FormsConfig(BaseModel):
+    """Секция forms из config.yaml — настройки send_email.php и smoke-теста.
+
+    test_recipients подставляются в const TEST_RECIPIENTS шаблона
+    resources/send_email.php при копировании в проект (forms.py).
+    """
+    test_recipients: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Корневой объект конфига
 # ---------------------------------------------------------------------------
 
@@ -291,3 +305,4 @@ class AppConfig(BaseModel):
     patterns: PatternsConfig = Field(default_factory=PatternsConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     service_files: ServiceFilesConfig = Field(default_factory=ServiceFilesConfig)
+    forms: FormsConfig = Field(default_factory=FormsConfig)

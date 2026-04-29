@@ -23,6 +23,7 @@ from core.pydantic_compat import ValidationError
 from core import logger
 from core.schemas import (
     AppConfig,
+    FormsConfig,
     ImagesConfig,
     PatternsConfig,
     ServiceFilesConfig,
@@ -134,3 +135,7 @@ class ConfigLoader:
     def service_files(self) -> ServiceFilesConfig:
         """Секция service_files — скрипты, ресурсы, настройки шагов."""
         return self._load().service_files
+
+    def forms(self) -> FormsConfig:
+        """Секция forms — настройки send_email.php и smoke-теста форм."""
+        return self._load().forms

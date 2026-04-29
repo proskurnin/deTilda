@@ -1,9 +1,10 @@
 # deTilda — unified configuration
 #
-# Три секции:
+# Четыре секции:
 #   patterns      — regex для поиска ссылок, замен текста и очистки файлов
 #   images        — правила обработки изображений и иконок Tilda
 #   service_files — управление скриптами, ресурсами и настройки шагов конвейера
+#   forms         — настройки send_email.php и smoke-теста форм
 
 patterns:
   # Regex для поиска ссылок в HTML/CSS/JS — используются в refs.py и checker.py
@@ -215,3 +216,12 @@ service_files:
           - "tildafavicon.ico"
       - source: "ga.js"
         destination: "js/ga.js"
+
+forms:
+  # Получатели тестовых писем send_email.php — срабатывает когда в форме
+  # поле Name содержит слово "test". Подставляются в const TEST_RECIPIENTS
+  # при копировании resources/send_email.php в проект (forms.py).
+  # Этот же список использует tools/smoke_test_form.py для проверки
+  # работоспособности формы после деплоя.
+  test_recipients:
+    - "r@prororo.com"
