@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import posixpath
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable
@@ -77,6 +78,30 @@ def _replace_static_prefix(url: str) -> str:
         if url.startswith("/" + prefix):
             return url[1:]
     return url
+
+
+def _to_relative_url(
+    target_from_root: str, current_path: Path, project_root: Path
+) -> str:
+    """Конвертирует путь от корня проекта в путь относительно current_path.
+
+    Нужно чтобы ссылки работали и на хостинге (под доменом), и при открытии
+    HTML локально через file:// (когда `/` указывает на корень диска,
+    а не на корень сайта).
+
+    Примеры:
+      target='favicon.ico', current=index.html (корень)        → 'favicon.ico'
+      target='favicon.ico', current=subdir/page.html           → '../favicon.ico'
+      target='css/style.css', current=subdir/sub2/page.html    → '../../css/style.css'
+    """
+    target_clean = target_from_root.lstrip("/")
+    try:
+        current_dir = current_path.parent.relative_to(project_root).as_posix()
+    except ValueError:
+        return target_clean
+    if current_dir in ("", "."):
+        return target_clean
+    return posixpath.relpath(target_clean, current_dir)
 
 
 def _compile_replace_rules(rules: Iterable[object]) -> list[tuple[re.Pattern[str], str]]:
@@ -347,15 +372,20 @@ def _update_links_in_html(
                 new_url = routes[route_key]
                 if new_url != route_key:
                     fixed += 1
-                    return f"{attr}={quote}{new_url}{suffix}{quote}"
+                    rel_url = _to_relative_url(new_url, current_path, project_root)
+                    return f"{attr}={quote}{rel_url}{suffix}{quote}"
             trimmed = _replace_static_prefix(base_url)
             if trimmed != base_url:
                 fixed += 1
-                return f"{attr}={quote}{trimmed}{suffix}{quote}"
+                rel_url = _to_relative_url(trimmed, current_path, project_root)
+                return f"{attr}={quote}{rel_url}{suffix}{quote}"
             relative = base_url.lstrip("/")
             if relative in rename_map:
                 fixed += 1
-                return f"{attr}={quote}{rename_map[relative]}{suffix}{quote}"
+                rel_url = _to_relative_url(
+                    rename_map[relative], current_path, project_root
+                )
+                return f"{attr}={quote}{rel_url}{suffix}{quote}"
             last_segment = relative.rsplit("/", 1)[-1]
             if relative and "." not in last_segment:
                 return match.group(0)
@@ -363,7 +393,11 @@ def _update_links_in_html(
             if not target.exists():
                 broken += 1
                 return f"{attr}={quote}#{quote} data-detilda-broken=\"1\""
-            return match.group(0)
+            # Файл существует под /relative — конвертируем в путь относительно
+            # current_path, чтобы работало и при file:// открытии.
+            fixed += 1
+            rel_url = _to_relative_url(relative, current_path, project_root)
+            return f"{attr}={quote}{rel_url}{suffix}{quote}"
 
         if base_url in rename_map:
             fixed += 1

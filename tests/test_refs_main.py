@@ -128,6 +128,50 @@ def test_existing_relative_link_not_broken(tmp_path: Path) -> None:
     assert broken == 0
 
 
+def test_absolute_root_link_converted_to_relative_from_root_page(tmp_path: Path) -> None:
+    """`/favicon.ico` в корневой странице → `favicon.ico` (для file:// preview)."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<link rel="shortcut icon" href="/favicon.ico" />',
+        encoding="utf-8",
+    )
+    (tmp_path / "favicon.ico").write_bytes(b"\x00")
+
+    fixed, broken = update_all_refs_in_project(tmp_path, {}, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert 'href="favicon.ico"' in text
+    assert 'href="/favicon.ico"' not in text
+    assert broken == 0
+
+
+def test_absolute_root_link_converted_to_relative_from_subdir_page(tmp_path: Path) -> None:
+    """`/favicon.ico` в `subdir/page.html` → `../favicon.ico`."""
+    (tmp_path / "subdir").mkdir()
+    page = tmp_path / "subdir" / "page.html"
+    page.write_text('<img src="/favicon.ico" />', encoding="utf-8")
+    (tmp_path / "favicon.ico").write_bytes(b"\x00")
+
+    update_all_refs_in_project(tmp_path, {}, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert 'src="../favicon.ico"' in text
+
+
+def test_absolute_root_link_via_rename_map_uses_relative_path(tmp_path: Path) -> None:
+    """Абсолютная ссылка через rename_map тоже становится относительной."""
+    (tmp_path / "subdir").mkdir()
+    page = tmp_path / "subdir" / "page.html"
+    page.write_text('<a href="/til-old.html">x</a>', encoding="utf-8")
+    (tmp_path / "ai-new.html").write_text("ok")
+
+    rename_map = {"til-old.html": "ai-new.html"}
+    update_all_refs_in_project(tmp_path, rename_map, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert 'href="../ai-new.html"' in text
+
+
 def test_replace_with_1px_images(tmp_path: Path) -> None:
     """replace_links_with_1px заменяет ссылки на 1px placeholder."""
     page = tmp_path / "index.html"
