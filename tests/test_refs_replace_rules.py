@@ -156,3 +156,32 @@ def test_js_replace_protects_base64_in_strings(tmp_path: Path) -> None:
     assert '"ai-rec"' in text
     # Base64 не должен потерять/исказить байты
     assert "R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" in text
+
+
+def test_js_regex_literal_with_quote_does_not_desync_string_scanner(tmp_path: Path) -> None:
+    """Регексп-литерал с кавычкой внутри (`/"/gi`) не должен сбивать парность.
+
+    Реальный кейс из lazyload-1.3.min.js: между двумя строковыми литералами
+    есть `replace(/"/gi, "")` — кавычка внутри regex literal. Наивный
+    rege-сканер строк видит её как opening quote и склеивает кусок кода
+    с следующим литералом, в результате чего селектор `.t-cover__carrier`
+    в самом конце файла остаётся непереименованным → ломается parallax.
+    """
+    js = tmp_path / "lazyload.min.js"
+    js.write_text(
+        'var s="t-rec";'
+        'function clean(x){return x.replace(/"/gi,"")}'
+        'var sel=".t-cover__carrier";'
+        'var img=".t-img";',
+        encoding="utf-8",
+    )
+
+    loader = ConfigLoader(ROOT)
+    update_all_refs_in_project(tmp_path, {}, loader)
+
+    text = js.read_text(encoding="utf-8")
+    assert '"ai-rec"' in text
+    assert '".ai-cover__carrier"' in text
+    assert '".ai-img"' in text
+    # Сам regex literal остался нетронутым
+    assert "/\"/gi" in text
