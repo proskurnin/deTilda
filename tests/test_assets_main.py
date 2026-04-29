@@ -71,6 +71,63 @@ def test_deletes_as_is_files(tmp_path: Path) -> None:
     assert result.stats.removed >= 2
 
 
+class _PatternDeleteLoader(_FakeLoader):
+    """Loader с regex-паттернами удаления — для UUID-имён вроде apple-touch-icon."""
+
+    def images(self) -> ImagesConfig:
+        return ImagesConfig.model_validate({
+            "delete_physical_files": {
+                "as_is": [],
+                "patterns": [
+                    r"apple-touch-icon-[0-9a-f]+\.png",
+                    r"tilda-[a-z0-9]+-spec\.json",
+                ],
+            },
+        })
+
+
+def test_deletes_files_by_regex_pattern(tmp_path: Path) -> None:
+    """Файлы, имя которых fullmatch'ит regex из patterns, удаляются до переименования."""
+    (tmp_path / "apple-touch-icon-deadbeef.png").write_bytes(b"fake")
+    (tmp_path / "Apple-Touch-Icon-CAFEBABE.png").write_bytes(b"fake")  # case-insensitive
+    (tmp_path / "tilda-abc123-spec.json").write_bytes(b"{}")
+    (tmp_path / "keep.png").write_bytes(b"fake")
+    (tmp_path / "apple-touch-icon-precomposed.png").write_bytes(b"fake")  # не fullmatch
+
+    result = rename_and_cleanup_assets(tmp_path, loader=_PatternDeleteLoader())
+
+    assert not (tmp_path / "apple-touch-icon-deadbeef.png").exists()
+    assert not (tmp_path / "Apple-Touch-Icon-CAFEBABE.png").exists()
+    assert not (tmp_path / "tilda-abc123-spec.json").exists()
+    assert (tmp_path / "keep.png").exists()
+    # precomposed не удаляется — паттерн требует hex-suffix
+    assert (tmp_path / "apple-touch-icon-precomposed.png").exists()
+    assert result.stats.removed >= 3
+
+
+def test_invalid_regex_pattern_logged_and_skipped(tmp_path: Path) -> None:
+    """Битый regex не валит запуск — пишется warning, остальное работает."""
+
+    class _BrokenPatternLoader(_FakeLoader):
+        def images(self) -> ImagesConfig:
+            return ImagesConfig.model_validate({
+                "delete_physical_files": {
+                    "as_is": ["logo404.png"],
+                    "patterns": [r"[invalid(", r"valid-.*\.png"],
+                },
+            })
+
+    (tmp_path / "logo404.png").write_bytes(b"fake")
+    (tmp_path / "valid-x.png").write_bytes(b"fake")
+    (tmp_path / "keep.png").write_bytes(b"fake")
+
+    rename_and_cleanup_assets(tmp_path, loader=_BrokenPatternLoader())
+
+    assert not (tmp_path / "logo404.png").exists()  # as_is работает
+    assert not (tmp_path / "valid-x.png").exists()  # валидный паттерн работает
+    assert (tmp_path / "keep.png").exists()
+
+
 def test_excluded_files_not_renamed(tmp_path: Path) -> None:
     """Файлы из exclude_from_rename не переименовываются."""
     (tmp_path / "robots.txt").write_text("Disallow: /tilda")

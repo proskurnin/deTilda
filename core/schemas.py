@@ -150,6 +150,11 @@ class DeletePhysicalFiles(BaseModel):
     # Удаляются сразу под оригинальным именем — без предварительного переименования
     as_is: List[str] = Field(default_factory=list)
 
+    # Удаляются если имя файла matches любой из regex-паттернов.
+    # Используется для Tilda-генерируемых имён с UUID-частью, которые
+    # нельзя перечислить точными именами (apple-touch-icons и т.п.).
+    patterns: List[str] = Field(default_factory=list)
+
 
 class PatternsList(BaseModel):
     """Простой список строк-паттернов."""

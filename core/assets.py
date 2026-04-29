@@ -422,6 +422,17 @@ def rename_and_cleanup_assets(
 
     exclude_from_rename = {f.lower() for f in service_cfg.exclude_from_rename.files}
     delete_immediately = {f.lower() for f in images_cfg.delete_physical_files.as_is}
+
+    # Regex-паттерны удаления — для Tilda-имён с UUID/хэшами, которые
+    # нельзя перечислить точными именами (apple-touch-icons и т.п.).
+    # Сравнение fullmatch по lowercase-имени, IGNORECASE — для согласованности с as_is.
+    delete_patterns: list[re.Pattern[str]] = []
+    for raw in images_cfg.delete_physical_files.patterns:
+        try:
+            delete_patterns.append(re.compile(raw, re.IGNORECASE))
+        except re.error as exc:
+            logger.warn(f"[assets] Некорректный паттерн delete_physical_files: {raw!r} — {exc}")
+
     delete_service_raw = list(service_cfg.scripts_to_delete.files)
     removable_service_scripts, preserved_service_scripts = filter_removable_scripts(
         delete_service_raw,
@@ -500,11 +511,23 @@ def rename_and_cleanup_assets(
             continue
 
         # Шаг 2: немедленное удаление мусора (tildacopy.png, Tilda-скрипты и др.)
-        if name_lower in delete_immediately or name_lower in delete_service:
+        matched_pattern = next(
+            (p for p in delete_patterns if p.fullmatch(name_lower)), None
+        )
+        if (
+            name_lower in delete_immediately
+            or name_lower in delete_service
+            or matched_pattern is not None
+        ):
             try:
                 path.unlink()
                 stats.removed += 1
-                logger.info(f"🗑 Удалён (as_is): {path.name}")
+                if matched_pattern is not None and name_lower not in delete_immediately:
+                    logger.info(
+                        f"🗑 Удалён (pattern {matched_pattern.pattern!r}): {path.name}"
+                    )
+                else:
+                    logger.info(f"🗑 Удалён (as_is): {path.name}")
             except Exception as exc:
                 logger.err(f"[assets] Ошибка удаления {path}: {exc}")
             continue
