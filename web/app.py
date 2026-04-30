@@ -26,10 +26,10 @@ from web.jobs import JobStatus, JobStore
 from web.worker import run_job
 
 _CONFIG = ConfigLoader()
-_STORE = JobStore()
-_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 _LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
 _WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
+_STORE = JobStore(persist_dir=_WORKDIR)
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
 # Per-IP rate limiting
 _rate_map: dict[str, list[float]] = defaultdict(list)
@@ -94,6 +94,9 @@ def _rate_limit(request: Request) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _WORKDIR.mkdir(parents=True, exist_ok=True)
+    _STORE.restore()
+
     stop = threading.Event()
 
     def _cleanup_loop() -> None:
