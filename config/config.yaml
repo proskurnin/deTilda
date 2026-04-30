@@ -250,3 +250,4 @@ web:
     - ".zip"
   max_concurrent_jobs: 5
   job_ttl_minutes: 30
+  rate_limit_per_minute: 10

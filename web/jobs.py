@@ -55,8 +55,8 @@ class JobStore:
         with self._lock:
             self._jobs[job.id] = job
 
-    def expire_old(self, ttl_minutes: int) -> None:
-        """Remove jobs older than ttl_minutes."""
+    def expire_old(self, ttl_minutes: int) -> list:
+        """Remove finished jobs older than ttl_minutes. Returns list of expired job IDs."""
         cutoff = datetime.now(timezone.utc)
         with self._lock:
             to_delete = [
@@ -65,6 +65,7 @@ class JobStore:
             ]
             for jid in to_delete:
                 self._jobs.pop(jid, None)
+        return to_delete
 
     def active_count(self) -> int:
         with self._lock:

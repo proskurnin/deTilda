@@ -324,6 +324,7 @@ class WebConfig(BaseModel):
     allowed_extensions: List[str] = Field(default_factory=lambda: [".zip"])
     max_concurrent_jobs: int = Field(default=5)
     job_ttl_minutes: int = Field(default=30)
+    rate_limit_per_minute: int = Field(default=10)
 
 
 class AppConfig(BaseModel):

@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import concurrent.futures
+import shutil
 import tempfile
+import threading
+import time
+from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, Response
 
 from core.config_loader import ConfigLoader
 from core.packer import pack_result
@@ -18,8 +24,51 @@ _CONFIG = ConfigLoader()
 _STORE = JobStore()
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 _LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
+_WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
 
-app = FastAPI(title="deTilda", version=APP_VERSION)
+# Per-IP rate limiting state
+_rate_map: dict[str, list[float]] = defaultdict(list)
+_rate_lock = threading.Lock()
+
+
+def _rate_limit(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    limit = _CONFIG.web().rate_limit_per_minute
+    now = time.monotonic()
+    with _rate_lock:
+        timestamps = [t for t in _rate_map[ip] if now - t < 60.0]
+        if len(timestamps) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail="Слишком много запросов. Повторите через минуту.",
+            )
+        timestamps.append(now)
+        _rate_map[ip] = timestamps
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    stop = threading.Event()
+
+    def _cleanup_loop() -> None:
+        while not stop.wait(timeout=60):
+            try:
+                ttl = _CONFIG.web().job_ttl_minutes
+                expired_ids = _STORE.expire_old(ttl)
+                for job_id in expired_ids:
+                    shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_cleanup_loop, daemon=True, name="detilda-cleanup")
+    t.start()
+    yield
+    stop.set()
+
+
+app = FastAPI(title="deTilda", version=APP_VERSION, lifespan=lifespan)
+
+RateLimited = Annotated[None, Depends(_rate_limit)]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -34,12 +83,12 @@ async def health() -> dict:
 
 @app.post("/api/jobs", status_code=202)
 async def create_job(
+    _: RateLimited,
     file: UploadFile = File(...),
     email: str = Form(default=""),
 ) -> dict:
     web_cfg = _CONFIG.web()
 
-    # Validate extension
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in web_cfg.allowed_extensions:
         raise HTTPException(
@@ -47,11 +96,9 @@ async def create_job(
             detail=f"Недопустимый тип файла. Разрешено: {web_cfg.allowed_extensions}",
         )
 
-    # Check concurrency limit
     if _STORE.active_count() >= web_cfg.max_concurrent_jobs:
         raise HTTPException(status_code=429, detail="Слишком много активных задач. Повторите позже.")
 
-    # Read and validate size
     content = await file.read()
     max_bytes = web_cfg.max_upload_size_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -60,12 +107,10 @@ async def create_job(
             detail=f"Файл слишком большой. Максимум: {web_cfg.max_upload_size_mb} МБ",
         )
 
-    # Save upload to a temp file
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     tmp.write(content)
     tmp.flush()
     tmp.close()
-    upload_path = Path(tmp.name)
 
     job = _STORE.create()
     _LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -74,7 +119,7 @@ async def create_job(
         run_job,
         job=job,
         store=_STORE,
-        upload_path=upload_path,
+        upload_path=Path(tmp.name),
         email=email,
         logs_dir=_LOGS_DIR / job.id,
     )
@@ -116,12 +161,3 @@ async def get_config() -> dict:
         "allowed_extensions": web_cfg.allowed_extensions,
         "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
     }
-
-
-@app.delete("/api/jobs/{job_id}", status_code=204)
-async def delete_job(job_id: str) -> None:
-    job = _STORE.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Задача не найдена")
-    # Expire immediately by marking finished_at in the past
-    _STORE.expire_old(ttl_minutes=0)
