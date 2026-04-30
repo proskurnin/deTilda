@@ -31,6 +31,7 @@ def process_archive(
     dry_run: bool = False,
     logs_dir: Path | str | None = None,
     version: str = APP_VERSION,
+    on_step_done=None,
 ) -> PipelineStats:
     """Обрабатывает ZIP-архив Tilda-экспорта и возвращает статистику.
 
@@ -39,6 +40,7 @@ def process_archive(
     dry_run:      если True — анализ без записи в файлы
     logs_dir:     папка для лог-файлов; по умолчанию repository_root/logs/
     version:      строка версии для заголовков отчётов
+    on_step_done: callable(step_name) — вызывается после завершения каждого шага
 
     Бросает RuntimeError если архив не удалось распаковать.
     """
@@ -47,5 +49,6 @@ def process_archive(
         logs_dir=Path(logs_dir) if logs_dir is not None else None,
         dry_run=dry_run,
         params=params,
+        on_step_done=on_step_done,
     )
     return pipeline.run(Path(archive_path))

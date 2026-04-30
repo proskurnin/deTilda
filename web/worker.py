@@ -96,11 +96,16 @@ def run_job(
             job.status = JobStatus.ERROR
             return
 
+        def _on_step(step: str) -> None:
+            job.progress.append(step)
+            store.update(job)
+
         try:
             stats = process_archive(
                 archive_path,
                 params=ProcessParams(email=email),
                 logs_dir=logs_dir,
+                on_step_done=_on_step,
             )
         except RuntimeError as exc:
             code = "unpack_failed" if "распаковать" in str(exc) else "pipeline_error"

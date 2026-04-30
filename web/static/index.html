@@ -36,6 +36,16 @@
   .stat-row.warn .v { color: #d97706; }
   .stat-row.bad  .v { color: #dc2626; }
   .stat-time { margin-top: .5rem; font-size: .78rem; color: #9ca3af; text-align: right; }
+
+  /* Progress steps */
+  #progress-block { display: none; margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: .85rem; }
+  .progress-title { font-size: .73rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: .06em; margin-bottom: .5rem; }
+  .progress-steps { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 0; }
+  .step-row { display: flex; align-items: center; gap: .4rem; padding: .18rem 0; font-size: .8rem; color: #c4c9d4; }
+  .step-row.s-done   { color: #374151; }
+  .step-row.s-active { color: #2563eb; }
+  .step-icon { width: 13px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .step-mini-spin { width: 9px; height: 9px; border: 1.5px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: spin .75s linear infinite; }
 </style>
 </head>
 <body>
@@ -52,6 +62,10 @@
   </form>
 
   <div id="status"></div>
+  <div id="progress-block">
+    <div class="progress-title">Шаги обработки</div>
+    <div class="progress-steps" id="progress-steps"></div>
+  </div>
   <div id="err-box" class="err-box" style="display:none">
     <div id="err-msg" class="err-msg"></div>
     <div id="err-hint" class="err-hint"></div>
@@ -79,6 +93,40 @@ const statTime   = document.getElementById('stat-time');
 const errBox    = document.getElementById('err-box');
 const errMsg    = document.getElementById('err-msg');
 const errHint   = document.getElementById('err-hint');
+
+const STEPS = [
+  { id: 'assets',          label: 'Ассеты' },
+  { id: 'page404',         label: 'Страница 404' },
+  { id: 'cleaners',        label: 'Очистка' },
+  { id: 'forms',           label: 'Обработчик форм' },
+  { id: 'inject',          label: 'Скрипты форм' },
+  { id: 'font_substitute', label: 'Замена шрифтов' },
+  { id: 'fonts',           label: 'Google Fonts' },
+  { id: 'refs',            label: 'Ссылки' },
+  { id: 'cdn_localizer',   label: 'Локализация CDN' },
+  { id: 'cdn_cleanup',     label: 'Очистка CDN' },
+  { id: 'images',          label: 'Изображения' },
+  { id: 'script_cleaner',  label: 'Tilda-скрипты' },
+  { id: 'forms_check',     label: 'Проверка форм' },
+  { id: 'html_prettify',   label: 'HTML-форматирование' },
+  { id: 'checker',         label: 'Проверка ссылок' },
+  { id: 'tilda-remnants',  label: 'Остатки Tilda' },
+  { id: 'report',          label: 'Отчёт' },
+];
+
+function renderProgress(completedSteps) {
+  const done = new Set(completedSteps || []);
+  let activeIdx = STEPS.findIndex(s => !done.has(s.id));
+  document.getElementById('progress-steps').innerHTML = STEPS.map((s, i) => {
+    const isDone = done.has(s.id);
+    const isActive = i === activeIdx;
+    const cls = isDone ? 's-done' : (isActive ? 's-active' : '');
+    const icon = isDone
+      ? '<span style="color:#16a34a;font-size:.75rem">✓</span>'
+      : (isActive ? '<span class="step-mini-spin"></span>' : '<span style="color:#e5e7eb;font-size:.9rem">·</span>');
+    return `<div class="step-row ${cls}"><span class="step-icon">${icon}</span><span>${s.label}</span></div>`;
+  }).join('');
+}
 
 function setStatus(text, spinning, isErr) {
   statusEl.className = isErr ? 'err' : '';
@@ -117,8 +165,12 @@ form.addEventListener('submit', async e => {
   poll(job_id);
 });
 
+const progressBlock = document.getElementById('progress-block');
+
 async function poll(jobId) {
   setStatus('Обработка сайта…', true, false);
+  progressBlock.style.display = 'block';
+  renderProgress([]);
   const interval = setInterval(async () => {
     let data;
     try {
@@ -126,9 +178,12 @@ async function poll(jobId) {
       data = await r.json();
     } catch { return; }
 
+    if (data.progress) renderProgress(data.progress);
+
     if (data.status === 'done') {
       clearInterval(interval);
       setStatus('', false, false);
+      progressBlock.style.display = 'none';
       showStats(data.stats);
       downloadEl.href = `/api/jobs/${jobId}/download`;
       downloadEl.style.display = 'block';
@@ -136,6 +191,7 @@ async function poll(jobId) {
       btn.disabled = false;
     } else if (data.status === 'error') {
       clearInterval(interval);
+      progressBlock.style.display = 'none';
       showError(data.error, data.error_code);
       btnAgain.style.display = 'block';
       btn.disabled = false;
@@ -182,6 +238,7 @@ btnAgain.addEventListener('click', () => {
   form.reset();
   statsBlock.style.display = 'none';
   errBox.style.display = 'none';
+  progressBlock.style.display = 'none';
   downloadEl.style.display = 'none';
   btnAgain.style.display = 'none';
   setStatus('', false, false);

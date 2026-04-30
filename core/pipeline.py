@@ -62,11 +62,20 @@ class DetildaPipeline:
         logs_dir: Path | None = None,
         dry_run: bool = False,
         params: ProcessParams | None = None,
+        on_step_done=None,
     ) -> None:
         self.version = version
         self.logs_dir = logs_dir
         self.dry_run = dry_run
         self.params = params
+        self._on_step_done = on_step_done
+
+    def _notify(self, step: str) -> None:
+        if self._on_step_done is not None:
+            try:
+                self._on_step_done(step)
+            except Exception:
+                pass
 
     def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
@@ -102,6 +111,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг assets завершился с ошибкой: {exc}")
                 stats.errors += 1
+            self._notify("assets")
 
             try:
                 with logger.module_scope("page404"):
@@ -109,6 +119,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг page404 завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("page404")
 
             try:
                 with logger.module_scope("cleaners"):
@@ -119,6 +130,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг cleaners завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("cleaners")
 
             try:
                 with logger.module_scope("forms"):
@@ -126,6 +138,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг forms завершился с ошибкой: {exc}")
                 stats.errors += 1
+            self._notify("forms")
 
             try:
                 with logger.module_scope("inject"):
@@ -133,6 +146,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг inject завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("inject")
 
             try:
                 with logger.module_scope("font_substitute"):
@@ -140,6 +154,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг font_substitute завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("font_substitute")
 
             try:
                 with logger.module_scope("fonts"):
@@ -147,6 +162,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг fonts завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("fonts")
 
             try:
                 with logger.module_scope("refs"):
@@ -161,6 +177,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг refs завершился с ошибкой: {exc}")
                 stats.errors += 1
+            self._notify("refs")
 
             try:
                 with logger.module_scope("cdn_localizer"):
@@ -169,6 +186,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг cdn_localizer завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("cdn_localizer")
 
             try:
                 with logger.module_scope("cdn_cleanup"):
@@ -176,6 +194,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг cdn_cleanup завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("cdn_cleanup")
 
             try:
                 with logger.module_scope("images"):
@@ -188,6 +207,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг images завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("images")
 
             try:
                 with logger.module_scope("script_cleaner"):
@@ -208,6 +228,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг script_cleaner завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("script_cleaner")
 
             try:
                 with logger.module_scope("forms_check"):
@@ -218,6 +239,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг forms_check завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("forms_check")
 
             try:
                 with logger.module_scope("html_prettify"):
@@ -225,6 +247,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг html_prettify завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("html_prettify")
 
             try:
                 with logger.module_scope("checker"):
@@ -237,6 +260,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг checker завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("checker")
 
             try:
                 with logger.module_scope("tilda-remnants"):
@@ -248,6 +272,7 @@ class DetildaPipeline:
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг tilda-remnants завершился с ошибкой: {exc}")
                 stats.warnings += 1
+            self._notify("tilda-remnants")
 
             stats.exec_time = time.time() - start_time
             try:

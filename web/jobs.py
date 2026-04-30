@@ -29,6 +29,7 @@ class Job:
     error_code: Optional[str] = None   # machine-readable key
     error_detail: Optional[str] = None # raw exception (admin only)
     stats: Optional[dict] = None
+    progress: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +40,7 @@ class Job:
             "error": self.error,
             "error_code": self.error_code,
             "stats": self.stats,
+            "progress": self.progress,
         }
 
     def to_admin_dict(self) -> dict:
@@ -49,6 +51,7 @@ class Job:
     def _to_persist_dict(self) -> dict:
         d = self.to_admin_dict()
         d["result_path"] = str(self.result_path) if self.result_path else None
+        d["progress"] = self.progress
         return d
 
     @classmethod
@@ -63,6 +66,7 @@ class Job:
             error_code=data.get("error_code"),
             error_detail=data.get("error_detail"),
             stats=data.get("stats"),
+            progress=data.get("progress", []),
         )
 
 
