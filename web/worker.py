@@ -64,6 +64,16 @@ def run_job(
         )
 
         job.result_path = stats.project_root
+        job.stats = {
+            "renamed_assets":   stats.renamed_assets,
+            "fixed_links":      stats.fixed_links,
+            "broken_links":     stats.broken_links,
+            "downloaded":       stats.downloaded_remote_assets,
+            "forms_hooked":     stats.forms_hooked,
+            "exec_time":        round(stats.exec_time, 1),
+            "warnings":         stats.warnings,
+            "errors":           stats.errors,
+        }
         job.status = JobStatus.DONE
     except Exception as exc:
         job.status = JobStatus.ERROR

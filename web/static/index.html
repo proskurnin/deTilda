@@ -6,61 +6,98 @@
 <title>deTilda</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.08); padding: 2rem; width: min(480px, 92vw); }
+  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: min(500px, 100%); }
   h1 { font-size: 1.5rem; margin-bottom: .25rem; }
-  .sub { color: #666; font-size: .9rem; margin-bottom: 1.5rem; }
-  label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .3rem; margin-top: 1rem; }
+  .sub { color: #6b7280; font-size: .9rem; margin-bottom: 1.75rem; }
+  label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .3rem; margin-top: 1.1rem; }
   input[type=email], input[type=file] { width: 100%; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .95rem; }
-  button { margin-top: 1.25rem; width: 100%; padding: .65rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
-  button:disabled { background: #9ca3af; cursor: default; }
-  #status { margin-top: 1rem; font-size: .9rem; color: #374151; min-height: 1.5rem; }
-  #download { display: none; margin-top: .75rem; width: 100%; padding: .65rem; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; text-align: center; text-decoration: none; }
-  .err { color: #dc2626; }
+  .btn-primary { margin-top: 1.25rem; width: 100%; padding: .65rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; }
+  .btn-primary:disabled { background: #9ca3af; cursor: default; }
+  .btn-success { display: none; width: 100%; padding: .65rem; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; text-align: center; text-decoration: none; margin-top: .75rem; }
+  .btn-ghost { display: none; width: 100%; padding: .6rem; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; font-size: .9rem; cursor: pointer; margin-top: .5rem; }
+
+  /* Status line */
+  #status { margin-top: 1rem; font-size: .9rem; color: #374151; min-height: 1.4rem; display: flex; align-items: center; gap: .4rem; }
+  #status.err { color: #dc2626; }
+  .spinner { width: 14px; height: 14px; border: 2px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Stats block */
+  #stats-block { display: none; margin-top: 1.25rem; border-top: 1px solid #f1f5f9; padding-top: 1rem; }
+  .stats-title { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .65rem; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 7px; padding: .35rem .65rem; font-size: .85rem; }
+  .stat-row .k { color: #6b7280; }
+  .stat-row .v { font-weight: 600; color: #111; }
+  .stat-row.warn .v { color: #d97706; }
+  .stat-row.bad  .v { color: #dc2626; }
+  .stat-time { margin-top: .5rem; font-size: .78rem; color: #9ca3af; text-align: right; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>deTilda</h1>
   <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
+
   <form id="form">
     <label for="file">ZIP-архив экспорта Tilda</label>
     <input type="file" id="file" name="file" accept=".zip" required>
     <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
     <input type="email" id="email" name="email" placeholder="owner@example.com">
-    <button type="submit" id="btn">Обработать</button>
+    <button type="submit" class="btn-primary" id="btn">Обработать</button>
   </form>
+
   <div id="status"></div>
-  <a id="download" href="#">Скачать результат</a>
+
+  <div id="stats-block">
+    <div class="stats-title">Результат обработки</div>
+    <div class="stats-grid" id="stats-grid"></div>
+    <div class="stat-time" id="stat-time"></div>
+  </div>
+
+  <a  id="download" class="btn-success" href="#">Скачать результат</a>
+  <button id="btn-again" class="btn-ghost">Обработать ещё</button>
 </div>
+
 <script>
-const form = document.getElementById('form');
-const btn = document.getElementById('btn');
-const statusEl = document.getElementById('status');
+const form      = document.getElementById('form');
+const btn       = document.getElementById('btn');
+const statusEl  = document.getElementById('status');
 const downloadEl = document.getElementById('download');
+const btnAgain  = document.getElementById('btn-again');
+const statsBlock = document.getElementById('stats-block');
+const statsGrid  = document.getElementById('stats-grid');
+const statTime   = document.getElementById('stat-time');
+
+function setStatus(text, spinning, isErr) {
+  statusEl.className = isErr ? 'err' : '';
+  statusEl.innerHTML = spinning
+    ? `<span class="spinner"></span>${text}`
+    : text;
+}
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
   btn.disabled = true;
   downloadEl.style.display = 'none';
-  statusEl.textContent = 'Загрузка...';
-  statusEl.className = '';
+  btnAgain.style.display = 'none';
+  statsBlock.style.display = 'none';
+  setStatus('Загрузка файла…', true, false);
 
   const fd = new FormData(form);
   let resp;
   try {
     resp = await fetch('/api/jobs', { method: 'POST', body: fd });
   } catch {
-    statusEl.textContent = 'Ошибка сети';
-    statusEl.className = 'err';
+    setStatus('Ошибка сети', false, true);
     btn.disabled = false;
     return;
   }
 
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    statusEl.textContent = data.detail || `Ошибка ${resp.status}`;
-    statusEl.className = 'err';
+    const d = await resp.json().catch(() => ({}));
+    setStatus(d.detail || `Ошибка ${resp.status}`, false, true);
     btn.disabled = false;
     return;
   }
@@ -70,29 +107,59 @@ form.addEventListener('submit', async e => {
 });
 
 async function poll(jobId) {
-  statusEl.textContent = 'Обработка…';
+  setStatus('Обработка сайта…', true, false);
   const interval = setInterval(async () => {
     let data;
     try {
       const r = await fetch(`/api/jobs/${jobId}`);
       data = await r.json();
-    } catch {
-      return;
-    }
+    } catch { return; }
+
     if (data.status === 'done') {
       clearInterval(interval);
-      statusEl.textContent = 'Готово!';
+      setStatus('', false, false);
+      showStats(data.stats);
       downloadEl.href = `/api/jobs/${jobId}/download`;
       downloadEl.style.display = 'block';
+      btnAgain.style.display = 'block';
       btn.disabled = false;
     } else if (data.status === 'error') {
       clearInterval(interval);
-      statusEl.textContent = `Ошибка: ${data.error || 'неизвестная'}`;
-      statusEl.className = 'err';
+      setStatus(data.error || 'Неизвестная ошибка', false, true);
+      btnAgain.style.display = 'block';
       btn.disabled = false;
     }
   }, 2000);
 }
+
+function showStats(s) {
+  if (!s) return;
+  const rows = [
+    { k: 'Переименовано файлов', v: s.renamed_assets,  cls: '' },
+    { k: 'Исправлено ссылок',   v: s.fixed_links,      cls: '' },
+    { k: 'Загружено с CDN',     v: s.downloaded,       cls: '' },
+    { k: 'Форм подключено',     v: s.forms_hooked,     cls: '' },
+    { k: 'Предупреждений',      v: s.warnings,         cls: s.warnings  > 0 ? 'warn' : '' },
+    { k: 'Ошибок',              v: s.errors,           cls: s.errors    > 0 ? 'bad'  : '' },
+  ];
+  statsGrid.innerHTML = rows.map(r => `
+    <div class="stat-row ${r.cls}">
+      <span class="k">${r.k}</span>
+      <span class="v">${r.v}</span>
+    </div>`).join('');
+  if (s.exec_time) {
+    statTime.textContent = `Время обработки: ${s.exec_time} сек`;
+  }
+  statsBlock.style.display = 'block';
+}
+
+btnAgain.addEventListener('click', () => {
+  form.reset();
+  statsBlock.style.display = 'none';
+  downloadEl.style.display = 'none';
+  btnAgain.style.display = 'none';
+  setStatus('', false, false);
+});
 </script>
 </body>
 </html>

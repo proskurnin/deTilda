@@ -26,6 +26,7 @@ class Job:
     finished_at: Optional[datetime] = None
     result_path: Optional[Path] = None
     error: Optional[str] = None
+    stats: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -34,6 +35,7 @@ class Job:
             "created_at": self.created_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "error": self.error,
+            "stats": self.stats,
         }
 
     def _to_persist_dict(self) -> dict:
@@ -50,6 +52,7 @@ class Job:
             finished_at=datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None,
             result_path=Path(data["result_path"]) if data.get("result_path") else None,
             error=data.get("error"),
+            stats=data.get("stats"),
         )
 
 
