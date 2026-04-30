@@ -20,6 +20,9 @@
   /* Status line */
   #status { margin-top: 1rem; font-size: .9rem; color: #374151; min-height: 1.4rem; display: flex; align-items: center; gap: .4rem; }
   #status.err { color: #dc2626; }
+  .err-box { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: .75rem 1rem; margin-top: 1rem; }
+  .err-box .err-msg { color: #dc2626; font-size: .9rem; font-weight: 500; }
+  .err-box .err-hint { color: #6b7280; font-size: .82rem; margin-top: .3rem; }
   .spinner { width: 14px; height: 14px; border: 2px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -49,6 +52,10 @@
   </form>
 
   <div id="status"></div>
+  <div id="err-box" class="err-box" style="display:none">
+    <div id="err-msg" class="err-msg"></div>
+    <div id="err-hint" class="err-hint"></div>
+  </div>
 
   <div id="stats-block">
     <div class="stats-title">Результат обработки</div>
@@ -69,6 +76,9 @@ const btnAgain  = document.getElementById('btn-again');
 const statsBlock = document.getElementById('stats-block');
 const statsGrid  = document.getElementById('stats-grid');
 const statTime   = document.getElementById('stat-time');
+const errBox    = document.getElementById('err-box');
+const errMsg    = document.getElementById('err-msg');
+const errHint   = document.getElementById('err-hint');
 
 function setStatus(text, spinning, isErr) {
   statusEl.className = isErr ? 'err' : '';
@@ -83,6 +93,7 @@ form.addEventListener('submit', async e => {
   downloadEl.style.display = 'none';
   btnAgain.style.display = 'none';
   statsBlock.style.display = 'none';
+  errBox.style.display = 'none';
   setStatus('Загрузка файла…', true, false);
 
   const fd = new FormData(form);
@@ -125,11 +136,25 @@ async function poll(jobId) {
       btn.disabled = false;
     } else if (data.status === 'error') {
       clearInterval(interval);
-      setStatus(data.error || 'Неизвестная ошибка', false, true);
+      showError(data.error, data.error_code);
       btnAgain.style.display = 'block';
       btn.disabled = false;
     }
   }, 2000);
+}
+
+const ERROR_HINTS = {
+  invalid_zip:    'Скачайте архив заново через Tilda: Настройки сайта → Экспорт → Скачать.',
+  empty_archive:  'Убедитесь что экспортировали полный сайт, а не отдельную страницу.',
+  unpack_failed:  'Проверьте что загружен ZIP-экспорт Tilda, а не другой архив.',
+  pipeline_error: 'Попробуйте загрузить архив снова. Если ошибка повторяется — обратитесь в поддержку.',
+  unknown:        'Попробуйте позже или обратитесь в поддержку.',
+};
+
+function showError(msg, code) {
+  errMsg.textContent  = msg || 'Произошла ошибка при обработке.';
+  errHint.textContent = ERROR_HINTS[code] || ERROR_HINTS.unknown;
+  errBox.style.display = 'block';
 }
 
 function showStats(s) {
@@ -156,6 +181,7 @@ function showStats(s) {
 btnAgain.addEventListener('click', () => {
   form.reset();
   statsBlock.style.display = 'none';
+  errBox.style.display = 'none';
   downloadEl.style.display = 'none';
   btnAgain.style.display = 'none';
   setStatus('', false, false);

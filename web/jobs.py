@@ -25,7 +25,9 @@ class Job:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: Optional[datetime] = None
     result_path: Optional[Path] = None
-    error: Optional[str] = None
+    error: Optional[str] = None        # user-friendly message
+    error_code: Optional[str] = None   # machine-readable key
+    error_detail: Optional[str] = None # raw exception (admin only)
     stats: Optional[dict] = None
 
     def to_dict(self) -> dict:
@@ -35,11 +37,17 @@ class Job:
             "created_at": self.created_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "error": self.error,
+            "error_code": self.error_code,
             "stats": self.stats,
         }
 
-    def _to_persist_dict(self) -> dict:
+    def to_admin_dict(self) -> dict:
         d = self.to_dict()
+        d["error_detail"] = self.error_detail
+        return d
+
+    def _to_persist_dict(self) -> dict:
+        d = self.to_admin_dict()
         d["result_path"] = str(self.result_path) if self.result_path else None
         return d
 
@@ -52,6 +60,8 @@ class Job:
             finished_at=datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None,
             result_path=Path(data["result_path"]) if data.get("result_path") else None,
             error=data.get("error"),
+            error_code=data.get("error_code"),
+            error_detail=data.get("error_detail"),
             stats=data.get("stats"),
         )
 

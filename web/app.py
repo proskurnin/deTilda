@@ -248,7 +248,7 @@ async def admin_panel(creds: AdminAuth) -> str:
 
 @app.get("/admin/api/jobs")
 async def admin_list_jobs(_: AdminAuth) -> list:
-    return [j.to_dict() for j in _STORE.list_all()]
+    return [j.to_admin_dict() for j in _STORE.list_all()]
 
 
 @app.get("/admin/api/stats")

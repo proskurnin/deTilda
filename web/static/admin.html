@@ -169,8 +169,8 @@ async function loadJobs() {
       <td><span class="status ${statusClass(j.status)}">${statusLabel(j.status)}</span></td>
       <td>${fmt(j.created_at)}</td>
       <td>${fmt(j.finished_at)}</td>
-      <td>${j.error
-        ? `<span class="err-text">${j.error}</span>`
+      <td>${j.status === 'error'
+        ? `<span class="err-text" title="${(j.error_detail||'').replace(/"/g,'&quot;')}">${j.error || '—'}</span>`
         : j.status === 'done'
           ? `<a href="/api/jobs/${j.id}/download" style="color:#2563eb;font-size:.8rem">скачать</a>`
           : '—'}</td>
