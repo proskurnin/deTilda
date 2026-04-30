@@ -24,7 +24,6 @@ from core import (
     script_cleaner,
 )
 from core.project import ProjectContext
-from core.htaccess import get_missing_routes
 from core.version import APP_VERSION
 
 
@@ -156,7 +155,8 @@ class DetildaPipeline:
 
             with logger.module_scope("checker"):
                 link_check = checker.check_links(context.project_root, context.config_loader)
-            stats.broken_htaccess_routes = self._count_unresolved_htaccess_routes()
+            htaccess_missing = link_check.htaccess_result.missing_routes if link_check.htaccess_result else []
+            stats.broken_htaccess_routes = sum(1 for r in htaccess_missing if r.action == "unresolved")
             stats.broken_links += link_check.broken
             stats.warnings += link_check.broken
             stats.warnings += stats.broken_htaccess_routes
@@ -184,7 +184,7 @@ class DetildaPipeline:
                     forms_found=stats.forms_found,
                     forms_hooked=stats.forms_hooked,
                     tilda_remnants=remnants.total_occurrences,
-                    missing_htaccess_routes=get_missing_routes(),
+                    missing_htaccess_routes=htaccess_missing,
                     exec_time=stats.exec_time,
                 )
 
@@ -257,6 +257,3 @@ class DetildaPipeline:
             return "завершено с предупреждениями"
         return "завершено успешно"
 
-    @staticmethod
-    def _count_unresolved_htaccess_routes() -> int:
-        return sum(1 for item in get_missing_routes() if item.action == "unresolved")

@@ -504,7 +504,7 @@ def update_all_refs_in_project(
     replace_patterns = images_cfg.replace_links_with_1px.patterns
     comment_patterns = images_cfg.comment_out_links.patterns
 
-    routes = collect_routes(project_root, loader, stats=stats)
+    routes = collect_routes(project_root, loader, stats=stats).routes
 
     fixed_total = 0
     broken_total = 0

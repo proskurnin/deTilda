@@ -128,7 +128,7 @@ def test_send_email_keeps_template_default_when_recipients_empty(tmp_path: Path)
 
     content = (tmp_path / "send_email.php").read_text(encoding="utf-8")
     # Дефолт из шаблона сохранён
-    assert "r@prororo.com" in content
+    assert "test@example.com" in content
 
 
 def test_send_email_recipients_quotes_are_escaped(tmp_path: Path) -> None:

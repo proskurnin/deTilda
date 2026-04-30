@@ -11,12 +11,9 @@
      - removed: удаляет битый маршрут из .htaccess
      - unresolved: оставляет как есть, логирует ошибку
 
-Глобальное состояние:
-  _routes_info, _missing_routes, _missing_route_keys — очищаются в начале
-  каждого вызова collect_routes(), поэтому безопасны при обработке нескольких архивов.
-
-Результат используется в checker.py (get_route_info, get_missing_routes)
+Результат используется в checker.py (HtaccessResult.get_route_info)
 для проверки ссылок и формирования финального отчёта.
+collect_routes() не использует глобальное состояние — безопасна при конкурентных вызовах.
 """
 from __future__ import annotations
 
@@ -30,11 +27,10 @@ from core import logger, utils
 from core.config_loader import ConfigLoader
 
 __all__ = [
+    "HtaccessResult",
     "MissingRouteInfo",
     "RouteInfo",
     "collect_routes",
-    "get_missing_routes",
-    "get_route_info",
 ]
 
 
@@ -55,10 +51,19 @@ class MissingRouteInfo:
     replacement: Optional[str] = None
 
 
-# Глобальный кеш маршрутов — сбрасывается в начале collect_routes()
-_routes_info: Dict[str, RouteInfo] = {}
-_missing_routes: List[MissingRouteInfo] = []
-_missing_route_keys: set[tuple[str, str]] = set()
+@dataclass
+class HtaccessResult:
+    """Результат разбора .htaccess — маршруты и информация о проблемных.
+
+    Возвращается из collect_routes() и содержит всё необходимое для
+    последующих шагов пайплайна без обращения к глобальному состоянию.
+    """
+    routes: Dict[str, str]
+    routes_info: Dict[str, RouteInfo]
+    missing_routes: List[MissingRouteInfo]
+
+    def get_route_info(self, alias: str) -> Optional[RouteInfo]:
+        return self.routes_info.get(_normalize_alias(alias))
 
 
 def _load_patterns(loader: ConfigLoader) -> tuple[re.Pattern[str], re.Pattern[str]]:
@@ -176,6 +181,9 @@ def _store_route(
     target: str,
     project_root: Path,
     routes: Dict[str, str],
+    routes_info: Dict[str, RouteInfo],
+    missing_routes: List[MissingRouteInfo],
+    missing_route_keys: set[tuple[str, str]],
     *,
     soft_fallback_enabled: bool = False,
     fallback_target: str = "404.html",
@@ -199,24 +207,24 @@ def _store_route(
 
     if exists:
         routes[alias] = target
-        _routes_info[alias] = RouteInfo(target=target, exists=True, path=candidate)
+        routes_info[alias] = RouteInfo(target=target, exists=True, path=candidate)
         logger.debug(f"[htaccess] {alias} → {target} (файл есть)")
         return "ok"
 
     route_key = (alias, target)
-    is_new_missing = route_key not in _missing_route_keys
+    is_new_missing = route_key not in missing_route_keys
     if is_new_missing:
-        _missing_route_keys.add(route_key)
+        missing_route_keys.add(route_key)
         logger.err(f"[htaccess] Битый маршрут: {alias} → {target} (файл отсутствует)")
 
     if auto_stub_enabled and _create_route_stub(alias, target, project_root, fallback_target):
         stub_candidate = _resolve_target_path(target, project_root)
         routes[alias] = target
-        _routes_info[alias] = RouteInfo(target=target, exists=True, path=stub_candidate)
+        routes_info[alias] = RouteInfo(target=target, exists=True, path=stub_candidate)
         if is_new_missing:
             _increment_stat(stats, "htaccess_routes_initially_broken")
             _increment_stat(stats, "htaccess_routes_autofixed")
-            _missing_routes.append(
+            missing_routes.append(
                 MissingRouteInfo(alias=alias, target=target, action="stub_created", replacement=target)
             )
         logger.warn(f"[htaccess] Решение: маршрут {alias} направлен на созданную заглушку {target}")
@@ -227,11 +235,11 @@ def _store_route(
         if fallback_candidate and fallback_candidate.exists():
             fixed_target = _fix_missing_htaccess_route(alias, target, fallback_target)
             routes[alias] = fixed_target
-            _routes_info[alias] = RouteInfo(target=fixed_target, exists=True, path=fallback_candidate)
+            routes_info[alias] = RouteInfo(target=fixed_target, exists=True, path=fallback_candidate)
             if is_new_missing:
                 _increment_stat(stats, "htaccess_routes_initially_broken")
                 _increment_stat(stats, "htaccess_routes_autofixed")
-                _missing_routes.append(
+                missing_routes.append(
                     MissingRouteInfo(alias=alias, target=target, action="fallback_redirect", replacement=fixed_target)
                 )
             logger.warn(f"[htaccess] Решение: маршрут {alias} перенаправлен на fallback {fixed_target}")
@@ -239,11 +247,11 @@ def _store_route(
 
     if remove_unresolved_enabled:
         routes.pop(alias, None)
-        _routes_info.pop(alias, None)
+        routes_info.pop(alias, None)
         if is_new_missing:
             _increment_stat(stats, "htaccess_routes_initially_broken")
             # Не инкрементируем htaccess_routes_autofixed — удаление ≠ исправление
-            _missing_routes.append(
+            missing_routes.append(
                 MissingRouteInfo(alias=alias, target=target, action="removed", replacement=None)
             )
             _increment_stat(stats, "warnings")
@@ -252,10 +260,10 @@ def _store_route(
 
     # Ни одна стратегия не сработала — оставляем маршрут, но помечаем как нерешённый
     routes[alias] = target
-    _routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
+    routes_info[alias] = RouteInfo(target=target, exists=False, path=candidate if candidate else None)
     if is_new_missing:
         _increment_stat(stats, "htaccess_routes_initially_broken")
-        _missing_routes.append(
+        missing_routes.append(
             MissingRouteInfo(alias=alias, target=target, action="unresolved", replacement=None)
         )
         _increment_stat(stats, "broken_htaccess_routes")
@@ -289,16 +297,16 @@ def collect_routes(
     project_root: Path,
     loader: ConfigLoader,
     stats: Any | None = None,
-) -> Dict[str, str]:
+) -> HtaccessResult:
     """Основная функция: читает .htaccess, строит таблицу маршрутов, исправляет битые.
 
-    Сбрасывает глобальный кеш перед началом — безопасно при обработке нескольких архивов.
-    Возвращает dict {alias: target} для всех валидных маршрутов.
+    Возвращает HtaccessResult с маршрутами и информацией о проблемных.
+    Не использует глобальное состояние — безопасна при конкурентных вызовах.
     """
     routes: Dict[str, str] = {}
-    _routes_info.clear()
-    _missing_routes.clear()
-    _missing_route_keys.clear()
+    routes_info: Dict[str, RouteInfo] = {}
+    missing_routes: List[MissingRouteInfo] = []
+    missing_route_keys: set[tuple[str, str]] = set()
 
     rewrite_re, redirect_re = _load_patterns(loader)
     htaccess_cfg = loader.patterns().htaccess_patterns
@@ -327,6 +335,7 @@ def collect_routes(
                 alias, target = extracted
                 action = _store_route(
                     alias, target, project_root, routes,
+                    routes_info, missing_routes, missing_route_keys,
                     soft_fallback_enabled=soft_fallback_enabled,
                     fallback_target=fallback_target,
                     auto_stub_enabled=auto_stub_enabled,
@@ -346,6 +355,7 @@ def collect_routes(
             target = index_match.group(1)
             action = _store_route(
                 "/", target, project_root, routes,
+                routes_info, missing_routes, missing_route_keys,
                 soft_fallback_enabled=soft_fallback_enabled,
                 fallback_target=fallback_target,
                 auto_stub_enabled=auto_stub_enabled,
@@ -372,20 +382,4 @@ def collect_routes(
         logger.info(f"🔗 Обнаружено маршрутов из htaccess: {len(routes)}")
     else:
         logger.warn("⚠️ В htaccess не найдено маршрутов.")
-    return routes
-
-
-def get_route_info(alias: str) -> Optional[RouteInfo]:
-    """Возвращает информацию о маршруте по alias.
-
-    Используется в checker.py при проверке ссылок из HTML.
-    """
-    return _routes_info.get(_normalize_alias(alias))
-
-
-def get_missing_routes() -> list[MissingRouteInfo]:
-    """Возвращает список битых маршрутов из последнего вызова collect_routes().
-
-    Используется в pipeline.py для финального отчёта.
-    """
-    return list(_missing_routes)
+    return HtaccessResult(routes=routes, routes_info=routes_info, missing_routes=missing_routes)

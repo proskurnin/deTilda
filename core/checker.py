@@ -28,7 +28,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from core import logger, utils
 from core.config_loader import ConfigLoader
 from core.downloader import download_to_project
-from core.htaccess import collect_routes, get_route_info
+from core.htaccess import HtaccessResult, collect_routes
 
 __all__ = [
     "FormIntegrationResult",
@@ -44,6 +44,7 @@ __all__ = [
 class LinkCheckerResult:
     checked: int = 0
     broken: int = 0
+    htaccess_result: HtaccessResult | None = None
 
 
 @dataclass
@@ -145,8 +146,8 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     ignore_prefixes = tuple(patterns_cfg.ignore_prefixes)
     link_patterns = patterns_cfg.links
 
-    result = LinkCheckerResult()
-    collect_routes(project_root, loader)
+    htaccess_result = collect_routes(project_root, loader)
+    result = LinkCheckerResult(htaccess_result=htaccess_result)
 
     for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:
@@ -167,7 +168,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                 continue
 
             if link.startswith("/"):
-                route_info = get_route_info(link_path or normalized_link)
+                route_info = htaccess_result.get_route_info(link_path or normalized_link)
                 if route_info and route_info.exists and route_info.path is not None:
                     candidate = route_info.path
                 else:
