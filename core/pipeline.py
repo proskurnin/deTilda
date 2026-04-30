@@ -52,6 +52,7 @@ class PipelineStats:
     images_background_fixed: int = 0
     images_unresolved: int = 0
     exec_time: float = 0.0
+    project_root: Path | None = None  # путь к обработанной папке — для упаковки в ZIP
 
 
 class DetildaPipeline:
@@ -84,7 +85,7 @@ class DetildaPipeline:
             logger.info(f"Рабочая папка: {archive_path.parent.resolve()}")
             logger.info(f"Дата запуска: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            stats = PipelineStats()
+            stats = PipelineStats(project_root=context.project_root)
             htaccess_missing: list = []
             remnants_count: int = 0
             remnants_filenames_count: int = 0
