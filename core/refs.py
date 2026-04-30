@@ -104,6 +104,16 @@ def _to_relative_url(
     return posixpath.relpath(target_clean, current_dir)
 
 
+def _safe_compile_logged(pattern: str, log_prefix: str) -> bool:
+    """Возвращает True если паттерн валиден, иначе логирует и возвращает False."""
+    try:
+        re.compile(pattern)
+        return True
+    except re.error as exc:
+        logger.warn(f"{log_prefix}: {pattern!r} — {exc}")
+        return False
+
+
 def _compile_replace_rules(rules: Iterable[object]) -> list[tuple[re.Pattern[str], str]]:
     """Компилирует ReplaceRule объекты в пары (pattern, replacement) для subn."""
     compiled: list[tuple[re.Pattern[str], str]] = []
@@ -132,6 +142,12 @@ def _apply_replace_rules(text: str, rules: Iterable[tuple[re.Pattern[str], str]]
 
 _JS_WINDOW_TILDA_RE = re.compile(r"\bwindow\.Tilda\b")
 _JS_TILDA_NAMESPACE_RE = re.compile(r"\bTilda(?=\.)")
+
+# Главный паттерн для attr=URL в HTML — неизменный, компилируем один раз.
+_HTML_LINK_RE = re.compile(
+    r'(?P<attr>href|src|data-src|data-href|action)\s*=\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
+    re.IGNORECASE,
+)
 
 # Контексты, после которых `/` начинает regex-литерал, а не деление.
 # Минифицированный JS активно использует regex (`replace(/"/g,"")`,
@@ -326,9 +342,9 @@ def _update_links_in_html(
     project_root: Path,
     current_path: Path,
     ignore_prefixes: Iterable[str],
-    link_rel_values: Iterable[str],
-    replace_patterns: Iterable[str],
-    comment_patterns: Iterable[str],
+    link_rel_patterns: Iterable[re.Pattern[str]],
+    replace_patterns: Iterable[re.Pattern[str]],
+    comment_patterns: Iterable[re.Pattern[str]],
 ) -> tuple[str, int, int]:
     """Обновляет все ссылки в HTML-файле.
 
@@ -420,12 +436,7 @@ def _update_links_in_html(
     # ДО того как broken-handler пометит их как битые (если файл уже удалён).
 
     # Заменяем ссылки на логотипы Tilda на прозрачный 1px.png
-    for pattern_str in replace_patterns:
-        try:
-            replace_re = re.compile(pattern_str, re.IGNORECASE)
-        except re.error:
-            logger.warn(f"[refs] Некорректный паттерн замены: {pattern_str}")
-            continue
+    for replace_re in replace_patterns:
         new_text, count = replace_re.subn("images/1px.png", text)
         if count:
             fixed += count
@@ -440,20 +451,11 @@ def _update_links_in_html(
         fixed += 1
         return f"<!-- {snippet} -->"
 
-    for pattern_str in comment_patterns:
-        try:
-            comment_re = re.compile(pattern_str, re.IGNORECASE)
-        except re.error:
-            logger.warn(f"[refs] Некорректный паттерн комментирования: {pattern_str}")
-            continue
+    for comment_re in comment_patterns:
         text = comment_re.sub(_comment_replacer, text)
 
     # Главный цикл: обновление и проверка ссылок (rename_map, маршруты, broken-handling)
-    pattern = re.compile(
-        r'(?P<attr>href|src|data-src|data-href|action)\s*=\s*(?P<quote>["\'])?(?P<link>[^"\'>]+)(?P=quote)',
-        re.IGNORECASE,
-    )
-    text = pattern.sub(repl, text)
+    text = _HTML_LINK_RE.sub(repl, text)
 
     # Комментируем <link rel="icon"> и <link rel="apple-touch-icon"> — иконки Tilda
     def _link_replacer(match: re.Match[str]) -> str:
@@ -464,12 +466,8 @@ def _update_links_in_html(
         fixed += 1
         return f"<!-- {tag} -->"
 
-    for rel_value in link_rel_values:
-        link_pattern = re.compile(
-            rf"(<link[^>]+rel=\"{re.escape(rel_value)}\"[^>]*>)",
-            re.IGNORECASE,
-        )
-        text = link_pattern.sub(_link_replacer, text)
+    for link_re in link_rel_patterns:
+        text = link_re.sub(_link_replacer, text)
 
     text = _cleanup_broken_markup(text)
     return text, fixed, broken
@@ -500,9 +498,20 @@ def update_all_refs_in_project(
     replace_rules = _compile_replace_rules(patterns_cfg.replace_rules)
 
     images_cfg = loader.images()
-    link_rel_values = images_cfg.comment_out_link_tags.rel_values
-    replace_patterns = images_cfg.replace_links_with_1px.patterns
-    comment_patterns = images_cfg.comment_out_links.patterns
+    replace_patterns = [
+        re.compile(p, re.IGNORECASE)
+        for p in images_cfg.replace_links_with_1px.patterns
+        if _safe_compile_logged(p, "[refs] Некорректный паттерн замены")
+    ]
+    comment_patterns = [
+        re.compile(p, re.IGNORECASE)
+        for p in images_cfg.comment_out_links.patterns
+        if _safe_compile_logged(p, "[refs] Некорректный паттерн комментирования")
+    ]
+    link_rel_patterns = [
+        re.compile(rf"(<link[^>]+rel=\"{re.escape(rv)}\"[^>]*>)", re.IGNORECASE)
+        for rv in images_cfg.comment_out_link_tags.rel_values
+    ]
 
     routes = collect_routes(project_root, loader, stats=stats).routes
 
@@ -530,7 +539,7 @@ def update_all_refs_in_project(
                 project_root,
                 path,
                 ignore_prefixes,
-                link_rel_values,
+                link_rel_patterns,
                 replace_patterns,
                 comment_patterns,
             )

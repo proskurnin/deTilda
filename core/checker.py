@@ -60,14 +60,20 @@ class FormIntegrationResult:
     warnings: int = 0  # 1 если есть непривязанные формы, иначе 0
 
 
-def _iter_links(text: str, patterns: Iterable[str]) -> Iterable[str]:
-    """Извлекает ссылки из текста по list regex-паттернов из config.yaml."""
+def _compile_link_patterns(patterns: Iterable[str]) -> list[re.Pattern[str]]:
+    """Компилирует паттерны из config.yaml для повторного использования."""
+    result = []
     for pattern in patterns:
         try:
-            regex = re.compile(pattern)
+            result.append(re.compile(pattern))
         except re.error:
             logger.warn(f"[checker] Некорректный паттерн: {pattern}")
-            continue
+    return result
+
+
+def _iter_links(text: str, compiled: Iterable[re.Pattern[str]]) -> Iterable[str]:
+    """Извлекает ссылки из текста по скомпилированным паттернам."""
+    for regex in compiled:
         for match in regex.finditer(text):
             link = match.groupdict().get("link")
             if link:
@@ -144,7 +150,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     ignore_prefixes = tuple(patterns_cfg.ignore_prefixes)
-    link_patterns = patterns_cfg.links
+    compiled_link_patterns = _compile_link_patterns(patterns_cfg.links)
 
     htaccess_result = collect_routes(project_root, loader)
     result = LinkCheckerResult(htaccess_result=htaccess_result)
@@ -156,7 +162,7 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
             continue
         base_directory = _get_effective_base_directory(file_path, project_root)
 
-        for link in _iter_links(text, link_patterns):
+        for link in _iter_links(text, compiled_link_patterns):
             normalized_link = _strip_cache_busting_param(link)
             if not normalized_link:
                 continue
@@ -216,7 +222,7 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
     project_root = Path(project_root)
     patterns_cfg = loader.patterns()
     service_cfg = loader.service_files()
-    link_patterns = patterns_cfg.links
+    compiled_link_patterns = _compile_link_patterns(patterns_cfg.links)
     replace_rules = patterns_cfg.replace_rules
     download_rules = [
         {"folder": r.folder, "extensions": list(r.extensions)}
@@ -235,7 +241,7 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
         original = text
         file_hits = 0
 
-        for link in _iter_links(original, link_patterns):
+        for link in _iter_links(original, compiled_link_patterns):
             if "tilda" not in link.lower():
                 continue
 
