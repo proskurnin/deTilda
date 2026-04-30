@@ -381,6 +381,96 @@ def _apply_case_normalization(
             )
 
 
+def _ensure_1px_placeholder(project_root: Path) -> None:
+    """Создаёт прозрачный 1px PNG если его ещё нет.
+
+    Используется как замена для логотипов Tilda в HTML (refs.py replace_links_with_1px).
+    """
+    placeholder = project_root / "images" / "1px.png"
+    if not placeholder.exists():
+        placeholder.parent.mkdir(parents=True, exist_ok=True)
+        placeholder.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
+            b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
+
+
+def _copy_resource_files(
+    resource_rules: list[ResourceCopyRule],
+    project_root: Path,
+    rename_map: Dict[str, str],
+) -> None:
+    """Копирует ресурсные файлы (favicon.ico, ga.js) из resources/ в проект.
+
+    Пропускает файлы с if_missing=True если они уже существуют в проекте
+    (например, пользовательский favicon.ico из архива Tilda).
+    """
+    for rule in resource_rules:
+        destination_path = project_root / rule.destination
+        try:
+            if not rule.source.exists():
+                logger.warn(f"[assets] Ресурс для копирования не найден: {rule.source}")  # pragma: no cover
+            elif rule.if_missing and destination_path.exists():
+                logger.info(
+                    f"⏭ Ресурс {rule.destination} уже существует — пропускаем копирование"
+                )
+            else:
+                utils.safe_copy(rule.source, destination_path)
+        except Exception as exc:
+            logger.err(f"[assets] Ошибка копирования {rule.source} → {destination_path}: {exc}")
+        for original in rule.originals:
+            rename_map.setdefault(original, rule.destination)
+
+
+def _save_rename_map(
+    rename_map: Dict[str, str],
+    mapping_cfg: object,
+    project_root: Path,
+) -> None:
+    """Сохраняет таблицу переименований в JSON-файл.
+
+    Путь и имя файла берутся из service_files.rename_map_output в config.yaml.
+    Удаляет устаревшие rename_map.json из предыдущих версий.
+    """
+    project_name = logger.get_project_name()
+    try:
+        mapping_name = mapping_cfg.filename.format(project=project_name)  # type: ignore[union-attr]
+    except Exception:
+        mapping_name = getattr(mapping_cfg, "filename", None) or f"{project_name}_rename_map.json"
+
+    if mapping_name == "rename_map.json":
+        mapping_name = f"{project_name}_rename_map.json"
+
+    location = getattr(mapping_cfg, "location", "logs")
+    if location.lower() == "logs":
+        mapping_dir = logger.get_logs_dir()
+    else:
+        mapping_dir = project_root / location
+    mapping_path = mapping_dir / mapping_name
+
+    legacy_candidates = [project_root / "rename_map.json", mapping_dir / "rename_map.json"]
+    for legacy_mapping in legacy_candidates:
+        if legacy_mapping.exists():
+            try:
+                legacy_mapping.unlink()
+            except Exception as exc:
+                logger.warn(f"[assets] Не удалось удалить устаревший rename_map.json: {exc}")
+
+    try:
+        utils.safe_write(
+            mapping_path,
+            json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
+        )
+        relative_mapping = utils.relpath(mapping_path, logger.get_logs_dir())
+        logger.ok(
+            f"💾 Таблица маппинга сохранена: {relative_mapping} ({len(rename_map)} элементов)"
+        )
+    except Exception as exc:
+        logger.err(f"[assets] Ошибка сохранения {mapping_path.name}: {exc}")
+
+
 def rename_and_cleanup_assets(
     project_root: Path | "ProjectContext",
     loader: ConfigLoader | None = None,
@@ -565,75 +655,13 @@ def rename_and_cleanup_assets(
             except Exception as exc:
                 logger.err(f"[assets] Ошибка удаления {path}: {exc}")
 
-    # Создаём прозрачный 1px PNG — используется как замена для логотипов Tilda в HTML
-    placeholder = project_root / "images" / "1px.png"
-    if not placeholder.exists():
-        placeholder.parent.mkdir(parents=True, exist_ok=True)
-        placeholder.write_bytes(
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
-            b"\x00\x02\x00\x01\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
-        )
-        logger.info(f"🧩 Добавлен placeholder: {utils.relpath(placeholder, project_root)}")
-
-    mapping_cfg = service_cfg.rename_map_output
-    project_name = logger.get_project_name()
-    try:
-        mapping_name = mapping_cfg.filename.format(project=project_name)
-    except Exception:
-        mapping_name = mapping_cfg.filename or f"{project_name}_rename_map.json"
-
-    if mapping_name == "rename_map.json":
-        mapping_name = f"{project_name}_rename_map.json"
-    if mapping_cfg.location.lower() == "logs":
-        mapping_dir = logger.get_logs_dir()
-    else:
-        mapping_dir = project_root / mapping_cfg.location
-    mapping_path = mapping_dir / mapping_name
-
-    legacy_candidates = [project_root / "rename_map.json", mapping_dir / "rename_map.json"]
-    for legacy_mapping in legacy_candidates:
-        if legacy_mapping.exists():
-            try:
-                legacy_mapping.unlink()
-            except Exception as exc:
-                logger.warn(
-                    f"[assets] Не удалось удалить устаревший rename_map.json: {exc}"
-                )
+    _ensure_1px_placeholder(project_root)
 
     _apply_case_normalization(project_root, rename_map, stats, patterns_cfg, service_cfg)
 
-    for rule in resource_rules:
-        destination_path = project_root / rule.destination
-        try:
-            if not rule.source.exists():
-                logger.warn(
-                    f"[assets] Ресурс для копирования не найден: {rule.source}"  # pragma: no cover
-                )
-            elif rule.if_missing and destination_path.exists():
-                # Пользовательский файл уже в проекте (например, корневой
-                # /favicon.ico из Tilda) — наш дефолт не перетираем.
-                logger.info(
-                    f"⏭ Ресурс {rule.destination} уже существует — пропускаем копирование"
-                )
-            else:
-                utils.safe_copy(rule.source, destination_path)
-        except Exception as exc:
-            logger.err(f"[assets] Ошибка копирования {rule.source} → {destination_path}: {exc}")
-        for original in rule.originals:
-            rename_map.setdefault(original, rule.destination)
+    _copy_resource_files(resource_rules, project_root, rename_map)
 
-    try:
-        utils.safe_write(
-            mapping_path,
-            json.dumps(rename_map, ensure_ascii=False, indent=2, sort_keys=True),
-        )
-        relative_mapping = utils.relpath(mapping_path, logger.get_logs_dir())
-        logger.ok(
-            f"💾 Таблица маппинга сохранена: {relative_mapping} ({len(rename_map)} элементов)"
-        )
-    except Exception as exc:
-        logger.err(f"[assets] Ошибка сохранения {mapping_path.name}: {exc}")
+    _save_rename_map(rename_map, service_cfg.rename_map_output, project_root)
 
     logger.info(
         f"📦 Ассеты обработаны: переименовано {stats.renamed}, удалено {stats.removed}"

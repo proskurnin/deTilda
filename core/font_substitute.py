@@ -24,18 +24,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from core import logger, utils
 
 __all__ = ["substitute_tilda_fonts"]
-
-
-# Целевой Google Font — геометрический sans с кириллицей, ближе всего к Tilda Sans
-GOOGLE_FONT_FAMILY = "Manrope"
-GOOGLE_FONT_IMPORT = (
-    "@import url('https://fonts.googleapis.com/css2?"
-    "family=Manrope:wght@200;300;400;500;600;700;800&display=swap');\n"
-)
 
 # Файл-bundle Tilda для шрифтов: fonts-tildasans.css или fonts-aidasans.css
 # (после til→ai в assets.py имя могло измениться)
@@ -58,12 +51,26 @@ _FONT_FAMILY_TOKEN_RE = re.compile(
 )
 
 
-def substitute_tilda_fonts(project_root: Path) -> int:
-    """Заменяет ссылки на Tilda Sans на Google Manrope.
+def substitute_tilda_fonts(project_root: Path | Any, loader: Any = None) -> int:
+    """Заменяет ссылки на Tilda Sans на шрифт из конфига (по умолчанию Manrope).
 
     Возвращает количество модифицированных файлов.
     """
+    from core.config_loader import ConfigLoader
+
+    if hasattr(project_root, "project_root"):
+        loader = project_root.config_loader
+        project_root = project_root.project_root
+
     project_root = Path(project_root)
+
+    if loader is None:
+        loader = ConfigLoader(project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent)
+
+    font_cfg = loader.font_substitute()
+    google_font_family = font_cfg.family
+    google_font_import = font_cfg.import_url
+
     css_files = list(utils.list_files_recursive(project_root, extensions=(".css",)))
     text_files = list(
         utils.list_files_recursive(
@@ -75,15 +82,15 @@ def substitute_tilda_fonts(project_root: Path) -> int:
     blocks_removed = 0
     has_dedicated = False
 
-    # Шаг 1: выделенный fonts-*sans*.css → полностью @import Manrope
+    # Шаг 1: выделенный fonts-*sans*.css → полностью @import из конфига
     for css in css_files:
         if not _DEDICATED_FONT_CSS_RE.match(css.name):
             continue
-        utils.safe_write(css, GOOGLE_FONT_IMPORT)
+        utils.safe_write(css, google_font_import)
         files_modified += 1
         has_dedicated = True
         logger.info(
-            f"🔤 {utils.relpath(css, project_root)} → @import {GOOGLE_FONT_FAMILY}"
+            f"🔤 {utils.relpath(css, project_root)} → @import {google_font_family}"
         )
 
     # Шаг 2: стихийные @font-face блоки в остальных CSS — удаляем.
@@ -103,14 +110,14 @@ def substitute_tilda_fonts(project_root: Path) -> int:
             continue
 
         if not has_dedicated and blocks_removed == 0:
-            new_text = GOOGLE_FONT_IMPORT + new_text
+            new_text = google_font_import + new_text
             has_dedicated = True  # отмечаем, чтобы не добавлять второй раз
         blocks_removed += removed_n
         utils.safe_write(css, new_text)
         files_modified += 1
 
-    # Шаг 3: все текстовые файлы — заменяем токен 'TildaSans'/'AidaSans' → 'Manrope'
-    replacement = f"'{GOOGLE_FONT_FAMILY}'"
+    # Шаг 3: все текстовые файлы — заменяем токен 'TildaSans'/'AidaSans' → значение из конфига
+    replacement = f"'{google_font_family}'"
     for path in text_files:
         try:
             text = utils.safe_read(path)
@@ -125,7 +132,7 @@ def substitute_tilda_fonts(project_root: Path) -> int:
 
     if files_modified:
         logger.info(
-            f"[font_substitute] Tilda Sans → {GOOGLE_FONT_FAMILY}: "
+            f"[font_substitute] Tilda Sans → {google_font_family}: "
             f"модифицировано {files_modified} файлов, "
             f"удалено @font-face: {blocks_removed}"
         )

@@ -289,6 +289,17 @@ class ServiceFilesConfig(BaseModel):
 # Секция forms
 # ---------------------------------------------------------------------------
 
+class FontSubstituteConfig(BaseModel):
+    """Секция font_substitute из config.yaml — настройки замены Tilda Sans."""
+    family: str = Field(default="Manrope")
+    import_url: str = Field(
+        default=(
+            "@import url('https://fonts.googleapis.com/css2?"
+            "family=Manrope:wght@200;300;400;500;600;700;800&display=swap');\n"
+        )
+    )
+
+
 class FormsConfig(BaseModel):
     """Секция forms из config.yaml — настройки send_email.php и smoke-теста.
 
@@ -312,3 +323,4 @@ class AppConfig(BaseModel):
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     service_files: ServiceFilesConfig = Field(default_factory=ServiceFilesConfig)
     forms: FormsConfig = Field(default_factory=FormsConfig)
+    font_substitute: FontSubstituteConfig = Field(default_factory=FontSubstituteConfig)

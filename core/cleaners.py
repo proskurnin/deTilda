@@ -123,10 +123,14 @@ def clean_text_files(project_root: Path, loader: ConfigLoader) -> CleanStats:
     files_to_clean = service_cfg.cleaner_options.files_to_clean_tilda_refs
     stats = CleanStats()
 
+    # Привязка имени файла к наборам правил — расширять здесь при добавлении новых файлов.
+    file_rules: dict[str, tuple[list, list]] = {
+        "robots.txt": (robots_patterns, []),
+        "readme.txt": ([], readme_substitutions),
+    }
+
     for path in _iter_targets(project_root, files_to_clean):
-        # Каждый файл получает свой набор правил в зависимости от имени
-        remove_list = robots_patterns if path.name.lower() == "robots.txt" else []
-        substitutions = readme_substitutions if path.name.lower() == "readme.txt" else []
+        remove_list, substitutions = file_rules.get(path.name.lower(), ([], []))
         if _clean_file(project_root, path, remove_list, substitutions, generic_patterns):
             stats.updated += 1
 

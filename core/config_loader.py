@@ -23,6 +23,7 @@ from core.pydantic_compat import ValidationError
 from core import logger
 from core.schemas import (
     AppConfig,
+    FontSubstituteConfig,
     FormsConfig,
     ImagesConfig,
     PatternsConfig,
@@ -139,3 +140,7 @@ class ConfigLoader:
     def forms(self) -> FormsConfig:
         """Секция forms — настройки send_email.php и smoke-теста форм."""
         return self._load().forms
+
+    def font_substitute(self) -> FontSubstituteConfig:
+        """Секция font_substitute — замена Tilda Sans на Google Font."""
+        return self._load().font_substitute

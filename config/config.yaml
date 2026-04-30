@@ -227,6 +227,13 @@ service_files:
       - source: "ga.js"
         destination: "js/ga.js"
 
+font_substitute:
+  # Семейство шрифта для замены TildaSans/AidaSans.
+  # Должен быть доступен в Google Fonts (fonts_localizer скачает его локально).
+  family: "Manrope"
+  # @import-строка которая вставляется в CSS вместо Tilda Sans bundle.
+  import_url: "@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap');\n"
+
 forms:
   # Получатели тестовых писем send_email.php — срабатывает когда в форме
   # поле Name содержит слово "test". Подставляются в const TEST_RECIPIENTS
