@@ -7,5 +7,5 @@ services:
       - .env.staging
     volumes:
       - ./logs:/app/logs
-      - /tmp/detilda_staging:/app/_workdir
+      - /var/lib/detilda/staging/_workdir:/app/_workdir
     restart: unless-stopped
