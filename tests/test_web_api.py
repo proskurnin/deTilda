@@ -140,3 +140,46 @@ def test_download_not_done_returns_409(client: TestClient) -> None:
     # job.status stays PENDING
     r = client.get(f"/api/jobs/{job.id}/download")
     assert r.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Admin panel — auth
+# ---------------------------------------------------------------------------
+
+def test_admin_requires_auth(client: TestClient) -> None:
+    r = client.get("/admin")
+    assert r.status_code == 401
+
+
+def test_admin_rejects_wrong_password(client: TestClient, monkeypatch) -> None:
+    import os
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.get("/admin", auth=("admin", "wrong"))
+    assert r.status_code == 401
+
+
+def test_admin_accepts_correct_credentials(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.get("/admin", auth=("admin", "secret"))
+    assert r.status_code == 200
+    assert "deTilda" in r.text
+
+
+def test_admin_stats_returns_json(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.get("/admin/api/stats", auth=("admin", "secret"))
+    assert r.status_code == 200
+    data = r.json()
+    assert "total_jobs" in data
+    assert "config" in data
+
+
+def test_admin_cleanup_returns_removed_count(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.post("/admin/api/cleanup", auth=("admin", "secret"))
+    assert r.status_code == 200
+    assert "removed" in r.json()

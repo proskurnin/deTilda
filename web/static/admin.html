@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>deTilda — Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f4f4f5; color: #111; }
+  header { background: #1e293b; color: #fff; padding: .75rem 1.5rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.1rem; }
+  header .badge { background: #f59e0b; color: #1e293b; font-size: .7rem; font-weight: 700; padding: .15rem .45rem; border-radius: 4px; letter-spacing: .05em; }
+  main { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin-bottom: 1.5rem; }
+  .stat { background: #fff; border-radius: 10px; padding: 1rem 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+  .stat .val { font-size: 1.8rem; font-weight: 700; }
+  .stat .lbl { font-size: .8rem; color: #6b7280; margin-top: .15rem; }
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07); margin-bottom: 1.25rem; overflow: hidden; }
+  .card-head { padding: .75rem 1.25rem; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
+  .card-head h2 { font-size: .95rem; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th { text-align: left; padding: .55rem 1rem; background: #f8fafc; color: #6b7280; font-weight: 500; border-bottom: 1px solid #e2e8f0; }
+  td { padding: .55rem 1rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .status { display: inline-block; padding: .2rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+  .s-pending  { background: #fef3c7; color: #92400e; }
+  .s-running  { background: #dbeafe; color: #1e40af; }
+  .s-done     { background: #dcfce7; color: #166534; }
+  .s-error    { background: #fee2e2; color: #991b1b; }
+  .mono { font-family: monospace; font-size: .8rem; color: #374151; }
+  .err-text { color: #dc2626; font-size: .8rem; }
+  button { cursor: pointer; border: none; border-radius: 7px; padding: .45rem .9rem; font-size: .85rem; }
+  .btn-cleanup { background: #fee2e2; color: #991b1b; }
+  .btn-cleanup:hover { background: #fecaca; }
+  .btn-refresh { background: #eff6ff; color: #1d4ed8; }
+  .btn-refresh:hover { background: #dbeafe; }
+  #cleanup-msg { font-size: .8rem; color: #166534; margin-left: .5rem; }
+  .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .5rem; padding: 1rem 1.25rem; }
+  .cfg-item { background: #f8fafc; border-radius: 7px; padding: .6rem .9rem; }
+  .cfg-item .k { font-size: .75rem; color: #6b7280; }
+  .cfg-item .v { font-size: 1rem; font-weight: 600; margin-top: .1rem; }
+  #last-refresh { font-size: .75rem; color: #9ca3af; }
+</style>
+</head>
+<body>
+<header>
+  <h1>deTilda Admin</h1>
+  <span class="badge">ADMIN</span>
+  <span id="version" style="font-size:.8rem;opacity:.6"></span>
+  <span style="margin-left:auto" id="last-refresh"></span>
+</header>
+<main>
+  <div class="grid" id="stat-grid">
+    <div class="stat"><div class="val" id="s-total">—</div><div class="lbl">Всего задач</div></div>
+    <div class="stat"><div class="val" id="s-running">—</div><div class="lbl">Выполняется</div></div>
+    <div class="stat"><div class="val" id="s-done">—</div><div class="lbl">Завершено</div></div>
+    <div class="stat"><div class="val" id="s-error">—</div><div class="lbl">С ошибкой</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Конфигурация</h2>
+    </div>
+    <div class="cfg-grid" id="cfg-grid"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Задачи</h2>
+      <div>
+        <button class="btn-cleanup" id="btn-cleanup">Очистить истёкшие</button>
+        <span id="cleanup-msg"></span>
+        <button class="btn-refresh" id="btn-refresh" style="margin-left:.5rem">Обновить</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Статус</th><th>Создана</th><th>Завершена</th><th>Детали</th></tr></thead>
+      <tbody id="jobs-body"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const statusClass = s => ({pending:'s-pending',running:'s-running',done:'s-done',error:'s-error'}[s]||'');
+const statusLabel = s => ({pending:'ожидание',running:'выполняется',done:'готово',error:'ошибка'}[s]||s);
+
+function fmt(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('ru-RU');
+}
+
+async function loadStats() {
+  const r = await fetch('/admin/api/stats');
+  if (!r.ok) return;
+  const d = await r.json();
+  document.getElementById('version').textContent = 'v' + d.version;
+  document.getElementById('s-total').textContent = d.total_jobs;
+  document.getElementById('s-running').textContent = (d.by_status.running||0) + (d.by_status.pending||0);
+  document.getElementById('s-done').textContent = d.by_status.done||0;
+  document.getElementById('s-error').textContent = d.by_status.error||0;
+
+  const cfg = d.config;
+  document.getElementById('cfg-grid').innerHTML = [
+    ['Макс. размер загрузки', cfg.max_upload_size_mb + ' МБ'],
+    ['Одновременных задач', cfg.max_concurrent_jobs],
+    ['TTL задач', cfg.job_ttl_minutes + ' мин'],
+    ['Rate limit', cfg.rate_limit_per_minute + ' req/мин'],
+  ].map(([k,v]) => `<div class="cfg-item"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+
+async function loadJobs() {
+  const r = await fetch('/admin/api/jobs');
+  if (!r.ok) return;
+  const jobs = await r.json();
+  const tbody = document.getElementById('jobs-body');
+  if (!jobs.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет задач</td></tr>';
+    return;
+  }
+  tbody.innerHTML = jobs.map(j => `
+    <tr>
+      <td class="mono">${j.id.slice(0,8)}…</td>
+      <td><span class="status ${statusClass(j.status)}">${statusLabel(j.status)}</span></td>
+      <td>${fmt(j.created_at)}</td>
+      <td>${fmt(j.finished_at)}</td>
+      <td>${j.error ? `<span class="err-text">${j.error}</span>` : (j.status==='done' ? `<a href="/api/jobs/${j.id}/download" style="color:#2563eb;font-size:.8rem">скачать</a>` : '—')}</td>
+    </tr>`).join('');
+}
+
+async function refresh() {
+  await Promise.all([loadStats(), loadJobs()]);
+  document.getElementById('last-refresh').textContent =
+    'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
+}
+
+document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('btn-cleanup').addEventListener('click', async () => {
+  const r = await fetch('/admin/api/cleanup', {method:'POST'});
+  const d = await r.json();
+  const msg = document.getElementById('cleanup-msg');
+  msg.textContent = `Удалено: ${d.removed}`;
+  setTimeout(() => msg.textContent = '', 4000);
+  await refresh();
+});
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

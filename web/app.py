@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import concurrent.futures
+import os
+import secrets
 import shutil
 import tempfile
 import threading
@@ -13,6 +15,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core.config_loader import ConfigLoader
 from core.packer import pack_result
@@ -29,6 +32,23 @@ _WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
 # Per-IP rate limiting state
 _rate_map: dict[str, list[float]] = defaultdict(list)
 _rate_lock = threading.Lock()
+
+# Admin auth
+_http_basic = HTTPBasic()
+
+
+def _admin_auth(credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)]) -> str:
+    expected_user = os.environ.get("ADMIN_USER", "admin")
+    expected_pass = os.environ.get("ADMIN_PASSWORD", "")
+    user_ok = secrets.compare_digest(credentials.username.encode(), expected_user.encode())
+    pass_ok = secrets.compare_digest(credentials.password.encode(), expected_pass.encode())
+    if not expected_pass or not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Неверные учётные данные",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 
 def _rate_limit(request: Request) -> None:
@@ -160,4 +180,50 @@ async def get_config() -> dict:
         "max_upload_size_mb": web_cfg.max_upload_size_mb,
         "allowed_extensions": web_cfg.allowed_extensions,
         "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin panel
+# ---------------------------------------------------------------------------
+
+AdminUser = Annotated[str, Depends(_admin_auth)]
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel(_: AdminUser) -> str:
+    return (Path(__file__).parent / "static" / "admin.html").read_text(encoding="utf-8")
+
+
+@app.get("/admin/api/jobs")
+async def admin_list_jobs(_: AdminUser) -> list:
+    return [j.to_dict() for j in _STORE.list_all()]
+
+
+@app.post("/admin/api/cleanup", status_code=200)
+async def admin_cleanup(_: AdminUser) -> dict:
+    web_cfg = _CONFIG.web()
+    expired_ids = _STORE.expire_old(web_cfg.job_ttl_minutes)
+    for job_id in expired_ids:
+        shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
+    return {"removed": len(expired_ids)}
+
+
+@app.get("/admin/api/stats")
+async def admin_stats(_: AdminUser) -> dict:
+    jobs = _STORE.list_all()
+    web_cfg = _CONFIG.web()
+    counts: dict[str, int] = {}
+    for j in jobs:
+        counts[j.status.value] = counts.get(j.status.value, 0) + 1
+    return {
+        "total_jobs": len(jobs),
+        "by_status": counts,
+        "version": APP_VERSION,
+        "config": {
+            "max_upload_size_mb": web_cfg.max_upload_size_mb,
+            "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
+            "job_ttl_minutes": web_cfg.job_ttl_minutes,
+            "rate_limit_per_minute": web_cfg.rate_limit_per_minute,
+        },
     }
