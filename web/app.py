@@ -1,6 +1,7 @@
 """deTilda web application — FastAPI entry point."""
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import os
 import secrets
@@ -13,14 +14,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core.config_loader import ConfigLoader
 from core.packer import pack_result
+from core.schemas import WebConfig
 from core.version import APP_VERSION
-from web.jobs import Job, JobStatus, JobStore
+from web.jobs import JobStatus, JobStore
 from web.worker import run_job
 
 _CONFIG = ConfigLoader()
@@ -29,15 +31,39 @@ _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 _LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
 _WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
 
-# Per-IP rate limiting state
+# Per-IP rate limiting
 _rate_map: dict[str, list[float]] = defaultdict(list)
 _rate_lock = threading.Lock()
+
+# In-memory config overrides (reset on restart)
+_web_cfg_override: dict = {}
+_web_cfg_lock = threading.Lock()
 
 # Admin auth
 _http_basic = HTTPBasic()
 
+_CFG_INT_FIELDS = frozenset({
+    "max_upload_size_mb", "processing_timeout_sec",
+    "max_concurrent_jobs", "job_ttl_minutes", "rate_limit_per_minute",
+})
 
-def _admin_auth(credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)]) -> str:
+
+def _get_web_cfg() -> WebConfig:
+    base = _CONFIG.web()
+    with _web_cfg_lock:
+        override = dict(_web_cfg_override)
+    if not override:
+        return base
+    fields = ("max_upload_size_mb", "processing_timeout_sec", "allowed_extensions",
+              "max_concurrent_jobs", "job_ttl_minutes", "rate_limit_per_minute")
+    merged = {f: getattr(base, f) for f in fields}
+    merged.update(override)
+    return WebConfig(**merged)
+
+
+def _admin_auth(
+    credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)],
+) -> HTTPBasicCredentials:
     expected_user = os.environ.get("ADMIN_USER", "admin")
     expected_pass = os.environ.get("ADMIN_PASSWORD", "")
     user_ok = secrets.compare_digest(credentials.username.encode(), expected_user.encode())
@@ -48,12 +74,12 @@ def _admin_auth(credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic
             detail="Неверные учётные данные",
             headers={"WWW-Authenticate": "Basic"},
         )
-    return credentials.username
+    return credentials
 
 
 def _rate_limit(request: Request) -> None:
     ip = request.client.host if request.client else "unknown"
-    limit = _CONFIG.web().rate_limit_per_minute
+    limit = _get_web_cfg().rate_limit_per_minute
     now = time.monotonic()
     with _rate_lock:
         timestamps = [t for t in _rate_map[ip] if now - t < 60.0]
@@ -73,7 +99,7 @@ async def lifespan(app: FastAPI):
     def _cleanup_loop() -> None:
         while not stop.wait(timeout=60):
             try:
-                ttl = _CONFIG.web().job_ttl_minutes
+                ttl = _get_web_cfg().job_ttl_minutes
                 expired_ids = _STORE.expire_old(ttl)
                 for job_id in expired_ids:
                     shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
@@ -89,7 +115,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="deTilda", version=APP_VERSION, lifespan=lifespan)
 
 RateLimited = Annotated[None, Depends(_rate_limit)]
+AdminAuth = Annotated[HTTPBasicCredentials, Depends(_admin_auth)]
 
+
+# ---------------------------------------------------------------------------
+# Public endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
@@ -107,7 +138,7 @@ async def create_job(
     file: UploadFile = File(...),
     email: str = Form(default=""),
 ) -> dict:
-    web_cfg = _CONFIG.web()
+    web_cfg = _get_web_cfg()
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in web_cfg.allowed_extensions:
@@ -175,7 +206,7 @@ async def download_result(job_id: str) -> Response:
 
 @app.get("/api/config")
 async def get_config() -> dict:
-    web_cfg = _CONFIG.web()
+    web_cfg = _get_web_cfg()
     return {
         "max_upload_size_mb": web_cfg.max_upload_size_mb,
         "allowed_extensions": web_cfg.allowed_extensions,
@@ -187,32 +218,22 @@ async def get_config() -> dict:
 # Admin panel
 # ---------------------------------------------------------------------------
 
-AdminUser = Annotated[str, Depends(_admin_auth)]
-
-
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(_: AdminUser) -> str:
-    return (Path(__file__).parent / "static" / "admin.html").read_text(encoding="utf-8")
+async def admin_panel(creds: AdminAuth) -> str:
+    token = base64.b64encode(f"{creds.username}:{creds.password}".encode()).decode()
+    html = (Path(__file__).parent / "static" / "admin.html").read_text(encoding="utf-8")
+    return html.replace("__ADMIN_TOKEN__", token)
 
 
 @app.get("/admin/api/jobs")
-async def admin_list_jobs(_: AdminUser) -> list:
+async def admin_list_jobs(_: AdminAuth) -> list:
     return [j.to_dict() for j in _STORE.list_all()]
 
 
-@app.post("/admin/api/cleanup", status_code=200)
-async def admin_cleanup(_: AdminUser) -> dict:
-    web_cfg = _CONFIG.web()
-    expired_ids = _STORE.expire_old(web_cfg.job_ttl_minutes)
-    for job_id in expired_ids:
-        shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
-    return {"removed": len(expired_ids)}
-
-
 @app.get("/admin/api/stats")
-async def admin_stats(_: AdminUser) -> dict:
+async def admin_stats(_: AdminAuth) -> dict:
     jobs = _STORE.list_all()
-    web_cfg = _CONFIG.web()
+    web_cfg = _get_web_cfg()
     counts: dict[str, int] = {}
     for j in jobs:
         counts[j.status.value] = counts.get(j.status.value, 0) + 1
@@ -222,8 +243,45 @@ async def admin_stats(_: AdminUser) -> dict:
         "version": APP_VERSION,
         "config": {
             "max_upload_size_mb": web_cfg.max_upload_size_mb,
+            "processing_timeout_sec": web_cfg.processing_timeout_sec,
             "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
             "job_ttl_minutes": web_cfg.job_ttl_minutes,
             "rate_limit_per_minute": web_cfg.rate_limit_per_minute,
         },
     }
+
+
+@app.patch("/admin/api/config")
+async def admin_update_config(
+    _: AdminAuth,
+    body: dict = Body(...),
+) -> dict:
+    updates: dict = {}
+    for key, val in body.items():
+        if key in _CFG_INT_FIELDS:
+            try:
+                v = int(val)
+                if v <= 0:
+                    raise HTTPException(status_code=422, detail=f"{key} должен быть > 0")
+                updates[key] = v
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail=f"{key}: ожидается целое число")
+    with _web_cfg_lock:
+        _web_cfg_override.update(updates)
+    cfg = _get_web_cfg()
+    return {
+        "max_upload_size_mb": cfg.max_upload_size_mb,
+        "processing_timeout_sec": cfg.processing_timeout_sec,
+        "max_concurrent_jobs": cfg.max_concurrent_jobs,
+        "job_ttl_minutes": cfg.job_ttl_minutes,
+        "rate_limit_per_minute": cfg.rate_limit_per_minute,
+    }
+
+
+@app.post("/admin/api/cleanup", status_code=200)
+async def admin_cleanup(_: AdminAuth) -> dict:
+    web_cfg = _get_web_cfg()
+    expired_ids = _STORE.expire_old(web_cfg.job_ttl_minutes)
+    for job_id in expired_ids:
+        shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
+    return {"removed": len(expired_ids)}

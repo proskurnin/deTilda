@@ -165,6 +165,8 @@ def test_admin_accepts_correct_credentials(client: TestClient, monkeypatch) -> N
     r = client.get("/admin", auth=("admin", "secret"))
     assert r.status_code == 200
     assert "deTilda" in r.text
+    # Token must be injected into the page (not left as placeholder)
+    assert "__ADMIN_TOKEN__" not in r.text
 
 
 def test_admin_stats_returns_json(client: TestClient, monkeypatch) -> None:
@@ -183,3 +185,26 @@ def test_admin_cleanup_returns_removed_count(client: TestClient, monkeypatch) ->
     r = client.post("/admin/api/cleanup", auth=("admin", "secret"))
     assert r.status_code == 200
     assert "removed" in r.json()
+
+
+def test_admin_config_patch_updates_value(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.patch(
+        "/admin/api/config",
+        auth=("admin", "secret"),
+        json={"max_upload_size_mb": 99},
+    )
+    assert r.status_code == 200
+    assert r.json()["max_upload_size_mb"] == 99
+
+
+def test_admin_config_patch_rejects_zero(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.patch(
+        "/admin/api/config",
+        auth=("admin", "secret"),
+        json={"max_concurrent_jobs": 0},
+    )
+    assert r.status_code == 422
