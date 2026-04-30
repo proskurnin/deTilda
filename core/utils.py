@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Sequence
 
@@ -25,6 +26,10 @@ __all__ = [
     "safe_read",
     "safe_write",
 ]
+
+# Устанавливается в DetildaPipeline.run() когда dry_run=True.
+# safe_write/safe_copy/safe_delete становятся no-op — файлы не изменяются.
+_dry_run: ContextVar[bool] = ContextVar("_dry_run", default=False)
 
 
 def _to_path(path: Path | str) -> Path:
@@ -45,6 +50,8 @@ def safe_read(path: Path | str) -> str:
 
 def safe_write(path: Path | str, content: str) -> None:
     """Записывает строку в файл UTF-8 с Unix-переносами. Создаёт папки если нужно."""
+    if _dry_run.get():
+        return
     path_obj = _to_path(path)
     path_obj.parent.mkdir(parents=True, exist_ok=True)
     path_obj.write_text(content, encoding="utf-8", newline="\n")
@@ -52,6 +59,8 @@ def safe_write(path: Path | str, content: str) -> None:
 
 def safe_copy(src: Path | str, dst: Path | str) -> None:
     """Копирует файл, создавая целевую папку если нужно."""
+    if _dry_run.get():
+        return
     src_path = _to_path(src)
     dst_path = _to_path(dst)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +70,8 @@ def safe_copy(src: Path | str, dst: Path | str) -> None:
 
 def safe_delete(path: Path | str) -> None:
     """Удаляет файл если он существует. Не падает если файла нет."""
+    if _dry_run.get():
+        return
     path_obj = _to_path(path)
     if path_obj.exists():
         path_obj.unlink()

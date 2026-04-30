@@ -22,6 +22,7 @@ from core import (
     refs,
     report,
     script_cleaner,
+    utils,
 )
 from core.project import ProjectContext
 from core.version import APP_VERSION
@@ -53,12 +54,20 @@ class PipelineStats:
 
 
 class DetildaPipeline:
-    def __init__(self, version: str = APP_VERSION, logs_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        version: str = APP_VERSION,
+        logs_dir: Path | None = None,
+        dry_run: bool = False,
+    ) -> None:
         self.version = version
         self.logs_dir = logs_dir
+        self.dry_run = dry_run
 
     def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
+
+        _dry_run_token = utils._dry_run.set(self.dry_run)
 
         project_root = archive.unpack_archive(archive_path)
         if not project_root:
@@ -68,131 +77,204 @@ class DetildaPipeline:
         context.attach_logger(logs_dir=self.logs_dir)
 
         try:
-            logger.info(f"=== deTilda {self.version} ===")
+            logger.info(f"=== deTilda {self.version} {'[DRY RUN] ' if self.dry_run else ''}===")
             logger.info(f"Рабочая папка: {archive_path.parent.resolve()}")
             logger.info(f"Дата запуска: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
             stats = PipelineStats()
+            htaccess_missing: list = []
+            remnants_count: int = 0
 
-            with logger.module_scope("assets"):
-                asset_result = assets.rename_and_cleanup_assets(context)
-            stats.renamed_assets = asset_result.stats.renamed
-            stats.removed_assets = asset_result.stats.removed
-            stats.downloaded_remote_assets = asset_result.stats.downloaded
-            stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
-            stats.warnings += asset_result.stats.warnings
-            report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
+            try:
+                with logger.module_scope("assets"):
+                    asset_result = assets.rename_and_cleanup_assets(context)
+                stats.renamed_assets = asset_result.stats.renamed
+                stats.removed_assets = asset_result.stats.removed
+                stats.downloaded_remote_assets = asset_result.stats.downloaded
+                stats.ssl_bypassed_downloads = asset_result.stats.ssl_bypassed_downloads
+                stats.warnings += asset_result.stats.warnings
+                report.generate_intermediate_report(stats.renamed_assets, 0, 0, 0)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг assets завершился с ошибкой: {exc}")
+                stats.errors += 1
 
-            with logger.module_scope("page404"):
-                page404.update_404_page(context.project_root)
+            try:
+                with logger.module_scope("page404"):
+                    page404.update_404_page(context.project_root)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг page404 завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("cleaners"):
-                clean_result = cleaners.clean_project_files(context, context.rename_map)
-            stats.cleaned_files = clean_result.updated
-            stats.removed_assets += clean_result.removed
-            report.generate_intermediate_report(stats.renamed_assets, stats.cleaned_files, 0, 0)
+            try:
+                with logger.module_scope("cleaners"):
+                    clean_result = cleaners.clean_project_files(context, context.rename_map)
+                stats.cleaned_files = clean_result.updated
+                stats.removed_assets += clean_result.removed
+                report.generate_intermediate_report(stats.renamed_assets, stats.cleaned_files, 0, 0)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг cleaners завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("forms"):
-                forms.generate_send_email_php(context)
-            with logger.module_scope("inject"):
-                stats.forms_hooked = inject.inject_form_scripts(context)
+            try:
+                with logger.module_scope("forms"):
+                    forms.generate_send_email_php(context)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг forms завершился с ошибкой: {exc}")
+                stats.errors += 1
 
-            with logger.module_scope("font_substitute"):
-                font_substitute.substitute_tilda_fonts(context.project_root)
+            try:
+                with logger.module_scope("inject"):
+                    stats.forms_hooked = inject.inject_form_scripts(context)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг inject завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("fonts"):
-                fonts_localizer.localize_google_fonts(context.project_root)
+            try:
+                with logger.module_scope("font_substitute"):
+                    font_substitute.substitute_tilda_fonts(context.project_root)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг font_substitute завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("refs"):
-                fixed_links, broken_links = refs.update_all_refs_in_project(
-                    context.project_root, context.rename_map, stats=stats
+            try:
+                with logger.module_scope("fonts"):
+                    fonts_localizer.localize_google_fonts(context.project_root)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг fonts завершился с ошибкой: {exc}")
+                stats.warnings += 1
+
+            try:
+                with logger.module_scope("refs"):
+                    fixed_links, broken_links = refs.update_all_refs_in_project(
+                        context.project_root, context.rename_map, stats=stats
+                    )
+                stats.fixed_links = fixed_links
+                stats.broken_links = broken_links
+                report.generate_intermediate_report(
+                    stats.renamed_assets, stats.cleaned_files, stats.fixed_links, stats.broken_links
                 )
-            stats.fixed_links = fixed_links
-            stats.broken_links = broken_links
-            report.generate_intermediate_report(
-                stats.renamed_assets, stats.cleaned_files, stats.fixed_links, stats.broken_links
-            )
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг refs завершился с ошибкой: {exc}")
+                stats.errors += 1
 
-            with logger.module_scope("cdn_localizer"):
-                cdn_result = cdn_localizer.localize_cdn_urls(context.project_root)
-            stats.warnings += cdn_result.download_failures
+            try:
+                with logger.module_scope("cdn_localizer"):
+                    cdn_result = cdn_localizer.localize_cdn_urls(context.project_root)
+                stats.warnings += cdn_result.download_failures
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг cdn_localizer завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("cdn_cleanup"):
-                cdn_localizer.cleanup_unresolved_cdn_references(context.project_root)
+            try:
+                with logger.module_scope("cdn_cleanup"):
+                    cdn_localizer.cleanup_unresolved_cdn_references(context.project_root)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг cdn_cleanup завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("images"):
-                image_fix = images.fix_project_images(context.project_root)
-            stats.images_updated_files = image_fix.updated_files
-            stats.images_img_fixed = image_fix.img_tags_fixed
-            stats.images_background_fixed = image_fix.background_tags_fixed
-            stats.images_unresolved = image_fix.unresolved_candidates
-            stats.warnings += image_fix.unresolved_candidates
+            try:
+                with logger.module_scope("images"):
+                    image_fix = images.fix_project_images(context.project_root)
+                stats.images_updated_files = image_fix.updated_files
+                stats.images_img_fixed = image_fix.img_tags_fixed
+                stats.images_background_fixed = image_fix.background_tags_fixed
+                stats.images_unresolved = image_fix.unresolved_candidates
+                stats.warnings += image_fix.unresolved_candidates
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг images завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("script_cleaner"):
-                if script_cleaner.can_remove_tilda_form_scripts(context.project_root):
-                    logger.info(
-                        "[script_cleaner] Пользовательский обработчик форм найден, "
-                        "удаляем Tilda form/events/fallback"
-                    )
-                    script_cleaner.remove_disallowed_scripts(
-                        context.project_root, context.config_loader
-                    )
-                else:
-                    logger.error(
-                        "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
-                        "удаление Tilda-скриптов отменено"
-                    )
-                    stats.errors += 1
+            try:
+                with logger.module_scope("script_cleaner"):
+                    if script_cleaner.can_remove_tilda_form_scripts(context.project_root):
+                        logger.info(
+                            "[script_cleaner] Пользовательский обработчик форм найден, "
+                            "удаляем Tilda form/events/fallback"
+                        )
+                        script_cleaner.remove_disallowed_scripts(
+                            context.project_root, context.config_loader
+                        )
+                    else:
+                        logger.error(
+                            "[script_cleaner] send_email.php или js/form-handler.js отсутствуют — "
+                            "удаление Tilda-скриптов отменено"
+                        )
+                        stats.errors += 1
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг script_cleaner завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("forms_check"):
-                forms_check = checker.check_forms_integration(context.project_root)
-            stats.forms_found = forms_check.forms_found
-            stats.forms_hooked = forms_check.forms_hooked
-            stats.warnings += forms_check.warnings
+            try:
+                with logger.module_scope("forms_check"):
+                    forms_check = checker.check_forms_integration(context.project_root)
+                stats.forms_found = forms_check.forms_found
+                stats.forms_hooked = forms_check.forms_hooked
+                stats.warnings += forms_check.warnings
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг forms_check завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("html_prettify"):
-                html_prettify.run(context, stats=stats)
+            try:
+                with logger.module_scope("html_prettify"):
+                    html_prettify.run(context, stats=stats)
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг html_prettify завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("checker"):
-                link_check = checker.check_links(context.project_root, context.config_loader)
-            htaccess_missing = link_check.htaccess_result.missing_routes if link_check.htaccess_result else []
-            stats.broken_htaccess_routes = sum(1 for r in htaccess_missing if r.action == "unresolved")
-            stats.broken_links += link_check.broken
-            stats.warnings += link_check.broken
-            stats.warnings += stats.broken_htaccess_routes
+            try:
+                with logger.module_scope("checker"):
+                    link_check = checker.check_links(context.project_root, context.config_loader)
+                htaccess_missing = link_check.htaccess_result.missing_routes if link_check.htaccess_result else []
+                stats.broken_htaccess_routes = sum(1 for r in htaccess_missing if r.action == "unresolved")
+                stats.broken_links += link_check.broken
+                stats.warnings += link_check.broken
+                stats.warnings += stats.broken_htaccess_routes
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг checker завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
-            with logger.module_scope("tilda-remnants"):
-                remnants = checker.check_tilda_remnants(context.project_root, context.config_loader)
-            stats.warnings += remnants.total_occurrences
+            try:
+                with logger.module_scope("tilda-remnants"):
+                    remnants = checker.check_tilda_remnants(context.project_root, context.config_loader)
+                remnants_count = remnants.total_occurrences
+                stats.warnings += remnants_count
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг tilda-remnants завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
             stats.exec_time = time.time() - start_time
-            with logger.module_scope("report"):
-                report.generate_final_report(
-                    project_root=context.project_root,
-                    cleaned_count=stats.cleaned_files,
-                    renamed_count=stats.renamed_assets,
-                    formatted_html_files=stats.formatted_html_files,
-                    warnings=stats.warnings,
-                    errors=stats.errors,
-                    broken_links_fixed=stats.fixed_links,
-                    broken_links_left=stats.broken_links,
-                    htaccess_routes_initially_broken=stats.htaccess_routes_initially_broken,
-                    htaccess_routes_autofixed=stats.htaccess_routes_autofixed,
-                    broken_htaccess_routes=stats.broken_htaccess_routes,
-                    downloaded_remote_assets=stats.downloaded_remote_assets,
-                    ssl_bypass_downloads=stats.ssl_bypassed_downloads,
-                    forms_found=stats.forms_found,
-                    forms_hooked=stats.forms_hooked,
-                    tilda_remnants=remnants.total_occurrences,
-                    missing_htaccess_routes=htaccess_missing,
-                    exec_time=stats.exec_time,
-                )
+            try:
+                with logger.module_scope("report"):
+                    report.generate_final_report(
+                        project_root=context.project_root,
+                        cleaned_count=stats.cleaned_files,
+                        renamed_count=stats.renamed_assets,
+                        formatted_html_files=stats.formatted_html_files,
+                        warnings=stats.warnings,
+                        errors=stats.errors,
+                        broken_links_fixed=stats.fixed_links,
+                        broken_links_left=stats.broken_links,
+                        htaccess_routes_initially_broken=stats.htaccess_routes_initially_broken,
+                        htaccess_routes_autofixed=stats.htaccess_routes_autofixed,
+                        broken_htaccess_routes=stats.broken_htaccess_routes,
+                        downloaded_remote_assets=stats.downloaded_remote_assets,
+                        ssl_bypass_downloads=stats.ssl_bypassed_downloads,
+                        forms_found=stats.forms_found,
+                        forms_hooked=stats.forms_hooked,
+                        tilda_remnants=remnants_count,
+                        missing_htaccess_routes=htaccess_missing,
+                        exec_time=stats.exec_time,
+                    )
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг report завершился с ошибкой: {exc}")
+                stats.warnings += 1
 
             self._print_final_summary(stats, stats.exec_time)
 
             return stats
         finally:
             logger.close()
+            utils._dry_run.reset(_dry_run_token)
 
     def _print_final_summary(self, stats: PipelineStats, elapsed_seconds: float) -> None:
         logger.info("======================================")
