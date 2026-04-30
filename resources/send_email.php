@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 // Заменяется forms.generate_send_email_php() из forms.test_recipients конфига.
 const TEST_RECIPIENTS = [
-    'r@prororo.com',
+    'test@example.com',
 ];
 
 const STANDARD_FIELDS = [
