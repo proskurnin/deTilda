@@ -106,6 +106,7 @@ async def lifespan(app: FastAPI):
                 expired_ids = _STORE.expire_old(ttl)
                 for job_id in expired_ids:
                     shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
+                    shutil.rmtree(_LOGS_DIR / job_id, ignore_errors=True)
             except Exception:
                 pass
 
@@ -287,4 +288,5 @@ async def admin_cleanup(_: AdminAuth) -> dict:
     expired_ids = _STORE.expire_old(web_cfg.job_ttl_minutes)
     for job_id in expired_ids:
         shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
+        shutil.rmtree(_LOGS_DIR / job_id, ignore_errors=True)
     return {"removed": len(expired_ids)}
