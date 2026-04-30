@@ -157,3 +157,35 @@ def test_case_insensitive_tilda_match(tmp_path: Path) -> None:
     text = page.read_text(encoding="utf-8")
     assert "TILDA" not in text
     assert "ai" in text.lower()
+
+
+def test_tilda_filename_detected(tmp_path: Path) -> None:
+    """Файл с 'tilda' в имени попадает в tilda_filenames."""
+    (tmp_path / "page.html").write_text("<p>ok</p>", encoding="utf-8")
+    (tmp_path / "tildasite.css").write_text("body{}", encoding="utf-8")
+
+    result = check_tilda_remnants(tmp_path, _FakeLoader())
+
+    assert len(result.tilda_filenames) == 1
+    assert "tildasite.css" in result.tilda_filenames[0]
+    # Содержимое не затронуто — это сканер имён, не ссылок
+    assert result.total_occurrences == 0
+
+
+def test_no_tilda_filename_when_all_renamed(tmp_path: Path) -> None:
+    """Если все файлы переименованы (ai-prefix) — tilda_filenames пуст."""
+    (tmp_path / "aidasite.css").write_text("body{}", encoding="utf-8")
+    (tmp_path / "index.html").write_text("<p>ok</p>", encoding="utf-8")
+
+    result = check_tilda_remnants(tmp_path, _FakeLoader())
+
+    assert result.tilda_filenames == []
+
+
+def test_tilda_filename_case_insensitive(tmp_path: Path) -> None:
+    """Поиск имён нечувствителен к регистру."""
+    (tmp_path / "TILDASITE.CSS").write_text("body{}", encoding="utf-8")
+
+    result = check_tilda_remnants(tmp_path, _FakeLoader())
+
+    assert len(result.tilda_filenames) == 1

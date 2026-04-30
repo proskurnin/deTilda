@@ -113,8 +113,9 @@ def generate_final_report(
     forms_found: int,
     forms_hooked: int,
     tilda_remnants: int,
-    missing_htaccess_routes: Iterable[MissingRouteInfo],
-    exec_time: float,
+    tilda_filename_remnants: int = 0,
+    missing_htaccess_routes: Iterable[MissingRouteInfo] = (),
+    exec_time: float = 0.0,
 ) -> None:
     """Генерирует финальный отчёт со статистикой всех шагов конвейера."""
     if not _reports_enabled():
@@ -163,6 +164,7 @@ def generate_final_report(
         f"📝 Форм найдено: {forms_found}\n"
         f"🧩 Форм подключено к handler: {forms_hooked}\n"
         f"{'✅' if tilda_remnants == 0 else '❌'} Остатков Tilda в ссылках: {tilda_remnants} (цель: 0)\n"
+        f"{'✅' if tilda_filename_remnants == 0 else '❌'} Файлов с именем tilda: {tilda_filename_remnants} (цель: 0)\n"
         f"⚠️ Предупреждений: {warnings}\n"
         f"⛔ Ошибок: {errors}\n"
         f"🕓 Время выполнения: {exec_time:.2f} сек\n"

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -51,6 +51,7 @@ class LinkCheckerResult:
 class TildaRemnantsResult:
     files_with_remnants: int = 0
     total_occurrences: int = 0  # ссылки которые не удалось исправить
+    tilda_filenames: list[str] = field(default_factory=list)  # файлы с 'tilda' в имени
 
 
 @dataclass
@@ -293,13 +294,28 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
             result.files_with_remnants += 1
             result.total_occurrences += file_hits
 
+    # Сканируем имена файлов — assets мог пропустить файлы с 'tilda' в имени
+    for file_path in sorted(project_root.rglob("*")):
+        if file_path.is_file() and "tilda" in file_path.name.lower():
+            rel = utils.relpath(file_path, project_root)
+            result.tilda_filenames.append(rel)
+            logger.warn(f"[tilda-remnants] Файл с именем tilda: {rel}")
+
     if result.total_occurrences:
         logger.warn(
-            f"[tilda-remnants] ❌ Осталось неисправленных: {result.total_occurrences} "
+            f"[tilda-remnants] ❌ Осталось неисправленных ссылок: {result.total_occurrences} "
             f"в {result.files_with_remnants} файлах — требуется ручная проверка"
         )
     else:
         logger.info("[tilda-remnants] ✓ Ссылок с 'tilda' не найдено")
+
+    if result.tilda_filenames:
+        logger.warn(
+            f"[tilda-remnants] ❌ Файлов с именем tilda: {len(result.tilda_filenames)} "
+            "— требуется ручная проверка"
+        )
+    else:
+        logger.info("[tilda-remnants] ✓ Файлов с именем tilda не найдено")
 
     return result
 

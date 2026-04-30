@@ -84,6 +84,7 @@ class DetildaPipeline:
             stats = PipelineStats()
             htaccess_missing: list = []
             remnants_count: int = 0
+            remnants_filenames_count: int = 0
 
             try:
                 with logger.module_scope("assets"):
@@ -237,7 +238,9 @@ class DetildaPipeline:
                 with logger.module_scope("tilda-remnants"):
                     remnants = checker.check_tilda_remnants(context.project_root, context.config_loader)
                 remnants_count = remnants.total_occurrences
+                remnants_filenames_count = len(remnants.tilda_filenames)
                 stats.warnings += remnants_count
+                stats.warnings += remnants_filenames_count
             except Exception as exc:
                 logger.error(f"[pipeline] Шаг tilda-remnants завершился с ошибкой: {exc}")
                 stats.warnings += 1
@@ -262,6 +265,7 @@ class DetildaPipeline:
                         forms_found=stats.forms_found,
                         forms_hooked=stats.forms_hooked,
                         tilda_remnants=remnants_count,
+                        tilda_filename_remnants=remnants_filenames_count,
                         missing_htaccess_routes=htaccess_missing,
                         exec_time=stats.exec_time,
                     )
