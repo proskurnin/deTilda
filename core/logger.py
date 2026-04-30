@@ -1,15 +1,14 @@
 """Simple logging utilities used across the deTilda toolchain.
 
-Логгер — глобальный синглтон с состоянием на уровне модуля.
-Это сознательное решение: pipeline обрабатывает один архив за раз,
-поэтому один активный лог-файл всегда корректен.
-
 Жизненный цикл:
   1. attach_to_project() — открывает лог-файл для текущего проекта
   2. info/warn/err/ok/debug — пишут в консоль И в файл одновременно
   3. close() — закрывает файл (вызывается в finally блоке pipeline)
 
 Имя лог-файла: logs/<project>_detilda.log
+
+Состояние хранится в contextvars.ContextVar — каждый asyncio-таск (веб-запрос)
+получает изолированный лог-файл без дополнительной настройки.
 """
 from __future__ import annotations
 
@@ -17,6 +16,7 @@ import sys
 import time
 import traceback
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Iterator, Optional, TextIO
 
@@ -37,10 +37,11 @@ __all__ = [
 # Суффикс в имени лог-файла: <project>_detilda.log
 _LOG_SUFFIX = "detilda"
 
-# Глобальное состояние логгера — активно пока идёт обработка одного архива
-_log_file: Optional[TextIO] = None
-_project_name: str = ""
-_logs_dir: Optional[Path] = None
+# Состояние логгера в ContextVar — изолировано на уровне asyncio-таска/потока.
+# Каждый веб-запрос (asyncio.create_task) получает свою копию автоматически.
+_log_file_var: ContextVar[Optional[TextIO]] = ContextVar("_log_file", default=None)
+_project_name_var: ContextVar[str] = ContextVar("_project_name", default="")
+_logs_dir_var: ContextVar[Optional[Path]] = ContextVar("_logs_dir", default=None)
 
 
 def _timestamp() -> str:
@@ -49,13 +50,13 @@ def _timestamp() -> str:
 
 def _write_line(level: str, message: str) -> None:
     """Пишет строку одновременно в консоль и в лог-файл."""
-    global _log_file
     line = f"{_timestamp()} {level} {message}"
     print(line)
-    if _log_file is not None:
+    log_file = _log_file_var.get()
+    if log_file is not None:
         try:
-            _log_file.write(line + "\n")
-            _log_file.flush()
+            log_file.write(line + "\n")
+            log_file.flush()
         except Exception:
             # Ошибки логгера не должны останавливать pipeline.
             pass
@@ -112,15 +113,15 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
 
     Вызывается в начале обработки каждого архива.
     logs_dir: путь из manifest.json; если не передан — вычисляется автоматически.
+    Состояние изолировано через ContextVar — безопасно при конкурентных вызовах.
     """
-    global _log_file, _project_name, _logs_dir
-
     project_root = Path(project_root)
     # Имя проекта = имя папки архива (например "hotelsargis")
-    _project_name = project_root.name
+    project_name = project_root.name
+    _project_name_var.set(project_name)
 
     if logs_dir is not None:
-        _logs_dir = Path(logs_dir)
+        resolved_logs_dir = Path(logs_dir)
     else:
         # Если проект в _workdir/ — поднимаемся на два уровня до корня репо
         base_dir = (
@@ -128,55 +129,57 @@ def attach_to_project(project_root: Path, logs_dir: Optional[Path] = None) -> No
             if project_root.parent.name == "_workdir"
             else project_root.parent
         )
-        _logs_dir = base_dir / "logs"
+        resolved_logs_dir = base_dir / "logs"
 
-    _logs_dir.mkdir(parents=True, exist_ok=True)
+    resolved_logs_dir.mkdir(parents=True, exist_ok=True)
+    _logs_dir_var.set(resolved_logs_dir)
 
-    log_path = _logs_dir / f"{_project_name}_{_LOG_SUFFIX}.log"
+    log_path = resolved_logs_dir / f"{project_name}_{_LOG_SUFFIX}.log"
 
     try:
         # Открываем в режиме append — повторный прогон дописывает в тот же файл
-        _log_file = log_path.open("a", encoding="utf-8")
+        log_file = log_path.open("a", encoding="utf-8")
+        _log_file_var.set(log_file)
     except Exception as exc:  # pragma: no cover - defensive fallback
         print(f"💥 Не удалось открыть файл лога {log_path}: {exc}", file=sys.stderr)
-        _log_file = None
+        _log_file_var.set(None)
         return
 
     header = (
         f"{'=' * 80}\n"
-        f"🕓 {_timestamp()} — deTilda log started for '{_project_name}'\n"
+        f"🕓 {_timestamp()} — deTilda log started for '{project_name}'\n"
         f"{'=' * 80}\n"
     )
-    _log_file.write(header)
-    _log_file.flush()
+    log_file.write(header)
+    log_file.flush()
     print(header, end="")
     info(f"Лог-файл: {log_path}")
 
 
 def get_project_name() -> str:
     """Возвращает имя текущего проекта (используется в report.py для имени файла отчёта)."""
-    return _project_name
+    return _project_name_var.get()
 
 
 def get_logs_dir() -> Path:
     """Возвращает папку логов (используется в assets.py для сохранения rename_map)."""
-    return _logs_dir or Path("logs")
+    return _logs_dir_var.get() or Path("logs")
 
 
 def close() -> None:
     """Закрывает лог-файл. Вызывается в finally блоке pipeline после обработки архива."""
-    global _log_file
-    if _log_file is None:
+    log_file = _log_file_var.get()
+    if log_file is None:
         return
     footer = (
         f"{'=' * 80}\n"
-        f"🏁 Завершение deTilda для {_project_name}\n"
+        f"🏁 Завершение deTilda для {_project_name_var.get()}\n"
         f"{'=' * 80}\n\n"
     )
     try:
-        _log_file.write(footer)
-        _log_file.close()
+        log_file.write(footer)
+        log_file.close()
     except Exception:
         pass
     finally:
-        _log_file = None
+        _log_file_var.set(None)

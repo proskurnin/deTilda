@@ -22,8 +22,8 @@ def _setup_logger(tmp_path: Path) -> Path:
     """Подменяет состояние логгера, чтобы отчёты писались в tmp_path."""
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
-    logger._project_name = "test_project"
-    logger._logs_dir = logs_dir
+    logger._project_name_var.set("test_project")
+    logger._logs_dir_var.set(logs_dir)
     return logs_dir
 
 

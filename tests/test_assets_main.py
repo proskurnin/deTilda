@@ -140,8 +140,8 @@ def test_excluded_files_not_renamed(tmp_path: Path) -> None:
 def test_creates_rename_map_json(tmp_path: Path) -> None:
     """rename_map.json сохраняется в logs/."""
     import core.logger as logger
-    logger._project_name = tmp_path.name
-    logger._logs_dir = tmp_path / "logs"
+    logger._project_name_var.set(tmp_path.name)
+    logger._logs_dir_var.set(tmp_path / "logs")
     (tmp_path / "logs").mkdir()
 
     (tmp_path / "tilda-x.css").write_text("")
