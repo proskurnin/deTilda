@@ -22,6 +22,7 @@ from typing import Dict
 
 from core import logger, utils
 from core.config_loader import ConfigLoader
+from core.params import ProcessParams
 from core.schemas import AppConfig
 
 
@@ -45,9 +46,14 @@ class ProjectContext:
     repository_root: Path    # корень deTilda (config/, resources/, logs/)
     config_loader: ConfigLoader
     rename_map: Dict[str, str] = field(default_factory=dict)  # {старый_путь: новый_путь}
+    params: ProcessParams = field(default_factory=ProcessParams)  # параметры запроса
 
     @classmethod
-    def from_project_root(cls, project_root: Path) -> "ProjectContext":
+    def from_project_root(
+        cls,
+        project_root: Path,
+        params: ProcessParams | None = None,
+    ) -> "ProjectContext":
         """Создаёт контекст из пути к распакованному проекту.
 
         Автоматически определяет repository_root и инициализирует ConfigLoader.
@@ -59,6 +65,7 @@ class ProjectContext:
             project_root=project_root,
             repository_root=repository_root,
             config_loader=loader,
+            params=params or ProcessParams(),
         )
 
     @property

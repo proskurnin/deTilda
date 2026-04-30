@@ -24,6 +24,7 @@ from core import (
     script_cleaner,
     utils,
 )
+from core.params import ProcessParams
 from core.project import ProjectContext
 from core.version import APP_VERSION
 
@@ -59,10 +60,12 @@ class DetildaPipeline:
         version: str = APP_VERSION,
         logs_dir: Path | None = None,
         dry_run: bool = False,
+        params: ProcessParams | None = None,
     ) -> None:
         self.version = version
         self.logs_dir = logs_dir
         self.dry_run = dry_run
+        self.params = params
 
     def run(self, archive_path: Path) -> PipelineStats:
         start_time = time.time()
@@ -73,7 +76,7 @@ class DetildaPipeline:
         if not project_root:
             raise RuntimeError("Не удалось распаковать архив")
 
-        context = ProjectContext.from_project_root(project_root)
+        context = ProjectContext.from_project_root(project_root, params=self.params)
         context.attach_logger(logs_dir=self.logs_dir)
 
         try:

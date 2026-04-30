@@ -92,9 +92,14 @@ def generate_send_email_php(project_root: Path | Any) -> Path:
     template_path = _RESOURCES_DIR / "send_email.php"
     template = template_path.read_text(encoding="utf-8")
 
-    loader = _resolve_config_loader(project_root)
-    if loader is not None:
-        template = _patch_test_recipients(template, loader.forms().test_recipients)
+    # Email из params (веб-запрос) имеет приоритет над config.yaml
+    params_email = getattr(getattr(project_root, "params", None), "email", "")
+    if params_email:
+        template = _patch_test_recipients(template, [params_email])
+    else:
+        loader = _resolve_config_loader(project_root)
+        if loader is not None:
+            template = _patch_test_recipients(template, loader.forms().test_recipients)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(template, encoding="utf-8")
