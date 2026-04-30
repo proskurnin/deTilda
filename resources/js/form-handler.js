@@ -193,6 +193,8 @@
     var remoteHosts = [
       'forms.tildacdn.com',
       'forms.tildacdn.pro',
+      'forms.aidacdn.com',
+      'forms.aidacdn.pro',
       'forms.tilda.ws',
       'forms.tilda.cc',
       'forms.tilda.network',
@@ -200,7 +202,7 @@
       'forms.aladeco.com'
     ];
 
-    var remotePrefixes = ['forms.tilda.', 'forms.tildacdn.', 'forms.aladeco.'];
+    var remotePrefixes = ['forms.tilda.', 'forms.tildacdn.', 'forms.aidacdn.', 'forms.aladeco.'];
 
     try {
       var parsed = new URL(attr, window.location.href);
@@ -248,12 +250,48 @@
     }, 3500);
   }
 
-  function hideFormPopup(form) {
-    var popup = form.closest ? form.closest('.t-popup') : null;
+  // ── Popup support (replaces tilda-events-1.0.min.js) ──────
+
+  function _findPopupRoot(el) {
+    if (el && el.closest) {
+      return el.closest('.t-popup');
+    }
+    var node = el;
+    while (node && node.nodeType === 1) {
+      if (node.classList && node.classList.contains('t-popup')) {
+        return node;
+      }
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function openPopup(popup) {
     if (!popup || !popup.classList) {
       return;
     }
+    popup.style.display = 'block';
+    popup.style.opacity = '';
+    popup.classList.add('t-popup_show', 't-popup_opened');
 
+    var bg = popup.querySelector('.t-popup__bg');
+    if (bg) {
+      bg.style.display = 'block';
+    }
+
+    if (document.body) {
+      document.body.classList.add('t-body_popupshowed', 't-body_popupfixed', 't-lock');
+      document.body.style.overflow = 'hidden';
+    }
+    if (document.documentElement) {
+      document.documentElement.classList.add('t-lock');
+    }
+  }
+
+  function closePopup(popup) {
+    if (!popup || !popup.classList) {
+      return;
+    }
     popup.classList.remove('t-popup_show', 't-popup_opened');
     popup.style.display = 'none';
     popup.style.opacity = '0';
@@ -271,6 +309,69 @@
     if (document.documentElement) {
       document.documentElement.classList.remove('t-lock');
     }
+  }
+
+  function handlePopupClick(event) {
+    var node = event.target;
+    while (node && node.nodeType === 1) {
+      // Close button
+      if (node.classList && (
+        node.classList.contains('js-popup-close') ||
+        node.classList.contains('t-popup__close')
+      )) {
+        var popup = _findPopupRoot(node);
+        if (popup) {
+          event.preventDefault();
+          closePopup(popup);
+        }
+        return;
+      }
+
+      // Background overlay
+      if (node.classList && node.classList.contains('t-popup__bg')) {
+        closePopup(_findPopupRoot(node));
+        return;
+      }
+
+      // data-popup-id trigger
+      var popupId = node.getAttribute && node.getAttribute('data-popup-id');
+      if (popupId) {
+        var target = document.getElementById(popupId);
+        if (target && target.classList && target.classList.contains('t-popup')) {
+          event.preventDefault();
+          openPopup(target);
+          return;
+        }
+      }
+
+      // href="#popupXXX" trigger
+      if (node.tagName === 'A') {
+        var href = (node.getAttribute('href') || '').trim();
+        if (href.charAt(0) === '#' && href.length > 1) {
+          var target = document.getElementById(href.slice(1));
+          if (target && target.classList && target.classList.contains('t-popup')) {
+            event.preventDefault();
+            openPopup(target);
+            return;
+          }
+        }
+      }
+
+      node = node.parentNode;
+    }
+  }
+
+  function handleEscKey(event) {
+    if (event.key === 'Escape' || event.keyCode === 27) {
+      var openPopups = document.querySelectorAll('.t-popup.t-popup_show');
+      for (var i = 0; i < openPopups.length; i += 1) {
+        closePopup(openPopups[i]);
+      }
+    }
+  }
+
+  function hideFormPopup(form) {
+    closePopup(_findPopupRoot(form));
   }
 
   function handleSubmit(event) {
@@ -343,6 +444,8 @@
 
   ensureInvalidStyle();
   document.addEventListener('submit', handleSubmit, true);
+  document.addEventListener('click', handlePopupClick, false);
+  document.addEventListener('keydown', handleEscKey, false);
 
   var forms = document.querySelectorAll('form');
   for (var i = 0; i < forms.length; i += 1) {
