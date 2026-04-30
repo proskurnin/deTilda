@@ -44,7 +44,7 @@ _http_basic = HTTPBasic()
 
 _CFG_INT_FIELDS = frozenset({
     "max_upload_size_mb", "processing_timeout_sec",
-    "max_concurrent_jobs", "job_ttl_minutes", "rate_limit_per_minute",
+    "max_concurrent_jobs", "job_ttl_minutes", "log_ttl_days", "rate_limit_per_minute",
 })
 
 
@@ -55,10 +55,27 @@ def _get_web_cfg() -> WebConfig:
     if not override:
         return base
     fields = ("max_upload_size_mb", "processing_timeout_sec", "allowed_extensions",
-              "max_concurrent_jobs", "job_ttl_minutes", "rate_limit_per_minute")
+              "max_concurrent_jobs", "job_ttl_minutes", "log_ttl_days", "rate_limit_per_minute")
     merged = {f: getattr(base, f) for f in fields}
     merged.update(override)
     return WebConfig(**merged)
+
+
+def _cleanup_old_logs(logs_dir: Path, ttl_days: int) -> int:
+    """Delete log subdirectories older than ttl_days (by mtime). Returns count removed."""
+    if not logs_dir.exists():
+        return 0
+    cutoff = time.time() - ttl_days * 86400
+    removed = 0
+    for entry in logs_dir.iterdir():
+        if entry.is_dir():
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _admin_auth(
@@ -102,11 +119,11 @@ async def lifespan(app: FastAPI):
     def _cleanup_loop() -> None:
         while not stop.wait(timeout=60):
             try:
-                ttl = _get_web_cfg().job_ttl_minutes
-                expired_ids = _STORE.expire_old(ttl)
+                cfg = _get_web_cfg()
+                expired_ids = _STORE.expire_old(cfg.job_ttl_minutes)
                 for job_id in expired_ids:
                     shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
-                    shutil.rmtree(_LOGS_DIR / job_id, ignore_errors=True)
+                _cleanup_old_logs(_LOGS_DIR, cfg.log_ttl_days)
             except Exception:
                 pass
 
@@ -250,6 +267,7 @@ async def admin_stats(_: AdminAuth) -> dict:
             "processing_timeout_sec": web_cfg.processing_timeout_sec,
             "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
             "job_ttl_minutes": web_cfg.job_ttl_minutes,
+            "log_ttl_days": web_cfg.log_ttl_days,
             "rate_limit_per_minute": web_cfg.rate_limit_per_minute,
         },
     }
@@ -284,9 +302,9 @@ async def admin_update_config(
 
 @app.post("/admin/api/cleanup", status_code=200)
 async def admin_cleanup(_: AdminAuth) -> dict:
-    web_cfg = _get_web_cfg()
-    expired_ids = _STORE.expire_old(web_cfg.job_ttl_minutes)
+    cfg = _get_web_cfg()
+    expired_ids = _STORE.expire_old(cfg.job_ttl_minutes)
     for job_id in expired_ids:
         shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
-        shutil.rmtree(_LOGS_DIR / job_id, ignore_errors=True)
-    return {"removed": len(expired_ids)}
+    removed_logs = _cleanup_old_logs(_LOGS_DIR, cfg.log_ttl_days)
+    return {"removed_jobs": len(expired_ids), "removed_logs": removed_logs}

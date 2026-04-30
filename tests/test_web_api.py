@@ -184,7 +184,9 @@ def test_admin_cleanup_returns_removed_count(client: TestClient, monkeypatch) ->
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
     r = client.post("/admin/api/cleanup", auth=("admin", "secret"))
     assert r.status_code == 200
-    assert "removed" in r.json()
+    data = r.json()
+    assert "removed_jobs" in data
+    assert "removed_logs" in data
 
 
 def test_admin_config_patch_updates_value(client: TestClient, monkeypatch) -> None:
