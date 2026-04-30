@@ -28,6 +28,7 @@ from core.schemas import (
     ImagesConfig,
     PatternsConfig,
     ServiceFilesConfig,
+    WebConfig,
     validate_regex_patterns,
 )
 
@@ -144,3 +145,7 @@ class ConfigLoader:
     def font_substitute(self) -> FontSubstituteConfig:
         """Секция font_substitute — замена Tilda Sans на Google Font."""
         return self._load().font_substitute
+
+    def web(self) -> WebConfig:
+        """Секция web — параметры веб-сервиса."""
+        return self._load().web

@@ -242,3 +242,11 @@ forms:
   # работоспособности формы после деплоя.
   test_recipients:
     - "r@prororo.com"
+
+web:
+  max_upload_size_mb: 50
+  processing_timeout_sec: 120
+  allowed_extensions:
+    - ".zip"
+  max_concurrent_jobs: 5
+  job_ttl_minutes: 30

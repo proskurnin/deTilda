@@ -313,6 +313,19 @@ class FormsConfig(BaseModel):
 # Корневой объект конфига
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Секция web
+# ---------------------------------------------------------------------------
+
+class WebConfig(BaseModel):
+    """Секция web из config.yaml — параметры веб-сервиса."""
+    max_upload_size_mb: int = Field(default=50)
+    processing_timeout_sec: int = Field(default=120)
+    allowed_extensions: List[str] = Field(default_factory=lambda: [".zip"])
+    max_concurrent_jobs: int = Field(default=5)
+    job_ttl_minutes: int = Field(default=30)
+
+
 class AppConfig(BaseModel):
     """Корневой объект конфига — соответствует структуре config/config.yaml.
 
@@ -324,3 +337,4 @@ class AppConfig(BaseModel):
     service_files: ServiceFilesConfig = Field(default_factory=ServiceFilesConfig)
     forms: FormsConfig = Field(default_factory=FormsConfig)
     font_substitute: FontSubstituteConfig = Field(default_factory=FontSubstituteConfig)
+    web: WebConfig = Field(default_factory=WebConfig)

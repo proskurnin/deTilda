@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>deTilda</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.08); padding: 2rem; width: min(480px, 92vw); }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .sub { color: #666; font-size: .9rem; margin-bottom: 1.5rem; }
+  label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .3rem; margin-top: 1rem; }
+  input[type=email], input[type=file] { width: 100%; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .95rem; }
+  button { margin-top: 1.25rem; width: 100%; padding: .65rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+  button:disabled { background: #9ca3af; cursor: default; }
+  #status { margin-top: 1rem; font-size: .9rem; color: #374151; min-height: 1.5rem; }
+  #download { display: none; margin-top: .75rem; width: 100%; padding: .65rem; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; text-align: center; text-decoration: none; }
+  .err { color: #dc2626; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>deTilda</h1>
+  <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
+  <form id="form">
+    <label for="file">ZIP-архив экспорта Tilda</label>
+    <input type="file" id="file" name="file" accept=".zip" required>
+    <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
+    <input type="email" id="email" name="email" placeholder="owner@example.com">
+    <button type="submit" id="btn">Обработать</button>
+  </form>
+  <div id="status"></div>
+  <a id="download" href="#">Скачать результат</a>
+</div>
+<script>
+const form = document.getElementById('form');
+const btn = document.getElementById('btn');
+const statusEl = document.getElementById('status');
+const downloadEl = document.getElementById('download');
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  btn.disabled = true;
+  downloadEl.style.display = 'none';
+  statusEl.textContent = 'Загрузка...';
+  statusEl.className = '';
+
+  const fd = new FormData(form);
+  let resp;
+  try {
+    resp = await fetch('/api/jobs', { method: 'POST', body: fd });
+  } catch {
+    statusEl.textContent = 'Ошибка сети';
+    statusEl.className = 'err';
+    btn.disabled = false;
+    return;
+  }
+
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    statusEl.textContent = data.detail || `Ошибка ${resp.status}`;
+    statusEl.className = 'err';
+    btn.disabled = false;
+    return;
+  }
+
+  const { job_id } = await resp.json();
+  poll(job_id);
+});
+
+async function poll(jobId) {
+  statusEl.textContent = 'Обработка…';
+  const interval = setInterval(async () => {
+    let data;
+    try {
+      const r = await fetch(`/api/jobs/${jobId}`);
+      data = await r.json();
+    } catch {
+      return;
+    }
+    if (data.status === 'done') {
+      clearInterval(interval);
+      statusEl.textContent = 'Готово!';
+      downloadEl.href = `/api/jobs/${jobId}/download`;
+      downloadEl.style.display = 'block';
+      btn.disabled = false;
+    } else if (data.status === 'error') {
+      clearInterval(interval);
+      statusEl.textContent = `Ошибка: ${data.error || 'неизвестная'}`;
+      statusEl.className = 'err';
+      btn.disabled = false;
+    }
+  }, 2000);
+}
+</script>
+</body>
+</html>
