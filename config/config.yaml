@@ -177,12 +177,13 @@ service_files:
       - "aida-events-1.0.min.js"
 
   # Что вставляется в HTML и куда — inject.py
-  # form-handler.js добавляется перед </body>, ga.js перед </head>
+  # form-handler.js добавляется перед </body>, GA config/loader — перед </head>
   html_inject_options:
     inject_handler_script: "form-handler.js"
     inject_after_marker: "</body>"
     inject_head_scripts:
-      - "ga.js"
+      - "/js/ga-config.js"
+      - "/js/ga.js"
     inject_head_marker: "</head>"
 
   # Настройки нормализации регистра имён файлов — assets.py
@@ -224,6 +225,8 @@ service_files:
       - source: "favicon.ico"
         destination: "favicon.ico"
         if_missing: true
+      - source: "ga-config.js"
+        destination: "js/ga-config.js"
       - source: "ga.js"
         destination: "js/ga.js"
 

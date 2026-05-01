@@ -5,7 +5,7 @@
 
 Два места вставки (настраиваются в config.yaml):
   - перед </body>: form-handler.js — обработчик форм
-  - перед </head>: ga.js — Google Analytics (и другие head-скрипты)
+  - перед </head>: ga-config.js + ga.js — Google Analytics (и другие head-скрипты)
 
 Идемпотентный: если скрипт уже есть в файле — не дублирует.
 Вызывается ПОСЛЕ forms.py (скрипты должны уже лежать в js/).
@@ -25,8 +25,11 @@ __all__ = ["inject_form_scripts"]
 def _load_options(loader: ConfigLoader) -> tuple[str, str, list[str], str]:
     """Читает настройки инъекции из config.yaml."""
     opts = loader.service_files().html_inject_options
-    # Если список head-скриптов пуст — используем ga.js как дефолт
-    head_scripts = [s for s in opts.inject_head_scripts if s.strip()] or ["ga.js"]
+    # Если список head-скриптов пуст — используем GA config + loader как дефолт
+    head_scripts = [s for s in opts.inject_head_scripts if s.strip()] or [
+        "/js/ga-config.js",
+        "/js/ga.js",
+    ]
     return opts.inject_handler_script, opts.inject_after_marker, head_scripts, opts.inject_head_marker
 
 
@@ -66,19 +69,38 @@ def _ensure_body_script(
     return text + tag, True
 
 
+def _script_src(script_name: str) -> str:
+    """Return script src, preserving absolute or already-qualified paths."""
+    script_name = script_name.strip()
+    if script_name.startswith(("/", "http://", "https://", "//")):
+        return script_name
+    if "/" in script_name:
+        return script_name
+    return f"js/{script_name}"
+
+
+def _script_already_present(text: str, script_name: str, src: str) -> bool:
+    """Return True if current or legacy src form is already present."""
+    candidates = {script_name.strip(), src}
+    if src.startswith("/"):
+        candidates.add(src.lstrip("/"))
+    return any(candidate and candidate in text for candidate in candidates)
+
+
 def _ensure_head_script(
     text: str,
     script_name: str,
     head_marker_pattern: re.Pattern[str],
     head_marker: str,
 ) -> tuple[str, bool]:
-    """Вставляет <script src="js/{script_name}"> перед head_marker (обычно </head>).
+    """Вставляет head-script перед head_marker (обычно </head>).
 
     Если скрипт уже есть — не дублирует. Если </head> не найден — пропускает файл.
     Возвращает (новый текст, был ли добавлен).
     """
-    tag = f'\n<script src="js/{script_name}"></script>'
-    if script_name in text:
+    src = _script_src(script_name)
+    tag = f'\n<script defer src="{src}"></script>'
+    if _script_already_present(text, script_name, src):
         return text, False
     if head_marker_pattern.search(text):
         return head_marker_pattern.sub(tag + head_marker, text), True

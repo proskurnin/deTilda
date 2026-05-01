@@ -50,7 +50,7 @@ python main.py
 | 3 | `page404` | Очистка `404.html` от ссылок Tilda и скриптов |
 | 4 | `cleaners` | Очистка `robots.txt`, `readme.txt` от упоминаний Tilda |
 | 5 | `forms` | Копирование `send_email.php` и `form-handler.js` из `resources/` |
-| 6 | `inject` | Внедрение скриптов в HTML (form-handler перед `</body>`, ga.js перед `</head>`) |
+| 6 | `inject` | Внедрение скриптов в HTML (form-handler перед `</body>`, GA config/loader перед `</head>`) |
 | 7 | `fonts_localizer` | Локализация Google Fonts (скачивание `.woff2`, инлайн `@import`) — GDPR-friendly |
 | 8 | `refs` | Обновление всех ссылок в HTML/CSS/JS по rename_map и маршрутам `.htaccess` |
 | 9 | `images` | Промоут `data-original` → `src` для lazyload изображений |
@@ -97,7 +97,8 @@ deTilda/
 ├── resources/                 # Шаблоны для копирования в проект
 │   ├── send_email.php         # Универсальный обработчик форм
 │   ├── js/form-handler.js     # Фронтенд для форм
-│   ├── ga.js                  # Шаблон Google Analytics
+│   ├── ga-config.js           # GA4 Measurement ID для готового сайта
+│   ├── ga.js                  # Загрузчик Google Analytics
 │   └── favicon.ico            # Дефолтная иконка
 ├── tools/
 │   └── bump_version.py        # SemVer bump + git тег
@@ -257,7 +258,7 @@ Multiple archives can be processed in one run by listing them comma-separated.
 | 3 | `page404` | Clean Tilda links and scripts from `404.html` |
 | 4 | `cleaners` | Clean Tilda mentions from `robots.txt`, `readme.txt` |
 | 5 | `forms` | Copy `send_email.php` and `form-handler.js` from `resources/` |
-| 6 | `inject` | Inject scripts into HTML (form-handler before `</body>`, ga.js before `</head>`) |
+| 6 | `inject` | Inject scripts into HTML (form-handler before `</body>`, GA config/loader before `</head>`) |
 | 7 | `fonts_localizer` | Localize Google Fonts (download `.woff2`, inline `@import`) — GDPR-friendly |
 | 8 | `refs` | Update all links in HTML/CSS/JS via rename_map and `.htaccess` routes |
 | 9 | `images` | Promote `data-original` → `src` for lazyload images |
