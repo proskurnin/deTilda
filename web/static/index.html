@@ -8,7 +8,9 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
   .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: min(500px, 100%); }
-  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .title-row { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .25rem; }
+  h1 { font-size: 1.5rem; margin: 0; }
+  .version { color: #9ca3af; font-size: .82rem; font-weight: 500; }
   .sub { color: #6b7280; font-size: .9rem; margin-bottom: 1.75rem; }
   label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .3rem; margin-top: 1.1rem; }
   input[type=email], input[type=file] { width: 100%; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .95rem; }
@@ -50,7 +52,10 @@
 </head>
 <body>
 <div class="card">
-  <h1>deTilda</h1>
+  <div class="title-row">
+    <h1>deTilda</h1>
+    <span class="version" id="app-version">v…</span>
+  </div>
   <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
 
   <form id="form">
@@ -166,6 +171,21 @@ form.addEventListener('submit', async e => {
 });
 
 const progressBlock = document.getElementById('progress-block');
+
+
+async function loadVersion() {
+  try {
+    const r = await fetch('/health');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.version) {
+      document.getElementById('app-version').textContent = `v${data.version}`;
+    }
+  } catch {}
+}
+
+loadVersion();
+
 
 async function poll(jobId) {
   setStatus('Обработка сайта…', true, false);
