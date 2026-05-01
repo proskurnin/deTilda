@@ -309,11 +309,19 @@ def _cleanup_broken_markup(text: str) -> str:
     return text
 
 
-def _split_url(url: str) -> tuple[str, str]:
+def _should_preserve_cache_busting(attr: str, url: str) -> bool:
+    """Return True for JS src URLs where Tilda's ?t=... avoids stale browser cache."""
+    split = urlsplit(url)
+    return attr.lower() == "src" and split.path.lower().endswith(".js")
+
+
+def _split_url(url: str, *, strip_t_param: bool = True) -> tuple[str, str]:
     """Разделяет URL на базовый путь и суффикс (query + fragment).
 
     Параметр ?t=... удаляется — Tilda использует его для cache-busting,
-    он не несёт смысловой нагрузки и мешает сравнению ссылок.
+    он не несёт смысловой нагрузки и мешает сравнению ссылок. Исключение:
+    JS-файлы в HTML. Для них ?t=... сохраняется, чтобы браузер не брал
+    устаревшую версию page-specific runtime-скриптов из кэша.
     """
     split = urlsplit(url)
     base_url = urlunsplit((split.scheme, split.netloc, split.path, "", ""))
@@ -321,11 +329,12 @@ def _split_url(url: str) -> tuple[str, str]:
     suffix = ""
 
     if split.query:
-        filtered_params = [
-            (key, value)
-            for key, value in parse_qsl(split.query, keep_blank_values=True)
-            if key.lower() != "t"
-        ]
+        params = parse_qsl(split.query, keep_blank_values=True)
+        filtered_params = (
+            params
+            if not strip_t_param
+            else [(key, value) for key, value in params if key.lower() != "t"]
+        )
         if filtered_params:
             suffix += "?" + urlencode(filtered_params, doseq=True)
 
@@ -333,6 +342,27 @@ def _split_url(url: str) -> tuple[str, str]:
         suffix += f"#{split.fragment}"
 
     return base_url, suffix
+
+
+def _is_missing_js_src(attr: str, base_url: str) -> bool:
+    """Return True when a missing link is a JS script-like src.
+
+    We intentionally do not rewrite missing JS src values to "#". The later
+    script_cleaner step needs the original filename to remove known Tilda
+    scripts, and arbitrary <script src="#"> tags can break page initialization.
+    """
+    return attr.lower() == "src" and base_url.lower().endswith(".js")
+
+
+_EMPTY_SCRIPT_SRC_RE = re.compile(
+    r"\s*<script\b(?=[^>]*\bsrc\s*=\s*(['\"])#\1)[^>]*>\s*</script\s*>",
+    re.IGNORECASE,
+)
+
+
+def _remove_empty_script_src_tags(text: str) -> tuple[str, int]:
+    """Remove invalid <script src="#"></script> tags left by older processing."""
+    return _EMPTY_SCRIPT_SRC_RE.subn("", text)
 
 
 def _update_links_in_html(
@@ -364,7 +394,10 @@ def _update_links_in_html(
         attr = match.group("attr")
         quote = match.group("quote") or '"'
         url = match.group("link")
-        base_url, suffix = _split_url(url)
+        base_url, suffix = _split_url(
+            url,
+            strip_t_param=not _should_preserve_cache_busting(attr, url),
+        )
 
         if _is_internal_anchor(url):
             return match.group(0)
@@ -408,6 +441,8 @@ def _update_links_in_html(
             target = project_root / relative
             if not target.exists():
                 broken += 1
+                if _is_missing_js_src(attr, base_url):
+                    return match.group(0)
                 return f"{attr}={quote}#{quote} data-detilda-broken=\"1\""
             # Файл существует под /relative — конвертируем в путь относительно
             # current_path, чтобы работало и при file:// открытии.
@@ -427,6 +462,8 @@ def _update_links_in_html(
             candidate = (project_root / base_url).resolve()
             if not candidate.exists():
                 broken += 1
+                if _is_missing_js_src(attr, base_url):
+                    return match.group(0)
                 return f"{attr}={quote}#{quote} data-detilda-broken=\"1\""
 
         return match.group(0)
@@ -469,6 +506,8 @@ def _update_links_in_html(
     for link_re in link_rel_patterns:
         text = link_re.sub(_link_replacer, text)
 
+    text, removed_empty_scripts = _remove_empty_script_src_tags(text)
+    fixed += removed_empty_scripts
     text = _cleanup_broken_markup(text)
     return text, fixed, broken
 

@@ -128,6 +128,55 @@ def test_existing_relative_link_not_broken(tmp_path: Path) -> None:
     assert broken == 0
 
 
+def test_missing_js_src_is_not_rewritten_to_hash(tmp_path: Path) -> None:
+    """Missing JS src stays intact so script_cleaner can remove known Tilda scripts."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<html><head><script src="js/aida-forms-1.0.min.js"></script></head></html>',
+        encoding="utf-8",
+    )
+
+    _fixed, broken = update_all_refs_in_project(tmp_path, {}, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert broken >= 1
+    assert 'src="js/aida-forms-1.0.min.js"' in text
+    assert 'src="#"' not in text
+
+
+def test_removes_empty_script_src_hash_tags(tmp_path: Path) -> None:
+    """Invalid <script src="#"></script> tags from older runs are removed."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<html><head><script src="#"></script></head><body>ok</body></html>',
+        encoding="utf-8",
+    )
+
+    fixed, _broken = update_all_refs_in_project(tmp_path, {}, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert fixed >= 1
+    assert '<script src="#"></script>' not in text
+    assert "<head></head>" in text
+
+
+def test_preserves_js_cache_busting_query(tmp_path: Path) -> None:
+    """Page-specific Tilda runtime JS keeps ?t=... to avoid stale browser cache."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<script src="js/aida-blocks-page27969817.min.js?t=1655879501"></script>',
+        encoding="utf-8",
+    )
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "aida-blocks-page27969817.min.js").write_text("", encoding="utf-8")
+
+    _fixed, broken = update_all_refs_in_project(tmp_path, {}, _FakeLoader())
+
+    text = page.read_text(encoding="utf-8")
+    assert broken == 0
+    assert 'src="js/aida-blocks-page27969817.min.js?t=1655879501"' in text
+
+
 def test_absolute_root_link_converted_to_relative_from_root_page(tmp_path: Path) -> None:
     """`/favicon.ico` в корневой странице → `favicon.ico` (для file:// preview)."""
     page = tmp_path / "index.html"
