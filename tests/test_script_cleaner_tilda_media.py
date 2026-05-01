@@ -54,10 +54,38 @@ def test_script_cleaner_keeps_tilda_media_runtime_for_youtube(tmp_path: Path) ->
     removed = remove_disallowed_scripts(tmp_path, loader)
     text = html.read_text(encoding="utf-8")
 
-    assert removed == 2
+    assert removed == 1
     assert "tilda-events-1.0.min.js" in text
     assert "tilda-fallback-1.0.min.js" in text
-    assert "tilda-forms-1.0.min.js" not in text
+    assert "tilda-forms-1.0.min.js" in text
+    assert "tilda-stat-1.0.min.js" not in text
+
+
+def test_script_cleaner_keeps_popup_form_runtime(tmp_path: Path) -> None:
+    html = tmp_path / "index.html"
+    html.write_text(
+        """
+        <div class="t702">
+          <div class="t-popup" data-tooltip-hook="#popup:myform">
+            <form class="js-form-proccess"></form>
+          </div>
+        </div>
+        <script src="js/tilda-events-1.0.min.js"></script>
+        <script src="js/tilda-fallback-1.0.min.js"></script>
+        <script src="js/tilda-forms-1.0.min.js"></script>
+        <script src="js/tilda-stat-1.0.min.js"></script>
+        """,
+        encoding="utf-8",
+    )
+
+    loader = _FakeLoader()
+    removed = remove_disallowed_scripts(tmp_path, loader)
+    text = html.read_text(encoding="utf-8")
+
+    assert removed == 1
+    assert "tilda-events-1.0.min.js" in text
+    assert "tilda-fallback-1.0.min.js" in text
+    assert "tilda-forms-1.0.min.js" in text
     assert "tilda-stat-1.0.min.js" not in text
 
 

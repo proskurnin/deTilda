@@ -1,4 +1,4 @@
-"""Tests for core.runtime_scripts — protect scripts needed by media blocks."""
+"""Tests for core.runtime_scripts — protect scripts needed by runtime blocks."""
 from __future__ import annotations
 
 import sys
@@ -21,7 +21,7 @@ from core.runtime_scripts import (
 )
 
 
-def test_no_media_returns_false(tmp_path: Path) -> None:
+def test_no_runtime_markers_returns_false(tmp_path: Path) -> None:
     (tmp_path / "page.html").write_text("<html><body>plain text</body></html>")
     assert project_needs_media_runtime(tmp_path) is False
 
@@ -48,8 +48,18 @@ def test_data_original_triggers_media(tmp_path: Path) -> None:
     assert project_needs_media_runtime(tmp_path) is True
 
 
-def test_filter_removes_all_when_no_media(tmp_path: Path) -> None:
-    """Без медиа-маркеров все скрипты подлежат удалению."""
+def test_popup_form_triggers_runtime(tmp_path: Path) -> None:
+    (tmp_path / "page.html").write_text(
+        '<a href="#popup:myform"></a>'
+        '<div class="t702"><div class="ai-popup" data-tooltip-hook="#popup:myform">'
+        '<form class="js-form-proccess"></form></div></div>',
+        encoding="utf-8",
+    )
+    assert project_needs_media_runtime(tmp_path) is True
+
+
+def test_filter_removes_all_when_no_runtime_markers(tmp_path: Path) -> None:
+    """Без runtime-маркеров все скрипты подлежат удалению."""
     (tmp_path / "page.html").write_text("<html><body>nothing</body></html>")
 
     scripts = ["tilda-events-1.0.min.js", "tilda-stat-1.0.min.js"]
@@ -67,14 +77,35 @@ def test_filter_protects_runtime_when_media_present(tmp_path: Path) -> None:
         "tilda-events-1.0.min.js",      # CONDITIONALLY_REQUIRED → сохранить
         "tilda-fallback-1.0.min.js",    # CONDITIONALLY_REQUIRED → сохранить
         "tilda-stat-1.0.min.js",        # → удалить
-        "tilda-forms-1.0.min.js",       # → удалить
+        "tilda-forms-1.0.min.js",       # CONDITIONALLY_REQUIRED → сохранить
     ]
     removable, preserved = filter_removable_scripts(scripts, tmp_path)
 
     assert "tilda-events-1.0.min.js" in preserved
     assert "tilda-fallback-1.0.min.js" in preserved
+    assert "tilda-forms-1.0.min.js" in preserved
     assert "tilda-stat-1.0.min.js" in removable
-    assert "tilda-forms-1.0.min.js" in removable
+
+
+def test_filter_protects_form_runtime_when_popup_form_present(tmp_path: Path) -> None:
+    (tmp_path / "page.html").write_text(
+        '<div class="t702"><div class="ai-popup" data-tooltip-hook="#popup:myform">'
+        '<form class="js-form-proccess"></form></div></div>',
+        encoding="utf-8",
+    )
+
+    scripts = [
+        "aida-events-1.0.min.js",
+        "aida-fallback-1.0.min.js",
+        "aida-forms-1.0.min.js",
+        "aida-stat-1.0.min.js",
+    ]
+    removable, preserved = filter_removable_scripts(scripts, tmp_path)
+
+    assert "aida-events-1.0.min.js" in preserved
+    assert "aida-fallback-1.0.min.js" in preserved
+    assert "aida-forms-1.0.min.js" in preserved
+    assert "aida-stat-1.0.min.js" in removable
 
 
 def test_filter_handles_empty_input(tmp_path: Path) -> None:
@@ -97,6 +128,7 @@ def test_aida_variants_also_protected(tmp_path: Path) -> None:
     """aida-* варианты (после переименования) тоже защищены."""
     assert "aida-events-1.0.min.js" in CONDITIONALLY_REQUIRED_RUNTIME_SCRIPTS
     assert "aida-fallback-1.0.min.js" in CONDITIONALLY_REQUIRED_RUNTIME_SCRIPTS
+    assert "aida-forms-1.0.min.js" in CONDITIONALLY_REQUIRED_RUNTIME_SCRIPTS
 
     (tmp_path / "page.html").write_text('<div class="t-slds"></div>')
     removable, preserved = filter_removable_scripts(

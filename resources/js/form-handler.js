@@ -254,16 +254,37 @@
 
   function _findPopupRoot(el) {
     if (el && el.closest) {
-      return el.closest('.t-popup');
+      return el.closest('.t-popup, .ai-popup');
     }
     var node = el;
     while (node && node.nodeType === 1) {
-      if (node.classList && node.classList.contains('t-popup')) {
+      if (node.classList && (
+        node.classList.contains('t-popup') ||
+        node.classList.contains('ai-popup')
+      )) {
         return node;
       }
       node = node.parentNode;
     }
     return null;
+  }
+
+  function isPopupElement(el) {
+    return !!(el && el.classList && (
+      el.classList.contains('t-popup') ||
+      el.classList.contains('ai-popup')
+    ));
+  }
+
+  function findPopupByHook(hook) {
+    if (!hook) {
+      return null;
+    }
+    var escapedHook = hook.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return document.querySelector(
+      '.t-popup[data-tooltip-hook="' + escapedHook + '"], ' +
+      '.ai-popup[data-tooltip-hook="' + escapedHook + '"]'
+    );
   }
 
   function openPopup(popup) {
@@ -272,15 +293,16 @@
     }
     popup.style.display = 'block';
     popup.style.opacity = '';
-    popup.classList.add('t-popup_show', 't-popup_opened');
+    popup.classList.add('t-popup_show', 't-popup_opened', 'ai-popup_show', 'ai-popup_opened');
 
-    var bg = popup.querySelector('.t-popup__bg');
+    var bg = popup.querySelector('.t-popup__bg, .ai-popup__bg');
     if (bg) {
       bg.style.display = 'block';
     }
 
     if (document.body) {
       document.body.classList.add('t-body_popupshowed', 't-body_popupfixed', 't-lock');
+      document.body.classList.add('ai-body_popupshowed', 'ai-body_popupfixed');
       document.body.style.overflow = 'hidden';
     }
     if (document.documentElement) {
@@ -292,17 +314,18 @@
     if (!popup || !popup.classList) {
       return;
     }
-    popup.classList.remove('t-popup_show', 't-popup_opened');
+    popup.classList.remove('t-popup_show', 't-popup_opened', 'ai-popup_show', 'ai-popup_opened');
     popup.style.display = 'none';
     popup.style.opacity = '0';
 
-    var bg = popup.querySelector('.t-popup__bg');
+    var bg = popup.querySelector('.t-popup__bg, .ai-popup__bg');
     if (bg) {
       bg.style.display = 'none';
     }
 
     if (document.body) {
       document.body.classList.remove('t-body_popupshowed', 't-body_popupfixed', 't-lock');
+      document.body.classList.remove('ai-body_popupshowed', 'ai-body_popupfixed');
       document.body.style.overflow = '';
       document.body.style.position = '';
     }
@@ -317,7 +340,8 @@
       // Close button
       if (node.classList && (
         node.classList.contains('js-popup-close') ||
-        node.classList.contains('t-popup__close')
+        node.classList.contains('t-popup__close') ||
+        node.classList.contains('ai-popup__close')
       )) {
         var popup = _findPopupRoot(node);
         if (popup) {
@@ -328,7 +352,10 @@
       }
 
       // Background overlay
-      if (node.classList && node.classList.contains('t-popup__bg')) {
+      if (node.classList && (
+        node.classList.contains('t-popup__bg') ||
+        node.classList.contains('ai-popup__bg')
+      )) {
         closePopup(_findPopupRoot(node));
         return;
       }
@@ -337,7 +364,7 @@
       var popupId = node.getAttribute && node.getAttribute('data-popup-id');
       if (popupId) {
         var target = document.getElementById(popupId);
-        if (target && target.classList && target.classList.contains('t-popup')) {
+        if (isPopupElement(target)) {
           event.preventDefault();
           openPopup(target);
           return;
@@ -348,8 +375,8 @@
       if (node.tagName === 'A') {
         var href = (node.getAttribute('href') || '').trim();
         if (href.charAt(0) === '#' && href.length > 1) {
-          var target = document.getElementById(href.slice(1));
-          if (target && target.classList && target.classList.contains('t-popup')) {
+          var target = document.getElementById(href.slice(1)) || findPopupByHook(href);
+          if (isPopupElement(target)) {
             event.preventDefault();
             openPopup(target);
             return;

@@ -14,7 +14,12 @@ __all__ = [
 ]
 
 _MEDIA_MARKERS_RE = re.compile(
-    r"(youtube\.com|youtu\.be|data-youtube|t-video|t-slds|t-gallery|data-img-zoom-url|data-original|t-bgimg)",
+    r"("
+    r"youtube\.com|youtu\.be|data-youtube|t-video|t-slds|t-gallery|"
+    r"data-img-zoom-url|data-original|t-bgimg|"
+    r"<form\b|js-form-proccess|data-formactiontype|data-tooltip-hook=[\"']#popup|"
+    r"\bt-popup\b|\bai-popup\b|\bt702\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -23,11 +28,18 @@ CONDITIONALLY_REQUIRED_RUNTIME_SCRIPTS = {
     "aida-events-1.0.min.js",
     "tilda-fallback-1.0.min.js",
     "aida-fallback-1.0.min.js",
+    "tilda-forms-1.0.min.js",
+    "aida-forms-1.0.min.js",
 }
 
 
 def project_needs_media_runtime(project_root: Path) -> bool:
-    """Return ``True`` when pages contain media blocks that need runtime scripts."""
+    """Return True when pages contain blocks that need Tilda runtime scripts.
+
+    The name is kept for compatibility. Besides media/lazyload blocks, popup
+    forms need Tilda form/events runtime for visual initialization; the custom
+    form-handler.js replaces submission, not the block UI runtime.
+    """
 
     for path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:

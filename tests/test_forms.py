@@ -49,6 +49,16 @@ def test_generate_form_handler_js_creates_js_directory(tmp_path: Path) -> None:
     assert (tmp_path / "js").is_dir()
 
 
+def test_form_handler_supports_aida_popup_hooks(tmp_path: Path) -> None:
+    """Runtime fallback должен открывать обработанные .ai-popup по data-tooltip-hook."""
+    generate_form_handler_js(tmp_path)
+
+    content = (tmp_path / "js" / "form-handler.js").read_text(encoding="utf-8")
+    assert ".t-popup, .ai-popup" in content
+    assert "findPopupByHook(href)" in content
+    assert "ai-popup_show" in content
+
+
 def test_generate_accepts_project_context_object(tmp_path: Path) -> None:
     """generate_send_email_php принимает объект с атрибутом project_root."""
     class FakeContext:

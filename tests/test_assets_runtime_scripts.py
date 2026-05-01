@@ -60,7 +60,28 @@ def test_assets_keep_runtime_scripts_when_media_markers_exist(tmp_path: Path) ->
 
     assert (tmp_path / "js" / "aida-events-1.0.min.js").exists()
     assert (tmp_path / "js" / "aida-fallback-1.0.min.js").exists()
-    assert not (tmp_path / "js" / "aida-forms-1.0.min.js").exists()
+    assert (tmp_path / "js" / "aida-forms-1.0.min.js").exists()
+    assert not (tmp_path / "js" / "aida-stat-1.0.min.js").exists()
+
+
+def test_assets_keep_form_runtime_scripts_when_popup_form_exists(tmp_path: Path) -> None:
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "tilda-events-1.0.min.js").write_text("", encoding="utf-8")
+    (tmp_path / "js" / "tilda-fallback-1.0.min.js").write_text("", encoding="utf-8")
+    (tmp_path / "js" / "tilda-forms-1.0.min.js").write_text("", encoding="utf-8")
+    (tmp_path / "js" / "tilda-stat-1.0.min.js").write_text("", encoding="utf-8")
+    (tmp_path / "index.html").write_text(
+        '<a href="#popup:myform"></a>'
+        '<div class="t702"><div class="t-popup" data-tooltip-hook="#popup:myform">'
+        '<form class="js-form-proccess"></form></div></div>',
+        encoding="utf-8",
+    )
+
+    rename_and_cleanup_assets(tmp_path, loader=_FakeLoader())
+
+    assert (tmp_path / "js" / "aida-events-1.0.min.js").exists()
+    assert (tmp_path / "js" / "aida-fallback-1.0.min.js").exists()
+    assert (tmp_path / "js" / "aida-forms-1.0.min.js").exists()
     assert not (tmp_path / "js" / "aida-stat-1.0.min.js").exists()
 
 
