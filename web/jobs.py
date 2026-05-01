@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ class Job:
     def to_admin_dict(self) -> dict:
         d = self.to_dict()
         d["error_detail"] = self.error_detail
+        d["result_available"] = bool(self.result_path and self.result_path.exists())
         return d
 
     def _to_persist_dict(self) -> dict:
@@ -75,40 +77,107 @@ class JobStore:
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.Lock()
         self._persist_dir = persist_dir
+        self._db_path = persist_dir / "jobs.sqlite3" if persist_dir is not None else None
+
+    def _ensure_db(self) -> None:
+        if self._db_path is None:
+            return
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self._db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT NOT NULL
+                )
+                """
+            )
+            con.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+
+    def _save_to_sqlite(self, job: Job) -> None:
+        if self._db_path is None:
+            return
+        self._ensure_db()
+        payload = json.dumps(job._to_persist_dict(), ensure_ascii=False)
+        with sqlite3.connect(self._db_path) as con:
+            con.execute(
+                """
+                INSERT INTO jobs (id, payload, created_at, finished_at, status)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at,
+                    finished_at = excluded.finished_at,
+                    status = excluded.status
+                """,
+                (
+                    job.id,
+                    payload,
+                    job.created_at.isoformat(),
+                    job.finished_at.isoformat() if job.finished_at else None,
+                    job.status.value,
+                ),
+            )
+
+    def _load_from_sqlite(self) -> list[Job]:
+        if self._db_path is None or not self._db_path.exists():
+            return []
+        self._ensure_db()
+        jobs: list[Job] = []
+        with sqlite3.connect(self._db_path) as con:
+            rows = con.execute("SELECT payload FROM jobs ORDER BY created_at DESC").fetchall()
+        for (payload,) in rows:
+            try:
+                jobs.append(Job._from_persist_dict(json.loads(payload)))
+            except Exception:
+                pass
+        return jobs
 
     def _save(self, job: Job) -> None:
         if self._persist_dir is None:
             return
         try:
-            path = self._persist_dir / f"{job.id}.json"
-            path.write_text(json.dumps(job._to_persist_dict()), encoding="utf-8")
-        except OSError:
+            self._save_to_sqlite(job)
+        except (OSError, sqlite3.Error):
             pass
 
-    def _delete_file(self, job_id: str) -> None:
+    def _load_legacy_json_jobs(self) -> list[Job]:
+        """Load jobs from the pre-SQLite JSON persistence format."""
         if self._persist_dir is None:
-            return
-        try:
-            (self._persist_dir / f"{job_id}.json").unlink(missing_ok=True)
-        except OSError:
-            pass
+            return []
+        jobs: list[Job] = []
+        for p in self._persist_dir.glob("*.json"):
+            try:
+                jobs.append(Job._from_persist_dict(json.loads(p.read_text(encoding="utf-8"))))
+            except Exception:
+                pass
+        return jobs
 
     def restore(self) -> int:
         """Load jobs persisted to disk. Called once on app startup."""
-        if self._persist_dir is None or not self._persist_dir.exists():
+        if self._persist_dir is None:
             return 0
+        self._persist_dir.mkdir(parents=True, exist_ok=True)
         loaded = 0
-        for p in self._persist_dir.glob("*.json"):
+        jobs_by_id = {job.id: job for job in self._load_from_sqlite()}
+        for job in self._load_legacy_json_jobs():
+            jobs_by_id.setdefault(job.id, job)
+        for job in jobs_by_id.values():
             try:
-                job = Job._from_persist_dict(json.loads(p.read_text(encoding="utf-8")))
                 # Jobs still marked running/pending at startup had their process killed —
                 # mark them as errors so the store reflects reality.
                 if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
                     job.status = JobStatus.ERROR
                     job.error = "Прервано перезапуском сервера"
                     job.finished_at = job.finished_at or datetime.now(timezone.utc)
+                    self._save(job)
                 with self._lock:
                     self._jobs[job.id] = job
+                self._save(job)
                 loaded += 1
             except Exception:
                 pass
@@ -131,7 +200,7 @@ class JobStore:
         self._save(job)
 
     def expire_old(self, ttl_minutes: int) -> list:
-        """Remove finished jobs older than ttl_minutes. Returns list of expired job IDs."""
+        """Forget expired results from memory while keeping admin history in SQLite."""
         cutoff = datetime.now(timezone.utc)
         with self._lock:
             to_delete = [
@@ -140,8 +209,6 @@ class JobStore:
             ]
             for jid in to_delete:
                 self._jobs.pop(jid, None)
-        for jid in to_delete:
-            self._delete_file(jid)
         return to_delete
 
     def active_count(self) -> int:
@@ -152,5 +219,10 @@ class JobStore:
             )
 
     def list_all(self) -> list:
+        if self._db_path is not None:
+            try:
+                return self._load_from_sqlite()
+            except (OSError, sqlite3.Error):
+                pass
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
