@@ -402,52 +402,68 @@
   }
 
   function isAidaForm(form) {
-    if (!form) return false;
-    // Проверяем наличие маркеров Tilda/Aida
-    return !!(
-      form.classList.contains('js-form-proccess') ||
-      form.classList.contains('ai-form') ||
-      form.querySelector('.tn-atom__form') ||
-      form.closest('.r').querySelector('.tn-atom__form') ||
-      form.getAttribute('data-aida-formskey') ||
-      form.closest('[data-aida-formskey]')
-    );
+    if (!form || form.tagName !== 'FORM') return false;
+    try {
+      // Проверяем наличие маркеров Tilda/Aida
+      return !!(
+        form.classList.contains('js-form-proccess') ||
+        form.classList.contains('ai-form') ||
+        form.getAttribute('data-aida-formskey') ||
+        form.getAttribute('data-tilda-formskey') ||
+        form.querySelector('.tn-atom__form') ||
+        (form.parentElement && form.parentElement.classList.contains('tn-atom__form'))
+      );
+    } catch (e) {
+      return false;
+    }
   }
 
   function handleSubmit(event) {
-    var form = event.target;
-    if (!form || form.tagName !== 'FORM' || !isAidaForm(form)) {
-      return;
+    try {
+      var form = event.target;
+      if (!form || form.tagName !== 'FORM' || !isAidaForm(form)) {
+        return;
+      }
+
+      // Allow native HTML5 validation to work first
+      if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      submitForm(form);
+    } catch (e) {
+      console.error('[deTilda] Submit error:', e);
     }
-
-    // Allow native HTML5 validation to work first
-    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    submitForm(form);
   }
 
   function handleButtonClick(event) {
-    var btn = event.target.closest('.ai-submit, button[type="submit"], input[type="submit"]');
-    if (!btn) return;
-    var form = btn.closest('form');
-    if (!form || !isAidaForm(form)) return;
+    try {
+      var btn = event.target;
+      if (btn.closest) {
+        btn = btn.closest('.ai-submit, .t-submit, button[type="submit"], input[type="submit"]');
+      }
+      if (!btn) return;
+      
+      var form = btn.closest ? btn.closest('form') : null;
+      if (!form || !isAidaForm(form)) return;
 
-    // Intercept click to prevent Tilda runtime from triggering its own submission logic
-    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
-      form.reportValidity();
+      // Intercept click to prevent Tilda runtime from triggering its own submission logic
+      if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+        if (typeof form.reportValidity === 'function') form.reportValidity();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
       event.preventDefault();
       event.stopImmediatePropagation();
-      return;
+      submitForm(form);
+    } catch (e) {
+      // Fail silently to not block UI
     }
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    submitForm(form);
   }
 
   function submitForm(form) {
