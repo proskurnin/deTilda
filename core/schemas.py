@@ -235,9 +235,26 @@ class NormalizeCaseConfig(BaseModel):
     extensions: List[str] = Field(default_factory=list)
 
 
+class BrowserRuntimeAssetsConfig(BaseModel):
+    """Настройки browser-runtime докачки CDN-ассетов."""
+    enabled: bool = True
+    max_pages: int = 20
+    timeout_sec: int = 20
+    wait_ms: int = 1000
+
+
+class NamespaceRewriteConfig(BaseModel):
+    """Настройки финального Aida namespace rewrite."""
+    enabled: bool = True
+
+
 class PipelineStagesConfig(BaseModel):
     """Флаги включения отдельных шагов конвейера."""
     normalize_case: NormalizeCaseConfig = Field(default_factory=NormalizeCaseConfig)
+    browser_runtime_assets: BrowserRuntimeAssetsConfig = Field(
+        default_factory=BrowserRuntimeAssetsConfig
+    )
+    namespace_rewrite: NamespaceRewriteConfig = Field(default_factory=NamespaceRewriteConfig)
 
 
 class CleanerOptionsConfig(BaseModel):

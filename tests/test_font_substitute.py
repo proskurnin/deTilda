@@ -174,3 +174,25 @@ def test_idempotent(tmp_path: Path) -> None:
     after_second = css.read_text(encoding="utf-8")
 
     assert after_first == after_second
+
+
+def test_nested_web_job_uses_repository_config(tmp_path: Path) -> None:
+    """Direct project-root calls still find config above _workdir/<job_id>/."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "config" / "config.yaml").write_text(
+        "font_substitute:\n"
+        "  family: Inter\n"
+        "  import_url: \"@import url('https://fonts.googleapis.com/css2?family=Inter&display=swap');\\n\"\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "_workdir" / "job-id" / "job-id"
+    project.mkdir(parents=True)
+    css = project / "fonts-aidasans.css"
+    css.write_text("@font-face{font-family:'TildaSans';src:url(x)}", encoding="utf-8")
+
+    font_substitute.substitute_tilda_fonts(project)
+
+    text = css.read_text(encoding="utf-8")
+    assert "family=Inter" in text
+    assert "Manrope" not in text

@@ -20,13 +20,21 @@ from __future__ import annotations
 
 import re
 import urllib.error
+from urllib.parse import urlsplit
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from core import logger, utils
 from core.downloader import fetch_bytes
 
-__all__ = ["CdnLocalizationResult", "cleanup_unresolved_cdn_references", "localize_cdn_urls"]
+__all__ = [
+    "CdnLocalizationResult",
+    "cleanup_unresolved_cdn_references",
+    "download_cdn_url",
+    "is_static_tilda_cdn_url",
+    "localize_cdn_urls",
+]
 
 
 @dataclass
@@ -34,6 +42,7 @@ class CdnLocalizationResult:
     files_updated: int = 0
     urls_localized: int = 0
     download_failures: int = 0
+    failed_urls: list[str] = field(default_factory=list)
 
 
 # Реальный домен Tilda для скачивания. Используем .com — самая стабильная зона.
@@ -44,7 +53,7 @@ _TARGET_EXTENSIONS = (".html", ".htm", ".css", ".js")
 
 # Прямой URL: https://static.tildacdn.com/path/file.ext или aidacdn (после til→ai)
 _DIRECT_URL_RE = re.compile(
-    r"https?://static\.(?:tilda|aida)cdn\.[a-z]+/[^\s'\"\\)]+",
+    r"(?:https?:)?//static\.(?:tilda|aida)cdn\.[a-z]+/[^\s'\"\\)]+",
     re.IGNORECASE,
 )
 
@@ -96,14 +105,38 @@ def _reverse_path_for_real_cdn(path: str) -> str:
 
 def _extract_path_from_url(url: str) -> str | None:
     """Из https://static.tildacdn.com/lib/flags/flags7.png → lib/flags/flags7.png"""
-    match = re.match(
-        r"https?://static\.(?:tilda|aida)cdn\.[a-z]+(/[^\s'\"\\)]+)",
-        url,
-        re.IGNORECASE,
-    )
-    if not match:
+    normalized_url = f"https:{url}" if url.startswith("//") else url
+    split = urlsplit(normalized_url)
+    if not split.netloc.lower().startswith("static.") or not re.search(
+        r"\.(?:tilda|aida)cdn\.", split.netloc, re.IGNORECASE
+    ):
         return None
-    return match.group(1).lstrip("/")
+    return split.path.lstrip("/")
+
+
+def is_static_tilda_cdn_url(url: str) -> bool:
+    """Return True for static Tilda CDN URLs we know how to localize."""
+    return _extract_path_from_url(url) is not None
+
+
+def _candidate_urls_for_path(path: str) -> list[str]:
+    candidates = [path]
+    reversed_path = _reverse_path_for_real_cdn(path)
+    if reversed_path != path:
+        candidates.append(reversed_path)
+    return [f"https://{_REAL_CDN_HOST}/{candidate}" for candidate in candidates]
+
+
+def download_cdn_url(
+    url: str,
+    project_root: Path,
+    cache: dict[str, object] | None = None,
+) -> Path | None:
+    """Download a static Tilda CDN URL into project_root preserving CDN path."""
+    path = _extract_path_from_url(url)
+    if not path:
+        return None
+    return _download_to_local(path, Path(project_root), cache if cache is not None else {})
 
 
 # Sentinel для negative cache (path известен как недоступный — не пробуем снова)
@@ -142,18 +175,14 @@ def _download_to_local(
         cache[path] = destination
         return destination
 
-    # Пробуем оригинальный путь (если til→ai не затронул)
-    candidates = [path]
-    reversed_path = _reverse_path_for_real_cdn(path)
-    if reversed_path != path:
-        candidates.append(reversed_path)
-
     data: bytes | None = None
-    for candidate in candidates:
-        real_url = f"https://{_REAL_CDN_HOST}/{candidate}"
+    for real_url in _candidate_urls_for_path(path):
         try:
             # Короткий timeout — для невалидных URL не ждём 20 секунд
-            data, _ = fetch_bytes(real_url, timeout=8)
+            data, _ = fetch_bytes(real_url, timeout=8, user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ))
             break
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             logger.warn(f"[cdn] Не удалось скачать {real_url}: {exc}")
@@ -188,6 +217,14 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
     project_root = Path(project_root)
     result = CdnLocalizationResult()
     download_cache: dict[str, object] = {}
+    failed_paths: set[str] = set()
+
+    def _record_download_failure(path: str) -> None:
+        if path in failed_paths:
+            return
+        failed_paths.add(path)
+        result.download_failures += 1
+        result.failed_urls.extend(_candidate_urls_for_path(path))
 
     for file_path in utils.list_files_recursive(project_root, extensions=_TARGET_EXTENSIONS):
         try:
@@ -213,7 +250,7 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
 
             local = _download_to_local(path, project_root, download_cache)
             if local is None:
-                result.download_failures += 1
+                _record_download_failure(path)
                 return match.group(0)
 
             result.urls_localized += 1
@@ -238,7 +275,7 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
                 return url
             local = _download_to_local(path, project_root, download_cache)
             if local is None:
-                result.download_failures += 1
+                _record_download_failure(path)
                 return url
             result.urls_localized += 1
             return path
@@ -256,8 +293,12 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
         )
     if result.download_failures:
         logger.warn(
-            f"[cdn] Не удалось скачать: {result.download_failures} ссылок"
+            f"[cdn] Не удалось скачать: {result.download_failures} уникальных ресурсов"
         )
+        for failed_url in result.failed_urls[:10]:
+            logger.warn(f"[cdn] Unresolved URL: {failed_url}")
+        if len(result.failed_urls) > 10:
+            logger.warn(f"[cdn] И ещё {len(result.failed_urls) - 10} URL")
 
     return result
 

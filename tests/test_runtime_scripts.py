@@ -43,6 +43,13 @@ def test_t_video_class_triggers_media(tmp_path: Path) -> None:
     assert project_needs_media_runtime(tmp_path) is True
 
 
+def test_ai_media_classes_trigger_runtime_after_namespace_rewrite(tmp_path: Path) -> None:
+    (tmp_path / "page.html").write_text(
+        '<div class="ai-video"></div><div class="ai-gallery"></div>'
+    )
+    assert project_needs_media_runtime(tmp_path) is True
+
+
 def test_data_original_triggers_media(tmp_path: Path) -> None:
     (tmp_path / "page.html").write_text('<img data-original="bg.jpg" />')
     assert project_needs_media_runtime(tmp_path) is True

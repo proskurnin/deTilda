@@ -197,6 +197,21 @@ service_files:
         - ".js"
         - ".php"
         - ".txt"
+    # Best-effort browser pass после статической CDN-локализации.
+    # Если Playwright/Chromium доступен, deTilda открывает HTML-страницы,
+    # ловит runtime-запросы к static.tildacdn/static.aidacdn и докачивает их
+    # до cdn_cleanup. Если браузер недоступен — шаг логируется как пропущенный,
+    # основной offline-first pipeline продолжает работу.
+    browser_runtime_assets:
+      enabled: true
+      max_pages: 20
+      timeout_sec: 20
+      wait_ms: 1000
+    # Финальный синхронный rewrite namespace после загрузки/локализации ресурсов:
+    # til* → ai*, t-* → ai-*, data-til*-* → data-ai*-* во всех HTML/CSS/JS.
+    # Запускается ближе к концу пайплайна, чтобы runtime-ресурсы тоже были переписаны.
+    namespace_rewrite:
+      enabled: true
 
   # Файлы, в которых удаляются остаточные ссылки на Tilda — cleaners.py
   cleaner_options:

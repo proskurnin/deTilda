@@ -65,7 +65,9 @@ def substitute_tilda_fonts(project_root: Path | Any, loader: Any = None) -> int:
     project_root = Path(project_root)
 
     if loader is None:
-        loader = ConfigLoader(project_root.parent.parent if project_root.parent.name == "_workdir" else project_root.parent)
+        from core.project import _detect_repository_root
+
+        loader = ConfigLoader(_detect_repository_root(project_root))
 
     font_cfg = loader.font_substitute()
     google_font_family = font_cfg.family

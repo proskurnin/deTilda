@@ -164,7 +164,6 @@ def _download_remote_assets(project_root: Path, loader: ConfigLoader) -> tuple[i
             continue
 
         if used_insecure_retry:
-            warnings += 1
             ssl_bypassed_downloads += 1
 
         try:

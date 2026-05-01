@@ -56,6 +56,64 @@ def test_replaces_aidacdn_url(tmp_path: Path, monkeypatch) -> None:
     assert '"lib/flags/flags7.png"' in text
 
 
+def test_replaces_protocol_relative_url(tmp_path: Path, monkeypatch) -> None:
+    """Protocol-relative CDN URLs are treated as https resources."""
+    html = tmp_path / "index.html"
+    html.write_text('<script src="//static.tildacdn.com/js/tilda-extra.js"></script>', encoding="utf-8")
+
+    monkeypatch.setattr(downloader, "fetch_bytes", lambda _url, **_kw: (b"js", False))
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
+
+    text = html.read_text(encoding="utf-8")
+    assert "static.tildacdn.com" not in text
+    assert 'src="js/tilda-extra.js"' in text
+    assert (tmp_path / "js" / "tilda-extra.js").exists()
+    assert result.urls_localized == 1
+
+
+def test_direct_url_query_is_not_used_as_local_filename(tmp_path: Path, monkeypatch) -> None:
+    """Cache-busting query strings are stripped when saving a CDN file."""
+    js = tmp_path / "test.js"
+    js.write_text(
+        'var src = "https://static.tildacdn.com/js/tilda-extra.js?t=123";',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(downloader, "fetch_bytes", lambda _url, **_kw: (b"js", False))
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    text = js.read_text(encoding="utf-8")
+    assert "tildacdn.com" not in text
+    assert '"js/tilda-extra.js"' in text
+    assert (tmp_path / "js" / "tilda-extra.js").exists()
+    assert not (tmp_path / "js" / "tilda-extra.js?t=123").exists()
+
+
+def test_dynamic_script_src_assignment_is_localized(tmp_path: Path, monkeypatch) -> None:
+    """Script URLs assigned after createElement are still direct CDN strings."""
+    js = tmp_path / "loader.js"
+    js.write_text(
+        "var s = document.createElement('script');"
+        "s.src = 'https://static.tildacdn.com/js/tilda-extra.js';"
+        "document.head.appendChild(s);",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(downloader, "fetch_bytes", lambda _url, **_kw: (b"js", False))
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    text = js.read_text(encoding="utf-8")
+    assert "static.tildacdn.com" not in text
+    assert "s.src = 'js/tilda-extra.js'" in text
+    assert (tmp_path / "js" / "tilda-extra.js").exists()
+
+
 def test_replaces_concatenated_url_in_js(tmp_path: Path, monkeypatch) -> None:
     """Конкатенация 'https://static.aidacdn.' + zone() + '/path/file.png' заменяется."""
     js = tmp_path / "phone.js"
@@ -262,11 +320,32 @@ def test_negative_cache_skips_repeated_failed_path(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(downloader, "fetch_bytes", _always_404)
     monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
 
-    cdn_localizer.localize_cdn_urls(tmp_path)
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
 
     # Один URL → одна попытка с aida path → одна с reverse path = 2 запроса всего
     # А не 4 (двойное обращение от двух файлов)
     assert call_count["n"] <= 2, f"Слишком много повторных попыток: {call_count['n']}"
+    assert result.download_failures == 1
+    assert result.failed_urls == ["https://static.tildacdn.com/missing/x.png"]
+
+
+def test_uses_browser_like_user_agent_for_cdn_downloads(tmp_path: Path, monkeypatch) -> None:
+    js = tmp_path / "test.js"
+    js.write_text('var u = "https://static.tildacdn.com/js/tilda-extra.js";', encoding="utf-8")
+
+    seen_user_agents: list[str] = []
+
+    def _fetch(_url, **kw):
+        seen_user_agents.append(kw.get("user_agent", ""))
+        return (b"js", False)
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fetch)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    cdn_localizer.localize_cdn_urls(tmp_path)
+
+    assert seen_user_agents
+    assert "Mozilla/5.0" in seen_user_agents[0]
 
 
 def test_does_not_overwrite_existing_local_file(tmp_path: Path, monkeypatch) -> None:

@@ -15,10 +15,10 @@ __all__ = [
 
 _MEDIA_MARKERS_RE = re.compile(
     r"("
-    r"youtube\.com|youtu\.be|data-youtube|t-video|t-slds|t-gallery|"
-    r"data-img-zoom-url|data-original|t-bgimg|"
+    r"youtube\.com|youtu\.be|data-youtube|(?:t|ai)-video|(?:t|ai)-slds|(?:t|ai)-gallery|"
+    r"data-img-zoom-url|data-original|(?:t|ai)-bgimg|"
     r"<form\b|js-form-proccess|data-formactiontype|data-tooltip-hook=[\"']#popup|"
-    r"\bt-popup\b|\bai-popup\b|\bt702\b"
+    r"\bt-popup\b|\bai-popup\b|\bt702\b|\bai702\b"
     r")",
     re.IGNORECASE,
 )

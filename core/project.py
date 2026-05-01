@@ -26,13 +26,23 @@ from core.params import ProcessParams
 from core.schemas import AppConfig
 
 
-def _detect_repository_root(project_root: Path) -> Path:
-    """Определяет корень репозитория по положению project_root.
+def _is_repository_root(path: Path) -> bool:
+    return (path / "config" / "config.yaml").is_file() and (path / "resources").is_dir()
 
-    Если проект лежит в _workdir/ — поднимаемся на два уровня:
-      _workdir/hotelsargis/ → deTilda/
-    Иначе — на один уровень (для тестов и нестандартных путей).
+
+def _detect_repository_root(project_root: Path) -> Path:
+    """Определяет корень репозитория, где лежат config/ и resources/.
+
+    Web jobs распаковываются глубже обычного CLI:
+      _workdir/<job_id>/<job_id>/
+    Поэтому нельзя полагаться только на parent.name == "_workdir"; сначала
+    ищем ближайшего предка с config/config.yaml и resources/.
     """
+    project_root = Path(project_root).resolve()
+    for candidate in (project_root.parent, *project_root.parents):
+        if _is_repository_root(candidate):
+            return candidate
+
     if project_root.parent.name == "_workdir":
         return project_root.parent.parent
     return project_root.parent

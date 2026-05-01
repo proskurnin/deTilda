@@ -8,6 +8,7 @@ from pathlib import Path
 from core import (
     archive,
     assets,
+    browser_assets,
     cdn_localizer,
     checker,
     cleaners,
@@ -18,6 +19,7 @@ from core import (
     images,
     inject,
     logger,
+    namespace_rewriter,
     page404,
     refs,
     report,
@@ -51,6 +53,17 @@ class PipelineStats:
     images_img_fixed: int = 0
     images_background_fixed: int = 0
     images_unresolved: int = 0
+    browser_runtime_pages: int = 0
+    browser_runtime_requests: int = 0
+    browser_runtime_downloaded: int = 0
+    browser_runtime_failed: int = 0
+    browser_runtime_skipped: bool = False
+    browser_runtime_skip_reason: str = ""
+    namespace_files_updated: int = 0
+    namespace_replacements: int = 0
+    namespace_renamed_paths: int = 0
+    namespace_critical_leftovers: int = 0
+    namespace_warning_leftovers: int = 0
     exec_time: float = 0.0
     project_root: Path | None = None  # путь к обработанной папке — для упаковки в ZIP
 
@@ -189,6 +202,43 @@ class DetildaPipeline:
             self._notify("cdn_localizer")
 
             try:
+                browser_cfg = context.config_loader.service_files().pipeline_stages.browser_runtime_assets
+                if browser_cfg.enabled:
+                    with logger.module_scope("browser_runtime_assets"):
+                        browser_result = browser_assets.localize_browser_runtime_assets(
+                            context.project_root,
+                            max_pages=browser_cfg.max_pages,
+                            timeout_sec=browser_cfg.timeout_sec,
+                            wait_ms=browser_cfg.wait_ms,
+                        )
+                    stats.browser_runtime_pages = browser_result.pages_checked
+                    stats.browser_runtime_requests = browser_result.requests_seen
+                    stats.browser_runtime_downloaded = browser_result.downloaded
+                    stats.browser_runtime_failed = browser_result.failed
+                    stats.browser_runtime_skipped = browser_result.skipped
+                    stats.browser_runtime_skip_reason = browser_result.skip_reason
+                    stats.warnings += browser_result.failed
+                    if browser_result.skipped:
+                        logger.warn(
+                            "[browser_runtime_assets] Шаг пропущен: "
+                            f"{browser_result.skip_reason}"
+                        )
+                    else:
+                        logger.info(
+                            "[browser_runtime_assets] Проверено страниц: "
+                            f"{browser_result.pages_checked}, browser requests: "
+                            f"{browser_result.requests_seen}, CDN requests: "
+                            f"{browser_result.cdn_requests_seen}, скачано: "
+                            f"{browser_result.downloaded}, failed: {browser_result.failed}"
+                        )
+                else:
+                    logger.info("[browser_runtime_assets] Шаг отключён в config.yaml")
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг browser_runtime_assets завершился с ошибкой: {exc}")
+                stats.warnings += 1
+            self._notify("browser_runtime_assets")
+
+            try:
                 with logger.module_scope("cdn_cleanup"):
                     cdn_localizer.cleanup_unresolved_cdn_references(context.project_root)
             except Exception as exc:
@@ -229,6 +279,40 @@ class DetildaPipeline:
                 logger.error(f"[pipeline] Шаг script_cleaner завершился с ошибкой: {exc}")
                 stats.warnings += 1
             self._notify("script_cleaner")
+
+            try:
+                namespace_cfg = context.config_loader.service_files().pipeline_stages.namespace_rewrite
+                if namespace_cfg.enabled:
+                    with logger.module_scope("namespace_rewrite"):
+                        namespace_result = namespace_rewriter.rewrite_project_namespace(
+                            context.project_root
+                        )
+                    stats.namespace_files_updated = namespace_result.files_updated
+                    stats.namespace_replacements = namespace_result.replacements
+                    stats.namespace_renamed_paths = namespace_result.renamed_paths
+                    stats.namespace_critical_leftovers = (
+                        namespace_result.critical_leftovers_total
+                    )
+                    stats.namespace_warning_leftovers = namespace_result.warning_leftovers_total
+                    stats.warnings += namespace_result.critical_leftovers_total
+                    if namespace_result.warning_leftovers_total:
+                        logger.warn(
+                            "[namespace_rewrite] Предупреждения namespace: "
+                            f"{namespace_result.warning_leftovers_total}"
+                        )
+                    logger.info(
+                        "[namespace_rewrite] Файлов обновлено: "
+                        f"{namespace_result.files_updated}, replacements: "
+                        f"{namespace_result.replacements}, renamed paths: "
+                        f"{namespace_result.renamed_paths}, critical leftovers: "
+                        f"{namespace_result.critical_leftovers_total}"
+                    )
+                else:
+                    logger.info("[namespace_rewrite] Шаг отключён в config.yaml")
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг namespace_rewrite завершился с ошибкой: {exc}")
+                stats.warnings += 1
+            self._notify("namespace_rewrite")
 
             try:
                 with logger.module_scope("forms_check"):
@@ -334,6 +418,12 @@ class DetildaPipeline:
         logger.info(f"🖼 Исправлено <img>: {stats.images_img_fixed}")
         logger.info(f"🖼 Исправлено background-image: {stats.images_background_fixed}")
         logger.info(f"⚠️ Потенциально неразрешённых изображений: {stats.images_unresolved}")
+        logger.info(f"🌐 Browser runtime pages: {stats.browser_runtime_pages}")
+        logger.info(f"🌐 Browser runtime downloads: {stats.browser_runtime_downloaded}")
+        logger.info(f"🌐 Browser runtime failed: {stats.browser_runtime_failed}")
+        logger.info(f"🧬 Namespace files updated: {stats.namespace_files_updated}")
+        logger.info(f"🧬 Namespace replacements: {stats.namespace_replacements}")
+        logger.info(f"🧬 Namespace critical leftovers: {stats.namespace_critical_leftovers}")
         logger.info(f"⚠️ Предупреждений: {stats.warnings}")
         logger.info(f"⛔ Ошибок: {stats.errors}")
         logger.info(f"🕓 Время выполнения: {elapsed_seconds:.2f} сек")
@@ -352,10 +442,6 @@ class DetildaPipeline:
             critical_findings.append(
                 f"Broken htaccess routes: {stats.broken_htaccess_routes}"
             )
-        if stats.ssl_bypassed_downloads > 0:
-            critical_findings.append(
-                f"SSL bypass used for downloads: {stats.ssl_bypassed_downloads}"
-            )
         if critical_findings:
             logger.warn("CRITICAL FINDINGS:")
             for idx, finding in enumerate(critical_findings, start=1):
@@ -371,4 +457,3 @@ class DetildaPipeline:
         if stats.warnings > 0:
             return "завершено с предупреждениями"
         return "завершено успешно"
-

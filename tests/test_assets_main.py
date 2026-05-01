@@ -183,6 +183,48 @@ def test_returns_asset_result_with_stats(tmp_path: Path) -> None:
     assert hasattr(result.stats, "downloaded")
 
 
+class _RemoteAssetLoader(_FakeLoader):
+    """Loader with remote asset download rules enabled."""
+
+    def patterns(self) -> PatternsConfig:
+        return PatternsConfig.model_validate({
+            "assets": {"til_to_ai_filename": r"\btil"},
+            "links": [r"(?i)\bsrc\s*=\s*[\"'](?P<link>[^\"']+)[\"']"],
+            "text_extensions": [".html"],
+        })
+
+    def service_files(self) -> ServiceFilesConfig:
+        return ServiceFilesConfig.model_validate({
+            "exclude_from_rename": {"files": []},
+            "scripts_to_delete": {"files": []},
+            "remote_assets": {
+                "scan_extensions": [".html"],
+                "rules": [{"folder": "js", "extensions": [".js"]}],
+            },
+            "rename_map_output": {"filename": "{project}_rename_map.json", "location": "logs"},
+        })
+
+
+def test_ssl_bypass_download_is_counted_but_not_warning(tmp_path: Path, monkeypatch) -> None:
+    """SSL fallback stays visible in stats but does not make pipeline warn by itself."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<script src="https://static.tildacdn.com/js/tilda-extra.js"></script>',
+        encoding="utf-8",
+    )
+
+    def _fake_fetch(_url: str):
+        return b"console.log('ok')", True
+
+    monkeypatch.setattr("core.assets.fetch_bytes", _fake_fetch)
+
+    result = rename_and_cleanup_assets(tmp_path, loader=_RemoteAssetLoader())
+
+    assert result.stats.downloaded == 1
+    assert result.stats.ssl_bypassed_downloads == 1
+    assert result.stats.warnings == 0
+
+
 class _FaviconFallbackLoader(_FakeLoader):
     """Loader с правилами resource_copy для проверки if_missing."""
 

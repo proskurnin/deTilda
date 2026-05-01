@@ -26,6 +26,17 @@ def test_detect_repository_root_workdir(tmp_path: Path) -> None:
     assert _detect_repository_root(project) == tmp_path
 
 
+def test_detect_repository_root_nested_web_job(tmp_path: Path) -> None:
+    """Web jobs live in _workdir/<job_id>/<job_id>/ and still use repo config."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "config.yaml").write_text("patterns: {}\n", encoding="utf-8")
+    (tmp_path / "resources").mkdir()
+    project = tmp_path / "_workdir" / "job-id" / "job-id"
+    project.mkdir(parents=True)
+
+    assert _detect_repository_root(project) == tmp_path.resolve()
+
+
 def test_detect_repository_root_other(tmp_path: Path) -> None:
     """Если проект НЕ в _workdir/ — repository_root = parent."""
     project = tmp_path / "myproject"

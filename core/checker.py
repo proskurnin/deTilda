@@ -142,6 +142,24 @@ def _get_effective_base_directory(file_path: Path, project_root: Path) -> Path:
     return file_path.parent
 
 
+def _relative_candidates(
+    file_path: Path,
+    base_directory: Path,
+    link_target: str,
+) -> list[Path]:
+    """Return possible filesystem targets for a relative link.
+
+    Body fragments can be interpreted in two contexts:
+    - as injected HTML inside the real page, where links resolve from page root;
+    - as physical files under files/, where links like ../page.html are valid.
+    """
+    candidates = [(base_directory / link_target).resolve()]
+    physical_candidate = (file_path.parent / link_target).resolve()
+    if physical_candidate not in candidates:
+        candidates.append(physical_candidate)
+    return candidates
+
+
 def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
     """Проверяет все внутренние ссылки в HTML-файлах проекта.
 
@@ -180,11 +198,16 @@ def check_links(project_root: Path, loader: ConfigLoader) -> LinkCheckerResult:
                     candidate = route_info.path
                 else:
                     candidate = project_root / (link_path or normalized_link).lstrip("/")
+                candidates = [candidate]
             else:
-                candidate = (base_directory / (link_path or normalized_link)).resolve()
+                candidates = _relative_candidates(
+                    file_path,
+                    base_directory,
+                    link_path or normalized_link,
+                )
 
             result.checked += 1
-            if not candidate.exists():
+            if not any(candidate.exists() for candidate in candidates):
                 result.broken += 1
                 logger.warn(
                     f"[checker] Битая ссылка в {utils.relpath(file_path, project_root)}: {normalized_link}"
