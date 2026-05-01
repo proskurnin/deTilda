@@ -17,6 +17,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from core.version import APP_VERSION  # noqa: E402
 from web.app import app, _STORE  # noqa: E402
 
 
@@ -40,6 +41,13 @@ def test_health(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_index_renders_app_version(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert f"v{APP_VERSION}" in r.text
+    assert "__APP_VERSION__" not in r.text
 
 
 # ---------------------------------------------------------------------------
