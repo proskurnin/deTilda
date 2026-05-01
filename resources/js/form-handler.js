@@ -526,19 +526,45 @@
   }
 
   function initForm(form) {
-    if (form.dataset.dtInit || !isAidaForm(form)) return;
-    form.dataset.dtInit = 'true';
-    
-    attachRealtimeCleanup(form);
+    if (form.dataset.dtInit) return;
+    try {
+      var realForm = form.tagName === 'FORM' ? form : form.querySelector('form');
+      if (!realForm) return;
+
+      if (realForm.dataset.dtInit || !isAidaForm(realForm)) return;
+      realForm.dataset.dtInit = 'true';
+      form.dataset.dtInit = 'true'; // Mark container too
+
+      attachRealtimeCleanup(realForm);
+    } catch (e) {
+      // Fail silently
+    }
   }
 
   (function waitForms() {
-    var forms = document.querySelectorAll('form, .ai-form, .js-form-proccess');
-    for (var i = 0; i < forms.length; i += 1) {
-      var f = forms[i].tagName === 'FORM' ? forms[i] : forms[i].querySelector('form');
-      if (f) initForm(f);
+    try {
+      var forms = document.querySelectorAll('form, .ai-form, .js-form-proccess, .tn-atom__form');
+      for (var i = 0; i < forms.length; i += 1) {
+        initForm(forms[i]);
+      }
+    } catch (e) {
+      // Fail silently
     }
     setTimeout(waitForms, 500);
+  })();
+
+  // Emergency visibility check: ensure site is not hidden if Aida scripts fail
+  (function ensureVisible() {
+    try {
+      var recs = document.querySelectorAll('.ai-records');
+      for (var i = 0; i < recs.length; i += 1) {
+        if (window.getComputedStyle(recs[i]).opacity === '0') {
+          recs[i].style.opacity = '1';
+          recs[i].style.visibility = 'visible';
+        }
+      }
+    } catch (e) {}
+    setTimeout(ensureVisible, 2000);
   })();
 
   ensureInvalidStyle();

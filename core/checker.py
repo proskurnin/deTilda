@@ -344,7 +344,7 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
 
 
 def check_forms_integration(project_root: Path) -> FormIntegrationResult:
-    """Проверяет что каждая страница с формой имеет подключённый form-handler.js.
+    """Проверяет что каждая форма имеет подключённый form-handler.js.
 
     Проверка статическая — анализирует HTML, не отправляет реальные запросы.
     Ищет не только теги <form>, но и маркеры Zero Block форм.
