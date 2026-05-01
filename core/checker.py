@@ -344,13 +344,18 @@ def check_tilda_remnants(project_root: Path, loader: ConfigLoader) -> TildaRemna
 
 
 def check_forms_integration(project_root: Path) -> FormIntegrationResult:
-    """Проверяет что каждая HTML-страница с формой имеет подключённый form-handler.js.
+    """Проверяет что каждая страница с формой имеет подключённый form-handler.js.
 
     Проверка статическая — анализирует HTML, не отправляет реальные запросы.
+    Ищет не только теги <form>, но и маркеры Zero Block форм.
     warnings=1 если хотя бы одна форма не подключена к handler.
     """
     project_root = Path(project_root)
-    form_pattern = re.compile(r"<form\b", re.IGNORECASE)
+    # Используем расширенный паттерн для поиска любых следов форм
+    form_pattern = re.compile(
+        r"<form\b|tn-atom__form|ai-form|js-form-proccess|ai_zeroForms__init",
+        re.IGNORECASE,
+    )
     handler_pattern = re.compile(r"form-handler\.js", re.IGNORECASE)
 
     forms_found = 0
@@ -362,12 +367,17 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
         except Exception:
             continue
 
-        file_forms = len(form_pattern.findall(content))
-        if file_forms == 0:
+        # Находим все вхождения маркеров форм на странице
+        file_forms_matches = form_pattern.findall(content)
+        if not file_forms_matches:
             continue
-        forms_found += file_forms
+
+        count_on_page = len(file_forms_matches)
+        forms_found += count_on_page
+        
+        # Если на странице есть хотя бы один handler, считаем все формы этой страницы защищёнными
         if handler_pattern.search(content):
-            forms_hooked += file_forms
+            forms_hooked += count_on_page
 
     result = FormIntegrationResult(forms_found=forms_found, forms_hooked=forms_hooked)
     if forms_found != forms_hooked:

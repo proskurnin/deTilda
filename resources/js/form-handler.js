@@ -401,9 +401,22 @@
     closePopup(_findPopupRoot(form));
   }
 
+  function isAidaForm(form) {
+    if (!form) return false;
+    // Проверяем наличие маркеров Tilda/Aida
+    return !!(
+      form.classList.contains('js-form-proccess') ||
+      form.classList.contains('ai-form') ||
+      form.querySelector('.tn-atom__form') ||
+      form.closest('.r').querySelector('.tn-atom__form') ||
+      form.getAttribute('data-aida-formskey') ||
+      form.closest('[data-aida-formskey]')
+    );
+  }
+
   function handleSubmit(event) {
     var form = event.target;
-    if (!form || form.tagName !== 'FORM') {
+    if (!form || form.tagName !== 'FORM' || !isAidaForm(form)) {
       return;
     }
 
@@ -422,7 +435,7 @@
     var btn = event.target.closest('.ai-submit, button[type="submit"], input[type="submit"]');
     if (!btn) return;
     var form = btn.closest('form');
-    if (!form) return;
+    if (!form || !isAidaForm(form)) return;
 
     // Intercept click to prevent Tilda runtime from triggering its own submission logic
     if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
@@ -438,6 +451,10 @@
   }
 
   function submitForm(form) {
+    // Neutralize original action right before our fetch
+    form.setAttribute('action', '#');
+    form.removeAttribute('data-success-url');
+
     fetch(resolveAction(form), {
       method: 'POST',
       body: new FormData(form),
@@ -493,12 +510,8 @@
   }
 
   function initForm(form) {
-    if (form.dataset.dtInit) return;
+    if (form.dataset.dtInit || !isAidaForm(form)) return;
     form.dataset.dtInit = 'true';
-    
-    // Neutralize original action
-    form.setAttribute('action', '#');
-    form.removeAttribute('data-success-url');
     
     attachRealtimeCleanup(form);
   }
