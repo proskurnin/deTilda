@@ -137,3 +137,36 @@ def test_removes_inline_script_referencing_deleted_file(tmp_path: Path) -> None:
     # Обычный скрипт не тронут
     assert "normal.js" in text
     assert removed >= 1
+
+def test_script_cleaner_keeps_zero_form_runtime(tmp_path: Path) -> None:
+    """Скрипты форм должны сохраняться, если найден маркер Zero Form."""
+    html = tmp_path / "zero.html"
+    html.write_text(
+        """
+        <html>
+        <head>
+            <script src="js/tilda-forms-1.0.min.js"></script>
+            <script src="js/tilda-zero-forms-1.0.min.js"></script>
+        </head>
+        <body>
+            <div class="tn-atom__form"></div>
+            <script>ai_zeroForms__init();</script>
+        </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    # Наши обработчики на месте (защитный механизм can_remove_tilda_form_scripts)
+    (tmp_path / "send_email.php").write_text("<?php", encoding="utf-8")
+    (tmp_path / "js").mkdir(exist_ok=True, parents=True)
+    (tmp_path / "js" / "form-handler.js").write_text("//", encoding="utf-8")
+
+    loader = _FakeLoader()
+    removed = remove_disallowed_scripts(tmp_path, loader)
+    text = html.read_text(encoding="utf-8")
+
+    # Не должно быть удалений, так как найдены маркеры Zero Form
+    assert removed == 0
+    assert "tilda-forms-1.0.min.js" in text
+    assert "tilda-zero-forms-1.0.min.js" in text

@@ -407,14 +407,37 @@
       return;
     }
 
-    if (!validateForm(form)) {
-      event.preventDefault();
-      showPopup('Проверьте корректность полей формы', false);
+    // Allow native HTML5 validation to work first
+    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
       return;
     }
 
     event.preventDefault();
+    event.stopImmediatePropagation();
 
+    submitForm(form);
+  }
+
+  function handleButtonClick(event) {
+    var btn = event.target.closest('.ai-submit, button[type="submit"], input[type="submit"]');
+    if (!btn) return;
+    var form = btn.closest('form');
+    if (!form) return;
+
+    // Intercept click to prevent Tilda runtime from triggering its own submission logic
+    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+      form.reportValidity();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    submitForm(form);
+  }
+
+  function submitForm(form) {
     fetch(resolveAction(form), {
       method: 'POST',
       body: new FormData(form),
@@ -469,13 +492,29 @@
       });
   }
 
+  function initForm(form) {
+    if (form.dataset.dtInit) return;
+    form.dataset.dtInit = 'true';
+    
+    // Neutralize original action
+    form.setAttribute('action', '#');
+    form.removeAttribute('data-success-url');
+    
+    attachRealtimeCleanup(form);
+  }
+
+  (function waitForms() {
+    var forms = document.querySelectorAll('form, .ai-form, .js-form-proccess');
+    for (var i = 0; i < forms.length; i += 1) {
+      var f = forms[i].tagName === 'FORM' ? forms[i] : forms[i].querySelector('form');
+      if (f) initForm(f);
+    }
+    setTimeout(waitForms, 500);
+  })();
+
   ensureInvalidStyle();
   document.addEventListener('submit', handleSubmit, true);
+  document.addEventListener('click', handleButtonClick, true);
   document.addEventListener('click', handlePopupClick, false);
   document.addEventListener('keydown', handleEscKey, false);
-
-  var forms = document.querySelectorAll('form');
-  for (var i = 0; i < forms.length; i += 1) {
-    attachRealtimeCleanup(forms[i]);
-  }
 })();

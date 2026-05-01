@@ -18,7 +18,9 @@ _MEDIA_MARKERS_RE = re.compile(
     r"youtube\.com|youtu\.be|data-youtube|(?:t|ai)-video|(?:t|ai)-slds|(?:t|ai)-gallery|"
     r"data-img-zoom-url|data-original|(?:t|ai)-bgimg|"
     r"<form\b|js-form-proccess|data-formactiontype|data-tooltip-hook=[\"']#popup|"
-    r"\bt-popup\b|\bai-popup\b|\bt702\b|\bai702\b"
+    r"\bt-popup\b|\bai-popup\b|\bt702\b|\bai702\b|"
+    r"tn-atom__form|ai-form|ai-input|ai-submit|data-input-lid|data-aida-formskey|"
+    r"ai_zeroForms__init|aida-zero-forms|ai702__form|ai-popup_show"
     r")",
     re.IGNORECASE,
 )
@@ -30,6 +32,8 @@ CONDITIONALLY_REQUIRED_RUNTIME_SCRIPTS = {
     "aida-fallback-1.0.min.js",
     "tilda-forms-1.0.min.js",
     "aida-forms-1.0.min.js",
+    "tilda-zero-forms-1.0.min.js",
+    "aida-zero-forms-1.0.min.js",
 }
 
 
