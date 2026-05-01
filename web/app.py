@@ -145,7 +145,8 @@ AdminAuth = Annotated[HTTPBasicCredentials, Depends(_admin_auth)]
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
-    return (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    html = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    return html.replace("__APP_VERSION__", APP_VERSION)
 
 
 @app.get("/health")
