@@ -1,6 +1,6 @@
 {
   "name": "deTilda",
-  "version": "5.1.3",
+  "version": "5.1.4",
   "release_date": "2026-05-01",
   "description": "Автоматическая подготовка Tilda-экспортов к деплою на собственный хостинг.",
   "authors": [
@@ -19,6 +19,6 @@
     "core": "core"
   },
   "build": {
-    "package_name": "detilda_5.1.3.zip"
+    "package_name": "detilda_5.1.4.zip"
   }
 }
