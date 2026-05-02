@@ -530,51 +530,43 @@
     }
   }
 
-  function initForm(form) {
-    if (form.dataset.dtInit) return;
+  // Emergency visibility check: ensure site is not hidden
+  (function ensureVisible() {
     try {
+      var recs = document.querySelectorAll('.ai-records, .t-records');
+      for (var i = 0; i < recs.length; i += 1) {
+        recs[i].style.setProperty('opacity', '1', 'important');
+        recs[i].style.setProperty('visibility', 'visible', 'important');
+        recs[i].style.setProperty('display', 'block', 'important');
+      }
+    } catch (e) {}
+    setTimeout(ensureVisible, 1000);
+  })();
+
+  function initForm(form) {
+    try {
+      if (form.dataset.dtInit) return;
       var realForm = form.tagName === 'FORM' ? form : form.querySelector('form');
       if (!realForm) return;
 
       if (realForm.dataset.dtInit || !isAidaForm(realForm)) return;
       realForm.dataset.dtInit = 'true';
-      form.dataset.dtInit = 'true'; // Mark container too
+      form.dataset.dtInit = 'true';
 
       attachRealtimeCleanup(realForm);
-    } catch (e) {
-      // Fail silently
-    }
+    } catch (e) {}
   }
 
   (function waitForms() {
     try {
-      var forms = document.querySelectorAll('form, .ai-form, .js-form-proccess, .tn-atom__form');
+      var forms = document.querySelectorAll('form, .ai-form, .t-form, .tn-atom__form');
       for (var i = 0; i < forms.length; i += 1) {
         initForm(forms[i]);
       }
-    } catch (e) {
-      // Fail silently
-    }
-    setTimeout(waitForms, 500);
-  })();
-
-  // Emergency visibility check: ensure site is not hidden if Aida scripts fail
-  (function ensureVisible() {
-    try {
-      var recs = document.querySelectorAll('.ai-records');
-      for (var i = 0; i < recs.length; i += 1) {
-        var style = window.getComputedStyle(recs[i]);
-        if (style.opacity === '0' || style.visibility === 'hidden') {
-          recs[i].style.setProperty('opacity', '1', 'important');
-          recs[i].style.setProperty('visibility', 'visible', 'important');
-          recs[i].style.setProperty('display', 'block', 'important');
-        }
-      }
     } catch (e) {}
-    setTimeout(ensureVisible, 600);
+    setTimeout(waitForms, 1000);
   })();
 
-  ensureInvalidStyle();
   document.addEventListener('submit', handleSubmit, true);
   document.addEventListener('click', handleButtonClick, true);
   document.addEventListener('click', handlePopupClick, false);
