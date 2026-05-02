@@ -33,9 +33,22 @@ jobs:
             set -eu
             cd /home/deploy/staging
             sudo chown -R "$(id -u):$(id -g)" /home/deploy/staging
+            if [ -f .env.staging ]; then
+              cp .env.staging /tmp/detilda.env.staging
+            elif [ -f /home/deploy/.env.staging ]; then
+              cp /home/deploy/.env.staging /tmp/detilda.env.staging
+            elif [ -f /home/deploy/secrets/.env.staging ]; then
+              cp /home/deploy/secrets/.env.staging /tmp/detilda.env.staging
+            fi
             git fetch --prune origin main
             git checkout -B main origin/main
             git reset --hard origin/main
+            if [ ! -f /tmp/detilda.env.staging ]; then
+              echo "Missing .env.staging on server. Put it in /home/deploy/.env.staging or /home/deploy/secrets/.env.staging."
+              exit 1
+            fi
+            cp /tmp/detilda.env.staging .env.staging
+            chmod 600 .env.staging
             docker compose -f docker-compose.staging.yml up -d --build --force-recreate
             docker image prune -f
             sudo cp nginx/staging.conf /etc/nginx/sites-available/detilda.proskurnin.com
@@ -65,9 +78,22 @@ jobs:
             set -eu
             cd /home/deploy/prod
             sudo chown -R "$(id -u):$(id -g)" /home/deploy/prod
+            if [ -f .env.prod ]; then
+              cp .env.prod /tmp/detilda.env.prod
+            elif [ -f /home/deploy/.env.prod ]; then
+              cp /home/deploy/.env.prod /tmp/detilda.env.prod
+            elif [ -f /home/deploy/secrets/.env.prod ]; then
+              cp /home/deploy/secrets/.env.prod /tmp/detilda.env.prod
+            fi
             git fetch --prune origin prod
             git checkout -B prod origin/prod
             git reset --hard origin/prod
+            if [ ! -f /tmp/detilda.env.prod ]; then
+              echo "Missing .env.prod on server. Put it in /home/deploy/.env.prod or /home/deploy/secrets/.env.prod."
+              exit 1
+            fi
+            cp /tmp/detilda.env.prod .env.prod
+            chmod 600 .env.prod
             docker compose -f docker-compose.prod.yml up -d --build --force-recreate
             docker image prune -f
             for i in 1 2 3 4 5; do

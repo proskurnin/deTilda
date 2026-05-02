@@ -2,6 +2,10 @@
 
 This file records user-visible and operational changes.
 
+## 5.5.1 - 2026-05-02
+
+- Fixed deploy workflow to preserve server-local `.env.staging` and `.env.prod` files after removing them from git.
+
 ## 5.5.0 - 2026-05-02
 
 - Added clickable processing-result metrics in the web UI with a details modal for counters, warnings, and errors.
