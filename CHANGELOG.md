@@ -23,6 +23,7 @@ Each release entry should explain:
 
 - Production Docker Compose now binds the app to `127.0.0.1:8001` so it can run on the same server as staging without conflicting with staging port `8000`.
 - Production GitHub Actions deploy now installs `nginx/prod.conf`, reloads nginx, and checks local health on `127.0.0.1:8001`.
+- Staging and production deploy scripts now remove stale `/tmp/detilda.env.*` backup files before copying the server-local env file. This prevents a previous root-owned bootstrap backup from blocking GitHub Actions deploys that run as `deploy`.
 
 ### Verified
 
@@ -39,7 +40,8 @@ Each release entry should explain:
   - `https://detilda.ru/health`: version `5.6.0`.
 - Confirmed staging health remains available:
   - `https://detilda.proskurnin.com/health`: version `5.6.0`.
-- GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY` still need to be verified or added for automated production deploys.
+- Added and verified a new deploy SSH key for `deploy@2.26.31.179`; `deploy` has passwordless sudo.
+- Tested GitHub Actions production deploy secrets with commit `c99a8a4d964e50d7cf5a7fb7fa067842dff8b9c0`; CI tests passed and deploy reached the server, but failed on a stale root-owned `/tmp/detilda.env.prod` file. The deploy workflow now removes stale temp env backups before copying.
 
 ## 5.6.0 - 2026-05-03
 

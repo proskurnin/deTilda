@@ -33,6 +33,7 @@ jobs:
             set -eu
             cd /home/deploy/staging
             sudo chown -R "$(id -u):$(id -g)" /home/deploy/staging
+            sudo rm -f /tmp/detilda.env.staging
             if [ -f .env.staging ]; then
               cp .env.staging /tmp/detilda.env.staging
             elif [ -f /home/deploy/.env.staging ]; then
@@ -79,6 +80,7 @@ jobs:
             set -eu
             cd /home/deploy/prod
             sudo chown -R "$(id -u):$(id -g)" /home/deploy/prod
+            sudo rm -f /tmp/detilda.env.prod
             if [ -f .env.prod ]; then
               cp .env.prod /tmp/detilda.env.prod
             elif [ -f /home/deploy/.env.prod ]; then

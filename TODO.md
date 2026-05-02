@@ -14,8 +14,7 @@ This file is the canonical place for future plans and follow-up work.
 ## Planned Work
 
 - Finish automated production deploy:
-  - verify or add GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY`;
-  - run a GitHub Actions production deploy from the `prod` branch;
+  - rerun a GitHub Actions production deploy from the `prod` branch after the `/tmp/detilda.env.prod` ownership fix;
   - verify `https://detilda.com/health` and `https://detilda.ru/health` after the GitHub Actions deploy.
 - Consider adding deeper Tilda-export validation after the first required-file gate:
   - detect `data-aida-export="yes"` / `data-tilda-project-id` markers in HTML;
