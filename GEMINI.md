@@ -1,22 +1,8 @@
-# deTilda - Gemini Instructions
+# Gemini Instructions
 
-## Общие принципы
-- **Детерминизм:** Пайплайн обработки должен быть воспроизводимым. Избегайте изменений, которые делают результат случайным.
-- **Оффлайн-first:** Инструмент предназначен для подготовки сайтов к оффлайн-использованию или хостингу без зависимости от Tilda.
-- **Минимальные зависимости:** Не добавляйте новые тяжелые библиотеки (например, полноценный `pydantic`), используйте `core/pydantic_compat.py`.
+The canonical project instructions are in `AGENTS.md`.
 
-## Архитектура (14 шагов)
-Соблюдайте порядок шагов в `core/pipeline.py`. Изменение порядка — это breaking change.
-1. `archive` -> 2. `assets` -> 3. `page404` -> 4. `cleaners` -> 5. `forms` -> 6. `inject` -> 7. `fonts_localizer` -> 8. `refs` -> 9. `images` -> 10. `script_cleaner` -> 11. `forms_check` -> 12. `html_prettify` -> 13. `checker` -> 14. `tilda-remnants`.
+Before making any changes, read and follow `AGENTS.md`.
 
-## Правила изменения кода
-- **Тесты:** При изменении логики обязательно обновляйте или добавляйте тесты в `tests/`. Используйте `pytest`.
-- **Конфигурация:** Новые настройки должны добавляться в `config/config.yaml` и описываться в `core/schemas.py`.
-- **Пути:** Не хардкодьте абсолютные пути. Используйте `ProjectContext` для работы с путями проекта.
-- **Версионирование:** Версия хранится в `manifest.json`. Для обновления используйте `tools/bump_version.py`.
-
-## Взаимодействие с Gemini
-- Всегда проверяйте работоспособность тестов командой `python -m pytest tests/ -q` после изменений.
-- При работе с путями и ссылками учитывайте нормализацию регистра и `.htaccess`.
-- Не фиксируйте (commit) изменения без явного запроса пользователя.
-- Не фиксируйте артефакты из `_workdir/` или логи из `logs/`.
+Do not treat this file as a separate source of project rules.
+If there is any conflict, `AGENTS.md` wins.
