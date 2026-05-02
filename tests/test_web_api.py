@@ -18,6 +18,7 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from core.version import APP_VERSION  # noqa: E402
+import web.app as app_module  # noqa: E402
 from web.app import app, _STORE  # noqa: E402
 
 
@@ -50,6 +51,20 @@ def test_index_renders_app_version(client: TestClient) -> None:
     assert f"v{APP_VERSION}" in r.text
     assert 'id="app-version"' not in r.text
     assert "__APP_VERSION__" not in r.text
+
+
+def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "<h1>deTilda v9.9.9</h1>" in r.text
+
+
+def test_health_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["version"] == "9.9.9"
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from core.config_loader import ConfigLoader
 from core.packer import pack_result
 from core.schemas import WebConfig
+from core.utils import load_manifest
 from core.version import APP_VERSION
 from web.jobs import JobStatus, JobStore
 from web.worker import run_job
@@ -46,6 +47,11 @@ _CFG_INT_FIELDS = frozenset({
     "max_upload_size_mb", "processing_timeout_sec",
     "max_concurrent_jobs", "job_ttl_minutes", "log_ttl_days", "rate_limit_per_minute",
 })
+
+
+def _get_runtime_version() -> str:
+    manifest = load_manifest()
+    return str(manifest.get("version", APP_VERSION))
 
 
 def _get_web_cfg() -> WebConfig:
@@ -146,12 +152,12 @@ AdminAuth = Annotated[HTTPBasicCredentials, Depends(_admin_auth)]
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     html = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    return html.replace("__APP_VERSION__", APP_VERSION)
+    return html.replace("__APP_VERSION__", _get_runtime_version())
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": APP_VERSION}
+    return {"status": "ok", "version": _get_runtime_version()}
 
 
 @app.post("/api/jobs", status_code=202)
