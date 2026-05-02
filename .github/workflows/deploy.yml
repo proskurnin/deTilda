@@ -40,6 +40,7 @@ jobs:
             elif [ -f /home/deploy/secrets/.env.staging ]; then
               cp /home/deploy/secrets/.env.staging /tmp/detilda.env.staging
             fi
+            rm -f .env.staging
             git fetch --prune origin main
             git checkout -B main origin/main
             git reset --hard origin/main
@@ -85,6 +86,7 @@ jobs:
             elif [ -f /home/deploy/secrets/.env.prod ]; then
               cp /home/deploy/secrets/.env.prod /tmp/detilda.env.prod
             fi
+            rm -f .env.prod
             git fetch --prune origin prod
             git checkout -B prod origin/prod
             git reset --hard origin/prod

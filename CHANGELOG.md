@@ -2,6 +2,10 @@
 
 This file records user-visible and operational changes.
 
+## 5.5.2 - 2026-05-02
+
+- Fixed deploy checkout after preserving server-local env files by removing the restored working-tree env file before `git checkout`.
+
 ## 5.5.1 - 2026-05-02
 
 - Fixed deploy workflow to preserve server-local `.env.staging` and `.env.prod` files after removing them from git.
