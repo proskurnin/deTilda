@@ -339,6 +339,7 @@ class WebConfig(BaseModel):
     max_upload_size_mb: int = Field(default=50)
     processing_timeout_sec: int = Field(default=120)
     allowed_extensions: List[str] = Field(default_factory=lambda: [".zip"])
+    required_archive_files: List[str] = Field(default_factory=list)
     max_concurrent_jobs: int = Field(default=5)
     job_ttl_minutes: int = Field(default=30)
     log_ttl_days: int = Field(default=7)

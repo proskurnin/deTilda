@@ -61,6 +61,13 @@
   .step-row.s-active { color: #2563eb; }
   .step-icon { width: 13px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
   .step-mini-spin { width: 9px; height: 9px; border: 1.5px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: spin .75s linear infinite; }
+  .batch-list { display: none; margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: .8rem; }
+  .batch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid #f8fafc; }
+  .batch-row:last-child { border-bottom: 0; }
+  .batch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .86rem; color: #374151; }
+  .batch-state { font-size: .78rem; color: #6b7280; }
+  .batch-link { color: #2563eb; text-decoration: none; font-size: .82rem; font-weight: 600; }
+  .batch-link:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -72,13 +79,14 @@
 
   <form id="form">
     <label for="file">ZIP-архив экспорта Tilda</label>
-    <input type="file" id="file" name="file" accept=".zip" required>
+    <input type="file" id="file" name="file" accept=".zip" multiple required>
     <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
     <input type="email" id="email" name="email" placeholder="owner@example.com">
     <button type="submit" class="btn-primary" id="btn">Обработать</button>
   </form>
 
   <div id="status"></div>
+  <div id="batch-list" class="batch-list"></div>
   <div id="progress-block">
     <div class="progress-title">Шаги обработки</div>
     <div class="progress-steps" id="progress-steps"></div>
@@ -122,12 +130,23 @@ const statTime   = document.getElementById('stat-time');
 const errBox    = document.getElementById('err-box');
 const errMsg    = document.getElementById('err-msg');
 const errHint   = document.getElementById('err-hint');
+const batchList = document.getElementById('batch-list');
 const detailsModal = document.getElementById('details-modal');
 const detailsTitle = document.getElementById('details-title');
 const detailsList  = document.getElementById('details-list');
 const detailsClose = document.getElementById('details-close');
 
 let currentStats = null;
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
 
 const STEPS = [
   { id: 'assets',          label: 'Ассеты' },
@@ -175,6 +194,8 @@ form.addEventListener('submit', async e => {
   btn.disabled = true;
   downloadEl.style.display = 'none';
   btnAgain.style.display = 'none';
+  batchList.style.display = 'none';
+  batchList.innerHTML = '';
   statsBlock.style.display = 'none';
   errBox.style.display = 'none';
   setStatus('Загрузка файла…', true, false);
@@ -196,17 +217,40 @@ form.addEventListener('submit', async e => {
     return;
   }
 
-  const { job_id } = await resp.json();
-  poll(job_id);
+  const body = await resp.json();
+  const jobs = body.jobs || [{ job_id: body.job_id, filename: document.getElementById('file').files[0]?.name || 'archive.zip' }];
+  if (jobs.length > 1) {
+    setStatus(`Поставлено в обработку: ${jobs.length}`, true, false);
+    batchList.style.display = 'block';
+    jobs.forEach(job => {
+      const row = document.createElement('div');
+      row.className = 'batch-row';
+      row.id = `job-row-${job.job_id}`;
+      row.innerHTML = `
+        <div>
+          <div class="batch-name">${escapeHtml(job.filename || job.job_id)}</div>
+          <div class="batch-state">ожидание</div>
+        </div>
+        <div></div>`;
+      batchList.appendChild(row);
+      poll(job.job_id, { row, batch: true });
+    });
+  } else {
+    poll(jobs[0].job_id, { batch: false });
+  }
 });
 
 const progressBlock = document.getElementById('progress-block');
 
 
-async function poll(jobId) {
-  setStatus('Обработка сайта…', true, false);
-  progressBlock.style.display = 'block';
-  renderProgress([]);
+async function poll(jobId, opts = {}) {
+  const isBatch = Boolean(opts.batch);
+  const row = opts.row || null;
+  if (!isBatch) {
+    setStatus('Обработка сайта…', true, false);
+    progressBlock.style.display = 'block';
+    renderProgress([]);
+  }
   const interval = setInterval(async () => {
     let data;
     try {
@@ -214,25 +258,54 @@ async function poll(jobId) {
       data = await r.json();
     } catch { return; }
 
-    if (data.progress) renderProgress(data.progress);
+    if (data.progress && !isBatch) renderProgress(data.progress);
+    if (row) {
+      const state = row.querySelector('.batch-state');
+      if (state) state.textContent = statusLabel(data.status);
+    }
 
     if (data.status === 'done') {
       clearInterval(interval);
-      setStatus('', false, false);
-      progressBlock.style.display = 'none';
-      showStats(data.stats);
-      downloadEl.href = `/api/jobs/${jobId}/download`;
-      downloadEl.style.display = 'block';
-      btnAgain.style.display = 'block';
-      btn.disabled = false;
+      if (isBatch && row) {
+        row.querySelector('.batch-state').textContent = 'готово';
+        row.lastElementChild.innerHTML = `<a class="batch-link" href="/api/jobs/${jobId}/download">скачать</a>`;
+        finishBatchIfDone();
+      } else {
+        setStatus('', false, false);
+        progressBlock.style.display = 'none';
+        showStats(data.stats);
+        downloadEl.href = `/api/jobs/${jobId}/download`;
+        downloadEl.style.display = 'block';
+        btnAgain.style.display = 'block';
+        btn.disabled = false;
+      }
     } else if (data.status === 'error') {
       clearInterval(interval);
-      progressBlock.style.display = 'none';
-      showError(data.error, data.error_code);
-      btnAgain.style.display = 'block';
-      btn.disabled = false;
+      if (isBatch && row) {
+        row.querySelector('.batch-state').textContent = data.error || 'ошибка';
+        row.querySelector('.batch-state').style.color = '#dc2626';
+        finishBatchIfDone();
+      } else {
+        progressBlock.style.display = 'none';
+        showError(data.error, data.error_code);
+        btnAgain.style.display = 'block';
+        btn.disabled = false;
+      }
     }
   }, 2000);
+}
+
+function statusLabel(s) {
+  return { pending: 'ожидание', running: 'обработка', done: 'готово', error: 'ошибка' }[s] || s || 'ожидание';
+}
+
+function finishBatchIfDone() {
+  const states = [...batchList.querySelectorAll('.batch-state')].map(el => el.textContent);
+  const done = states.every(text => text === 'готово' || text.includes('ошибка'));
+  if (!done) return;
+  setStatus('', false, false);
+  btnAgain.style.display = 'block';
+  btn.disabled = false;
 }
 
 const ERROR_HINTS = {
@@ -313,6 +386,8 @@ btnAgain.addEventListener('click', () => {
   form.reset();
   currentStats = null;
   closeDetails();
+  batchList.style.display = 'none';
+  batchList.innerHTML = '';
   statsBlock.style.display = 'none';
   errBox.style.display = 'none';
   progressBlock.style.display = 'none';

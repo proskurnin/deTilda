@@ -60,21 +60,61 @@
   .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; padding: 1rem 1.25rem; }
   .cfg-item { background: #f8fafc; border-radius: 8px; padding: .65rem .9rem; }
   .cfg-item label { display: block; font-size: .75rem; color: #6b7280; margin-bottom: .3rem; }
-  .cfg-item input { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: .35rem .55rem; font-size: .95rem; font-weight: 600; background: #fff; }
-  .cfg-item input:focus { outline: 2px solid #2563eb; border-color: transparent; }
+  .cfg-item input, .cfg-item textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: .35rem .55rem; font-size: .95rem; font-weight: 600; background: #fff; }
+  .cfg-item textarea { min-height: 118px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .cfg-item input:focus, .cfg-item textarea:focus { outline: 2px solid #2563eb; border-color: transparent; }
   #last-refresh { font-size: .75rem; opacity: .6; margin-left: auto; }
   .err-banner { background: #fee2e2; color: #991b1b; padding: .6rem 1rem; font-size: .85rem; border-radius: 8px; margin-bottom: .75rem; display: none; }
+  .auth-screen { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem; background: linear-gradient(135deg, #e0f2fe 0%, #f8fafc 48%, #fce7f3 100%); }
+  .auth-screen[hidden] { display: none; }
+  .auth-card { width: min(420px, 100%); background: rgba(255,255,255,.96); border: 1px solid rgba(148,163,184,.28); border-radius: 14px; box-shadow: 0 24px 80px rgba(15,23,42,.22); padding: 1.35rem; }
+  .auth-card h2 { font-size: 1.25rem; margin-bottom: .35rem; }
+  .auth-card p { color: #64748b; font-size: .9rem; line-height: 1.45; margin-bottom: 1rem; }
+  .auth-field { margin-bottom: .85rem; }
+  .auth-field label { display: block; color: #475569; font-size: .78rem; font-weight: 600; margin-bottom: .32rem; }
+  .auth-field input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: .68rem .75rem; font-size: .95rem; background: #fff; }
+  .auth-field input:focus { outline: 3px solid rgba(37,99,235,.18); border-color: #2563eb; }
+  .auth-actions { display: flex; align-items: center; gap: .75rem; margin-top: 1rem; }
+  .auth-error { color: #dc2626; font-size: .82rem; min-height: 1.2rem; margin-top: .7rem; }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .8rem; padding: 1rem 1.25rem; }
+  .settings-item { background: #f8fafc; border-radius: 8px; padding: .8rem .9rem; }
+  .settings-item h3 { font-size: .9rem; margin-bottom: .7rem; }
+  .settings-item label { display: block; font-size: .75rem; color: #6b7280; margin-bottom: .25rem; }
+  .settings-item input { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: .42rem .55rem; margin-bottom: .55rem; background: #fff; }
+  .header-btn { margin-left: 0; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.16); }
+  .header-btn:hover { background: rgba(255,255,255,.2); }
 </style>
 </head>
 <body>
-<!-- Auth token injected by server — used for all API calls from this page -->
-<script>window._AUTH = 'Basic __ADMIN_TOKEN__';</script>
+<script>
+window._ADMIN_USER = __ADMIN_USER_JSON__;
+</script>
+
+<div id="auth-screen" class="auth-screen" hidden>
+  <form id="auth-form" class="auth-card">
+    <h2>Вход в админку</h2>
+    <p>Введите логин и пароль администратора. Данные сохраняются только в этом браузере для запросов к API.</p>
+    <div class="auth-field">
+      <label for="auth-user">Пользователь</label>
+      <input id="auth-user" name="username" autocomplete="username" required>
+    </div>
+    <div class="auth-field">
+      <label for="auth-pass">Пароль</label>
+      <input id="auth-pass" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="auth-actions">
+      <button class="btn-primary" type="submit">Войти</button>
+    </div>
+    <div id="auth-error" class="auth-error"></div>
+  </form>
+</div>
 
 <header>
   <h1>deTilda Admin</h1>
   <span class="badge">ADMIN</span>
   <span id="version" style="font-size:.8rem"></span>
   <span id="last-refresh"></span>
+  <button class="header-btn" id="btn-logout" type="button">Выйти</button>
 </header>
 
 <main>
@@ -97,6 +137,26 @@
       </div>
     </div>
     <form id="cfg-form" class="cfg-grid" onsubmit="return false"></form>
+  </div>
+
+  <!-- Security -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Безопасность</h2>
+      <span id="password-msg" class="msg"></span>
+    </div>
+    <div class="settings-grid">
+      <form id="password-form" class="settings-item" onsubmit="return false">
+        <h3>Смена пароля администратора</h3>
+        <label for="current-password">Текущий пароль</label>
+        <input id="current-password" type="password" autocomplete="current-password">
+        <label for="new-password">Новый пароль</label>
+        <input id="new-password" type="password" autocomplete="new-password" minlength="8">
+        <label for="repeat-password">Повторите новый пароль</label>
+        <input id="repeat-password" type="password" autocomplete="new-password" minlength="8">
+        <button class="btn-primary" id="btn-password" type="submit">Сменить пароль</button>
+      </form>
+    </div>
   </div>
 
   <!-- Jobs -->
@@ -144,21 +204,63 @@
 </div>
 
 <script>
-// All API requests use the server-injected auth token
+const AUTH_KEY = 'detildaAdminAuth';
+window._AUTH = localStorage.getItem(AUTH_KEY) || '';
+
+function makeToken(username, password) {
+  return 'Basic ' + btoa(unescape(encodeURIComponent(`${username}:${password}`)));
+}
+
+function showLogin(message = '') {
+  document.getElementById('auth-error').textContent = message;
+  document.getElementById('auth-screen').hidden = false;
+  document.getElementById('auth-user').value = window._ADMIN_USER || 'admin';
+  document.getElementById('auth-pass').value = '';
+  setTimeout(() => document.getElementById('auth-pass').focus(), 0);
+}
+
+function hideLogin() {
+  document.getElementById('auth-screen').hidden = true;
+  document.getElementById('auth-error').textContent = '';
+}
+
+function saveAuth(username, password) {
+  window._AUTH = makeToken(username, password);
+  localStorage.setItem(AUTH_KEY, window._AUTH);
+}
+
+function clearAuth() {
+  window._AUTH = '';
+  localStorage.removeItem(AUTH_KEY);
+}
+
 function authFetch(url, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (window._AUTH) headers.Authorization = window._AUTH;
   return fetch(url, {
     ...opts,
-    headers: { 'Authorization': window._AUTH, ...(opts.headers || {}) },
+    headers,
   });
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
 const CFG_FIELDS = [
-  { key: 'max_upload_size_mb',      label: 'Макс. размер загрузки (МБ)' },
-  { key: 'processing_timeout_sec',  label: 'Таймаут обработки (сек)' },
-  { key: 'max_concurrent_jobs',     label: 'Одновременных задач' },
-  { key: 'job_ttl_minutes',         label: 'TTL задач (мин)' },
-  { key: 'log_ttl_days',            label: 'Хранить логи (дней)' },
-  { key: 'rate_limit_per_minute',   label: 'Rate limit (req/мин)' },
+  { key: 'max_upload_size_mb',      label: 'Макс. размер загрузки (МБ)', type: 'number' },
+  { key: 'processing_timeout_sec',  label: 'Таймаут обработки (сек)', type: 'number' },
+  { key: 'max_concurrent_jobs',     label: 'Одновременных задач', type: 'number' },
+  { key: 'job_ttl_minutes',         label: 'TTL задач (мин)', type: 'number' },
+  { key: 'log_ttl_days',            label: 'Хранить логи (дней)', type: 'number' },
+  { key: 'rate_limit_per_minute',   label: 'Rate limit (req/мин)', type: 'number' },
+  { key: 'required_archive_files',  label: 'Обязательные файлы архива', type: 'list' },
 ];
 
 function statusClass(s) {
@@ -186,12 +288,15 @@ function renderConfig(cfg) {
   document.getElementById('cfg-form').innerHTML = CFG_FIELDS.map(f => `
     <div class="cfg-item">
       <label for="cfg-${f.key}">${f.label}</label>
-      <input id="cfg-${f.key}" type="number" min="1" value="${cfg[f.key] ?? ''}">
+      ${f.type === 'list'
+        ? `<textarea id="cfg-${f.key}" spellcheck="false">${escapeHtml((cfg[f.key] || []).join('\n'))}</textarea>`
+        : `<input id="cfg-${f.key}" type="number" min="1" value="${escapeHtml(cfg[f.key] ?? '')}">`}
     </div>`).join('');
 }
 
 async function loadStats() {
   const r = await authFetch('/admin/api/stats');
+  if (r.status === 401) { clearAuth(); showLogin('Неверный логин или пароль'); return; }
   if (!r.ok) { showError('Ошибка загрузки статистики: ' + r.status); return; }
   const d = await r.json();
   document.getElementById('version').textContent = 'v' + d.version;
@@ -204,6 +309,7 @@ async function loadStats() {
 
 async function loadJobs() {
   const r = await authFetch(`/admin/api/jobs?page=${jobsPage}&page_size=${jobsPageSize}`);
+  if (r.status === 401) { clearAuth(); showLogin('Неверный логин или пароль'); return; }
   if (!r.ok) return;
   const data = await r.json();
   const jobs = data.items || [];
@@ -282,10 +388,39 @@ function showError(msg) {
 }
 
 async function refresh() {
+  if (!window._AUTH) {
+    showLogin();
+    return;
+  }
   await Promise.all([loadStats(), loadJobs()]);
   document.getElementById('last-refresh').textContent =
     'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }
+
+document.getElementById('auth-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const username = document.getElementById('auth-user').value.trim();
+  const password = document.getElementById('auth-pass').value;
+  saveAuth(username, password);
+  const r = await authFetch('/admin/api/stats');
+  if (r.status === 401) {
+    clearAuth();
+    showLogin('Неверный логин или пароль');
+    return;
+  }
+  if (!r.ok) {
+    clearAuth();
+    showLogin('Не удалось войти: ' + r.status);
+    return;
+  }
+  hideLogin();
+  await refresh();
+});
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  clearAuth();
+  showLogin();
+});
 
 document.getElementById('btn-refresh').addEventListener('click', refresh);
 document.getElementById('jobs-prev').addEventListener('click', async () => {
@@ -317,7 +452,12 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const body = {};
   CFG_FIELDS.forEach(f => {
     const el = document.getElementById('cfg-' + f.key);
-    if (el && el.value) body[f.key] = parseInt(el.value, 10);
+    if (!el) return;
+    if (f.type === 'list') {
+      body[f.key] = el.value.split('\n').map(v => v.trim()).filter(Boolean);
+    } else if (el.value) {
+      body[f.key] = parseInt(el.value, 10);
+    }
   });
   const r = await authFetch('/admin/api/config', {
     method: 'PATCH',
@@ -333,6 +473,29 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('password-form').addEventListener('submit', async () => {
+  const currentPassword = document.getElementById('current-password').value;
+  const newPassword = document.getElementById('new-password').value;
+  const repeatPassword = document.getElementById('repeat-password').value;
+  if (newPassword !== repeatPassword) {
+    showMsg('password-msg', 'Новые пароли не совпадают', 'msg-err');
+    return;
+  }
+  const r = await authFetch('/admin/api/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    showMsg('password-msg', d.detail || 'Ошибка смены пароля', 'msg-err');
+    return;
+  }
+  saveAuth(d.username || window._ADMIN_USER || 'admin', newPassword);
+  document.getElementById('password-form').reset();
+  showMsg('password-msg', d.persisted ? 'Пароль изменён и сохранён' : 'Пароль изменён до перезапуска', 'msg-ok');
+});
+
 document.getElementById('btn-cleanup').addEventListener('click', async () => {
   const r = await authFetch('/admin/api/cleanup', { method: 'POST' });
   const d = await r.json();
@@ -340,8 +503,11 @@ document.getElementById('btn-cleanup').addEventListener('click', async () => {
   await refresh();
 });
 
-refresh();
-setInterval(refresh, 15000);
+if (window._AUTH) refresh();
+else showLogin();
+setInterval(() => {
+  if (window._AUTH) refresh();
+}, 15000);
 </script>
 </body>
 </html>

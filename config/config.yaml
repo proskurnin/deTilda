@@ -266,6 +266,12 @@ web:
   processing_timeout_sec: 120
   allowed_extensions:
     - ".zip"
+  required_archive_files:
+    - "htaccess"
+    - "sitemap.xml"
+    - "404.html"
+    - "readme.txt"
+    - "robots.txt"
   max_concurrent_jobs: 5
   job_ttl_minutes: 30
   log_ttl_days: 7

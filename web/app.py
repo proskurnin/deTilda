@@ -1,14 +1,17 @@
 """deTilda web application — FastAPI entry point."""
 from __future__ import annotations
 
-import base64
 import concurrent.futures
+import io
+import json
 import os
+import re
 import secrets
 import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,11 +45,14 @@ _web_cfg_lock = threading.Lock()
 
 # Admin auth
 _http_basic = HTTPBasic()
+_admin_password_lock = threading.Lock()
 
 _CFG_INT_FIELDS = frozenset({
     "max_upload_size_mb", "processing_timeout_sec",
     "max_concurrent_jobs", "job_ttl_minutes", "log_ttl_days", "rate_limit_per_minute",
 })
+_CFG_LIST_FIELDS = frozenset({"required_archive_files"})
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def _get_runtime_version() -> str:
@@ -61,7 +67,8 @@ def _get_web_cfg() -> WebConfig:
     if not override:
         return base
     fields = ("max_upload_size_mb", "processing_timeout_sec", "allowed_extensions",
-              "max_concurrent_jobs", "job_ttl_minutes", "log_ttl_days", "rate_limit_per_minute")
+              "required_archive_files", "max_concurrent_jobs", "job_ttl_minutes",
+              "log_ttl_days", "rate_limit_per_minute")
     merged = {f: getattr(base, f) for f in fields}
     merged.update(override)
     return WebConfig(**merged)
@@ -106,6 +113,94 @@ def _admin_job_dict(job) -> dict:
     return data
 
 
+def _archive_rootless_names(names: list[str]) -> set[str]:
+    files = [name for name in names if name and not name.endswith("/")]
+    first_parts = {name.split("/", 1)[0] for name in files if "/" in name}
+    has_root_files = any("/" not in name for name in files)
+    strip_root = len(first_parts) == 1 and not has_root_files
+    root = next(iter(first_parts)) if strip_root else ""
+
+    rootless: set[str] = set()
+    for name in files:
+        normalized = name.replace("\\", "/").lstrip("/")
+        if strip_root and normalized.startswith(root + "/"):
+            normalized = normalized[len(root) + 1:]
+        rootless.add(normalized.lower())
+    return rootless
+
+
+def _required_file_aliases(filename: str) -> set[str]:
+    normalized = filename.strip().replace("\\", "/").lstrip("/").lower()
+    aliases = {normalized}
+    if normalized == "htaccess":
+        aliases.add(".htaccess")
+    elif normalized == ".htaccess":
+        aliases.add("htaccess")
+    return aliases
+
+
+def _validate_tilda_export_zip(content: bytes, required_files: list[str]) -> None:
+    if not required_files:
+        return
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            rootless = _archive_rootless_names(zf.namelist())
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Файл повреждён или не является ZIP-архивом.")
+
+    missing = [
+        filename for filename in required_files
+        if not (_required_file_aliases(filename) & rootless)
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Архив не похож на полный экспорт Tilda. "
+                "Не найдены обязательные файлы: " + ", ".join(missing)
+            ),
+        )
+
+
+def _safe_zip_stem(value: str) -> str:
+    stem = re.sub(r"^https?://", "", value.strip(), flags=re.IGNORECASE)
+    stem = stem.split("/", 1)[0].split(":", 1)[0].lower()
+    stem = stem.removeprefix("www.")
+    stem = re.sub(r"[^a-z0-9._-]+", "-", stem).strip(".-_")
+    return stem or "detilda"
+
+
+def _domain_from_robots(project_root: Path) -> str | None:
+    robots = project_root / "robots.txt"
+    if not robots.is_file():
+        return None
+    try:
+        lines = robots.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+    sitemap_domain = None
+    for line in lines:
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "host" and value:
+            return _safe_zip_stem(value)
+        if key == "sitemap" and value and sitemap_domain is None:
+            sitemap_domain = _safe_zip_stem(value)
+    return sitemap_domain
+
+
+def _download_filename(job) -> str:
+    if job.result_path:
+        domain = _domain_from_robots(job.result_path)
+        if domain:
+            return f"{domain}.zip"
+    return f"detilda_{job.id[:8]}.zip"
+
+
 def _admin_auth(
     credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)],
 ) -> HTTPBasicCredentials:
@@ -120,6 +215,47 @@ def _admin_auth(
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials
+
+
+def _quote_env_value(value: str) -> str:
+    if value and re.fullmatch(r"[A-Za-z0-9_@%+=:,./-]+", value):
+        return value
+    escaped = (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
+    return f'"{escaped}"'
+
+
+def _write_env_value(env_path: Path, key: str, value: str) -> None:
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    rendered = f"{key}={_quote_env_value(value)}"
+    replaced = False
+    next_lines: list[str] = []
+    for line in lines:
+        if _ENV_KEY_RE.match(line) and line.split("=", 1)[0] == key:
+            next_lines.append(rendered)
+            replaced = True
+        else:
+            next_lines.append(line)
+    if not replaced:
+        next_lines.append(rendered)
+    env_path.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+
+
+def _set_admin_password(new_password: str) -> bool:
+    """Update the runtime admin password and persist it when ADMIN_ENV_FILE is configured."""
+    env_file = os.environ.get("ADMIN_ENV_FILE", "")
+    with _admin_password_lock:
+        os.environ["ADMIN_PASSWORD"] = new_password
+        if not env_file:
+            return False
+        _write_env_value(Path(env_file), "ADMIN_PASSWORD", new_password)
+        return True
 
 
 def _rate_limit(request: Request) -> None:
@@ -185,47 +321,68 @@ async def health() -> dict:
 @app.post("/api/jobs", status_code=202)
 async def create_job(
     _: RateLimited,
-    file: UploadFile = File(...),
+    file: list[UploadFile] = File(...),
     email: str = Form(default=""),
 ) -> dict:
     web_cfg = _get_web_cfg()
+    uploads = file
 
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in web_cfg.allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Недопустимый тип файла. Разрешено: {web_cfg.allowed_extensions}",
-        )
-
-    if _STORE.active_count() >= web_cfg.max_concurrent_jobs:
+    if not uploads:
+        raise HTTPException(status_code=400, detail="Файлы не выбраны.")
+    if _STORE.active_count() + len(uploads) > web_cfg.max_concurrent_jobs:
         raise HTTPException(status_code=429, detail="Слишком много активных задач. Повторите позже.")
 
-    content = await file.read()
     max_bytes = web_cfg.max_upload_size_mb * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Файл слишком большой. Максимум: {web_cfg.max_upload_size_mb} МБ",
-        )
+    prepared: list[tuple[UploadFile, Path]] = []
+    try:
+        for upload in uploads:
+            suffix = Path(upload.filename or "").suffix.lower()
+            if suffix not in web_cfg.allowed_extensions:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{upload.filename}: недопустимый тип файла. Разрешено: {web_cfg.allowed_extensions}",
+                )
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-    tmp.write(content)
-    tmp.flush()
-    tmp.close()
+            content = await upload.read()
+            if len(content) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{upload.filename}: файл слишком большой. Максимум: {web_cfg.max_upload_size_mb} МБ",
+                )
+            _validate_tilda_export_zip(content, web_cfg.required_archive_files)
 
-    job = _STORE.create()
-    _LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+            tmp.write(content)
+            tmp.flush()
+            tmp.close()
+            prepared.append((upload, Path(tmp.name)))
 
-    _EXECUTOR.submit(
-        run_job,
-        job=job,
-        store=_STORE,
-        upload_path=Path(tmp.name),
-        email=email,
-        logs_dir=_LOGS_DIR / job.id,
-    )
+        _LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        created: list[dict] = []
+        for upload, tmp_path in prepared:
+            job = _STORE.create()
+            _EXECUTOR.submit(
+                run_job,
+                job=job,
+                store=_STORE,
+                upload_path=tmp_path,
+                email=email,
+                logs_dir=_LOGS_DIR / job.id,
+            )
+            created.append({
+                "job_id": job.id,
+                "status": job.status.value,
+                "filename": upload.filename or "",
+            })
+    except HTTPException:
+        for _, tmp_path in prepared:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
-    return {"job_id": job.id, "status": job.status.value}
+    response: dict = {"jobs": created}
+    if len(created) == 1:
+        response.update(created[0])
+    return response
 
 
 @app.get("/api/jobs/{job_id}")
@@ -250,7 +407,7 @@ async def download_result(job_id: str) -> Response:
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="detilda_{job_id[:8]}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="{_download_filename(job)}"'},
     )
 
 
@@ -260,6 +417,7 @@ async def get_config() -> dict:
     return {
         "max_upload_size_mb": web_cfg.max_upload_size_mb,
         "allowed_extensions": web_cfg.allowed_extensions,
+        "required_archive_files": web_cfg.required_archive_files,
         "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
     }
 
@@ -269,10 +427,9 @@ async def get_config() -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(creds: AdminAuth) -> str:
-    token = base64.b64encode(f"{creds.username}:{creds.password}".encode()).decode()
+async def admin_panel() -> str:
     html = (Path(__file__).parent / "static" / "admin.html").read_text(encoding="utf-8")
-    return html.replace("__ADMIN_TOKEN__", token)
+    return html.replace("__ADMIN_USER_JSON__", json.dumps(os.environ.get("ADMIN_USER", "admin")))
 
 
 @app.get("/admin/api/jobs")
@@ -328,6 +485,7 @@ async def admin_stats(_: AdminAuth) -> dict:
         "config": {
             "max_upload_size_mb": web_cfg.max_upload_size_mb,
             "processing_timeout_sec": web_cfg.processing_timeout_sec,
+            "required_archive_files": web_cfg.required_archive_files,
             "max_concurrent_jobs": web_cfg.max_concurrent_jobs,
             "job_ttl_minutes": web_cfg.job_ttl_minutes,
             "log_ttl_days": web_cfg.log_ttl_days,
@@ -351,15 +509,50 @@ async def admin_update_config(
                 updates[key] = v
             except (ValueError, TypeError):
                 raise HTTPException(status_code=422, detail=f"{key}: ожидается целое число")
+        elif key in _CFG_LIST_FIELDS:
+            if isinstance(val, str):
+                items = [line.strip() for line in val.splitlines()]
+            elif isinstance(val, list):
+                items = [str(item).strip() for item in val]
+            else:
+                raise HTTPException(status_code=422, detail=f"{key}: ожидается список строк")
+            updates[key] = [item for item in items if item]
     with _web_cfg_lock:
         _web_cfg_override.update(updates)
     cfg = _get_web_cfg()
     return {
         "max_upload_size_mb": cfg.max_upload_size_mb,
         "processing_timeout_sec": cfg.processing_timeout_sec,
+        "required_archive_files": cfg.required_archive_files,
         "max_concurrent_jobs": cfg.max_concurrent_jobs,
         "job_ttl_minutes": cfg.job_ttl_minutes,
         "rate_limit_per_minute": cfg.rate_limit_per_minute,
+    }
+
+
+@app.post("/admin/api/password")
+async def admin_change_password(
+    creds: AdminAuth,
+    body: dict = Body(...),
+) -> dict:
+    current_password = str(body.get("current_password", ""))
+    new_password = str(body.get("new_password", ""))
+    if not secrets.compare_digest(current_password.encode(), creds.password.encode()):
+        raise HTTPException(status_code=403, detail="Текущий пароль указан неверно")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=422, detail="Новый пароль должен быть не короче 8 символов")
+    if "\n" in new_password or "\r" in new_password:
+        raise HTTPException(status_code=422, detail="Новый пароль не должен содержать переносы строк")
+    if secrets.compare_digest(new_password.encode(), current_password.encode()):
+        raise HTTPException(status_code=422, detail="Новый пароль должен отличаться от текущего")
+    try:
+        persisted = _set_admin_password(new_password)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Не удалось сохранить пароль в env-файл")
+    return {
+        "ok": True,
+        "username": creds.username,
+        "persisted": persisted,
     }
 
 

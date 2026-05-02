@@ -20,18 +20,27 @@ from fastapi.testclient import TestClient  # noqa: E402
 from core.version import APP_VERSION  # noqa: E402
 import web.app as app_module  # noqa: E402
 from web.app import app, _STORE  # noqa: E402
-from web.jobs import JobStore  # noqa: E402
+from web.jobs import JobStatus, JobStore  # noqa: E402
 
 
 @pytest.fixture()
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=False)
+    app_module._web_cfg_override.clear()
+    try:
+        yield TestClient(app, raise_server_exceptions=False)
+    finally:
+        app_module._web_cfg_override.clear()
 
 
 def _make_zip(name: str = "site") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(f"{name}/index.html", "<html><body>test</body></html>")
+        zf.writestr(f"{name}/htaccess", "RewriteEngine On\n")
+        zf.writestr(f"{name}/sitemap.xml", "<?xml version='1.0'?><urlset></urlset>")
+        zf.writestr(f"{name}/404.html", "<html><body>404</body></html>")
+        zf.writestr(f"{name}/readme.txt", "Tilda export")
+        zf.writestr(f"{name}/robots.txt", "Host: example.com\nSitemap: https://example.com/sitemap.xml\n")
     return buf.getvalue()
 
 
@@ -94,7 +103,24 @@ def test_create_job_returns_202(client: TestClient) -> None:
     assert r.status_code == 202
     body = r.json()
     assert "job_id" in body
+    assert len(body["jobs"]) == 1
     assert body["status"] in ("pending", "running", "done")
+
+
+def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
+    r = client.post(
+        "/api/jobs",
+        files=[
+            ("file", ("one.zip", _make_zip("one"), "application/zip")),
+            ("file", ("two.zip", _make_zip("two"), "application/zip")),
+        ],
+        data={"email": "test@example.com"},
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert "jobs" in body
+    assert len(body["jobs"]) == 2
+    assert {item["filename"] for item in body["jobs"]} == {"one.zip", "two.zip"}
 
 
 def test_create_job_rejects_non_zip(client: TestClient) -> None:
@@ -104,6 +130,22 @@ def test_create_job_rejects_non_zip(client: TestClient) -> None:
         data={"email": ""},
     )
     assert r.status_code == 400
+
+
+def test_create_job_rejects_archive_without_required_tilda_files(client: TestClient) -> None:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("site/index.html", "<html></html>")
+
+    r = client.post(
+        "/api/jobs",
+        files={"file": ("site.zip", buf.getvalue(), "application/zip")},
+        data={"email": ""},
+    )
+
+    assert r.status_code == 400
+    assert "Не найдены обязательные файлы" in r.json()["detail"]
+    assert "robots.txt" in r.json()["detail"]
 
 
 def test_create_job_rejects_oversized_file(client: TestClient, monkeypatch) -> None:
@@ -168,12 +210,44 @@ def test_download_not_done_returns_409(client: TestClient) -> None:
     assert r.status_code == 409
 
 
+def test_download_filename_uses_domain_from_robots(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    store = JobStore(persist_dir=tmp_path / "workdir")
+    monkeypatch.setattr(app_module, "_STORE", store)
+    project = tmp_path / "result"
+    project.mkdir()
+    (project / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "robots.txt").write_text(
+        "Sitemap: https://www.example.org/sitemap.xml\n",
+        encoding="utf-8",
+    )
+    job = store.create()
+    job.status = JobStatus.DONE
+    job.result_path = project
+    store.update(job)
+
+    r = client.get(f"/api/jobs/{job.id}/download")
+
+    assert r.status_code == 200
+    assert 'filename="example.org.zip"' in r.headers["content-disposition"]
+
+
 # ---------------------------------------------------------------------------
 # Admin panel — auth
 # ---------------------------------------------------------------------------
 
-def test_admin_requires_auth(client: TestClient) -> None:
+def test_admin_page_is_web_login(client: TestClient) -> None:
     r = client.get("/admin")
+    assert r.status_code == 200
+    assert "Вход в админку" in r.text
+    assert "__ADMIN_USER_JSON__" not in r.text
+
+
+def test_admin_api_requires_auth(client: TestClient) -> None:
+    r = client.get("/admin/api/stats")
     assert r.status_code == 401
 
 
@@ -181,7 +255,7 @@ def test_admin_rejects_wrong_password(client: TestClient, monkeypatch) -> None:
     import os
     monkeypatch.setenv("ADMIN_USER", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
-    r = client.get("/admin", auth=("admin", "wrong"))
+    r = client.get("/admin/api/stats", auth=("admin", "wrong"))
     assert r.status_code == 401
 
 
@@ -191,8 +265,7 @@ def test_admin_accepts_correct_credentials(client: TestClient, monkeypatch) -> N
     r = client.get("/admin", auth=("admin", "secret"))
     assert r.status_code == 200
     assert "deTilda" in r.text
-    # Token must be injected into the page (not left as placeholder)
-    assert "__ADMIN_TOKEN__" not in r.text
+    assert "__ADMIN_USER_JSON__" not in r.text
 
 
 def test_admin_stats_returns_json(client: TestClient, monkeypatch) -> None:
@@ -285,6 +358,18 @@ def test_admin_config_patch_updates_value(client: TestClient, monkeypatch) -> No
     assert r.json()["max_upload_size_mb"] == 99
 
 
+def test_admin_config_patch_updates_required_archive_files(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    r = client.patch(
+        "/admin/api/config",
+        auth=("admin", "secret"),
+        json={"required_archive_files": ["robots.txt", "sitemap.xml"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["required_archive_files"] == ["robots.txt", "sitemap.xml"]
+
+
 def test_admin_config_patch_rejects_zero(client: TestClient, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USER", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
@@ -294,3 +379,48 @@ def test_admin_config_patch_rejects_zero(client: TestClient, monkeypatch) -> Non
         json={"max_concurrent_jobs": 0},
     )
     assert r.status_code == 422
+
+
+def test_admin_change_password_updates_runtime_and_env_file(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    env_file = tmp_path / ".env.admin"
+    env_file.write_text("ADMIN_USER=admin\nADMIN_PASSWORD=secret\nOTHER=value\n", encoding="utf-8")
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("ADMIN_ENV_FILE", str(env_file))
+
+    r = client.post(
+        "/admin/api/password",
+        auth=("admin", "secret"),
+        json={"current_password": "secret", "new_password": "new-secret-123"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["persisted"] is True
+    assert "ADMIN_PASSWORD=new-secret-123" in env_file.read_text(encoding="utf-8")
+    assert "OTHER=value" in env_file.read_text(encoding="utf-8")
+
+    old_auth = client.get("/admin/api/stats", auth=("admin", "secret"))
+    new_auth = client.get("/admin/api/stats", auth=("admin", "new-secret-123"))
+
+    assert old_auth.status_code == 401
+    assert new_auth.status_code == 200
+
+
+def test_admin_change_password_rejects_wrong_current_password(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+
+    r = client.post(
+        "/admin/api/password",
+        auth=("admin", "secret"),
+        json={"current_password": "wrong", "new_password": "new-secret-123"},
+    )
+
+    assert r.status_code == 403

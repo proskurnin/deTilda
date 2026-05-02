@@ -11,6 +11,14 @@ This file is the canonical place for future plans and follow-up work.
 
 ## Planned Work
 
+- Нужно начать готовить prod реализацию:
+  - домен detilda.com и домен detilda.ru я направил на наш сервер 2.26.31.179;
+  - нужно разобраться как деплоить в прод;
+- Consider adding deeper Tilda-export validation after the first required-file gate:
+  - detect `data-aida-export="yes"` / `data-tilda-project-id` markers in HTML;
+  - require at least one HTML page;
+  - check that asset folders referenced by HTML exist;
+  - report validation details in the processing-result modal.
 - Add an automated smoke check for processed zero-block forms that catches invalid `aida-zero-forms-1.0.min.js` before archive delivery.
 - Add a deploy smoke check that records the expected version and compares it against `/health`.
 - Add browser-console smoke tests for generated archives once Playwright can run reliably in the local/CI environment.

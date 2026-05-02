@@ -5,7 +5,10 @@ services:
       - "127.0.0.1:8000:8000"
     env_file:
       - .env.staging
+    environment:
+      ADMIN_ENV_FILE: /app/.env.runtime
     volumes:
+      - ./.env.staging:/app/.env.runtime
       - ./logs:/app/logs
       - /var/lib/detilda/staging/_workdir:/app/_workdir
     restart: unless-stopped
