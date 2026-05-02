@@ -13,13 +13,10 @@ This file is the canonical place for future plans and follow-up work.
 
 ## Planned Work
 
-- Finish production rollout:
-  - create and push the `prod` branch when the first production release is approved;
-  - add GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY`;
-  - create server-local `.env.prod` on `2.26.31.179`;
-  - bootstrap Let's Encrypt certificates for `detilda.com` and `detilda.ru`;
-  - run the first production deploy from the `prod` branch;
-  - verify `https://detilda.com/health` and `https://detilda.ru/health`.
+- Finish automated production deploy:
+  - verify or add GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY`;
+  - run a GitHub Actions production deploy from the `prod` branch;
+  - verify `https://detilda.com/health` and `https://detilda.ru/health` after the GitHub Actions deploy.
 - Consider adding deeper Tilda-export validation after the first required-file gate:
   - detect `data-aida-export="yes"` / `data-tilda-project-id` markers in HTML;
   - require at least one HTML page;

@@ -27,7 +27,19 @@ Each release entry should explain:
 ### Verified
 
 - Confirmed DNS resolution for `detilda.com` and `detilda.ru`: both resolve to `2.26.31.179`.
-- Confirmed `origin/prod` does not exist yet, so the first production rollout still requires creating/pushing the `prod` branch.
+- Created and pushed the `prod` branch at commit `4e8aa7043048f536d63b0f03481ed46c0be24559`.
+- Created server-local `/home/deploy/.env.prod` on `2.26.31.179` without printing secret values.
+- Bootstrapped production checkout in `/home/deploy/prod`.
+- Started the production container on `127.0.0.1:8001`.
+- Issued the Let's Encrypt certificate for `detilda.com` and `detilda.ru`.
+- Installed the final production nginx SSL config.
+- Manually deployed production from `origin/prod`.
+- Confirmed production health:
+  - `https://detilda.com/health`: version `5.6.0`;
+  - `https://detilda.ru/health`: version `5.6.0`.
+- Confirmed staging health remains available:
+  - `https://detilda.proskurnin.com/health`: version `5.6.0`.
+- GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY` still need to be verified or added for automated production deploys.
 
 ## 5.6.0 - 2026-05-03
 
