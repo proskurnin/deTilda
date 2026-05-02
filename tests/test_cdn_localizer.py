@@ -133,6 +133,32 @@ def test_replaces_concatenated_url_in_js(tmp_path: Path, monkeypatch) -> None:
     assert (tmp_path / "lib" / "flags" / "flags7.png").exists()
 
 
+def test_keeps_dynamic_runtime_cdn_base_in_js(tmp_path: Path, monkeypatch) -> None:
+    """Не ломает runtime, где CDN-домен собирается отдельно от имени ресурса."""
+    js_dir = tmp_path / "js"
+    js_dir.mkdir()
+    js = js_dir / "aida-zero-forms-1.0.min.js"
+    source = (
+        'function add(o,n){var s=true,_="",d="https://static.aidacdn."+getRootZone();'
+        '!s&&_&&-1!==_.indexOf("https://")&&(d=_.split("/js/")[0]);'
+        'var c=document.createElement(n);'
+        'c.id="x","script"===n?(c.src=d+"/js/"+o,c.async=!0):'
+        '"link"===n&&(c.href=d+"/css/"+o,c.rel="stylesheet");}'
+    )
+    js.write_text(source, encoding="utf-8")
+
+    def _fail_fetch(*_args, **_kwargs):
+        raise AssertionError("dynamic runtime base must not be downloaded")
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fail_fetch)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
+
+    assert result.files_updated == 0
+    assert js.read_text(encoding="utf-8") == source
+
+
 def test_processes_css_files(tmp_path: Path, monkeypatch) -> None:
     """CSS-файлы тоже обрабатываются."""
     css = tmp_path / "css" / "main.css"

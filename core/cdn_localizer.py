@@ -75,7 +75,7 @@ _CONCAT_URL_RE = re.compile(
     r"""
     https?://static\.(?:tilda|aida)cdn\.
     (?P<q1>['"])                        # закрывающая кавычка первой части
-    (?P<concat>\s*\+\s*[^+]+?\+\s*)     # + variable() +
+    (?P<concat>\s*\+\s*[A-Za-z_$][\w$]*(?:\([^;,+]*\))?\s*\+\s*) # + variable() +
     (?P<q2>['"])                        # открывающая кавычка второй части
     (?P<rest>(?:(?!(?P=q2)).)+)         # path + suffix — всё кроме q2
     (?P=q2)                             # закрывающая кавычка второй части
@@ -165,13 +165,16 @@ def _download_to_local(
         return None
     if isinstance(cached, Path):
         return cached
+    if not path or path.endswith("/"):
+        cache[path] = _DOWNLOAD_FAILED
+        return None
 
     # КРИТИЧНО: если файл уже существует локально — НЕ скачивать.
     # Иначе мы перезапишем версию обработанную refs.py (где til→ai в строках)
     # свежей оригинальной с CDN — и идентификаторы CSS-классов в JS снова
     # станут .t-* вместо .ai-*, ломая querySelector в браузере.
     destination = project_root / path
-    if destination.exists() and destination.stat().st_size > 0:
+    if destination.is_file() and destination.stat().st_size > 0:
         cache[path] = destination
         return destination
 
