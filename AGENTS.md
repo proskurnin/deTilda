@@ -208,6 +208,15 @@ curl -fsS https://detilda.proskurnin.com/health
 
 Do not consider a bump/deploy task complete until `/health` shows the new version.
 
+For production deploys, also verify:
+
+```bash
+curl -fsS https://detilda.com/health
+curl -fsS https://detilda.ru/health
+```
+
+Do not consider a production deploy complete until both production `/health` endpoints show the expected version.
+
 ---
 
 ### Runtime Script Protection

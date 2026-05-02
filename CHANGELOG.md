@@ -10,6 +10,25 @@ Each release entry should explain:
 - how the change was verified;
 - whether deploy was confirmed through `/health`, when applicable.
 
+## Unreleased
+
+### Added
+
+- Added production nginx configs for `detilda.com` and `detilda.ru`:
+  - `nginx/prod.bootstrap.conf` for the first HTTP-only certificate bootstrap;
+  - `nginx/prod.conf` for the final SSL reverse proxy.
+- Added `docs/production-deploy.md` with the production rollout procedure, required GitHub secrets, first certificate bootstrap, and release flow.
+
+### Changed
+
+- Production Docker Compose now binds the app to `127.0.0.1:8001` so it can run on the same server as staging without conflicting with staging port `8000`.
+- Production GitHub Actions deploy now installs `nginx/prod.conf`, reloads nginx, and checks local health on `127.0.0.1:8001`.
+
+### Verified
+
+- Confirmed DNS resolution for `detilda.com` and `detilda.ru`: both resolve to `2.26.31.179`.
+- Confirmed `origin/prod` does not exist yet, so the first production rollout still requires creating/pushing the `prod` branch.
+
 ## 5.6.0 - 2026-05-03
 
 ### Added

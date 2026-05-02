@@ -6,14 +6,20 @@ This file is the canonical place for future plans and follow-up work.
 
 - After every version bump and deploy, verify `https://detilda.proskurnin.com/health`.
 - Do not consider a bump/deploy task complete until `/health` shows the new version.
+- After every production deploy, verify both `https://detilda.com/health` and `https://detilda.ru/health`.
+- Do not consider a production deploy complete until both production `/health` endpoints show the expected version.
 - For form/runtime changes, verify runtime behavior and browser console errors, not only HTML.
 - Keep plans here when work is deferred beyond the current turn.
 
 ## Planned Work
 
-- Нужно начать готовить prod реализацию:
-  - домен detilda.com и домен detilda.ru я направил на наш сервер 2.26.31.179;
-  - нужно разобраться как деплоить в прод;
+- Finish production rollout:
+  - create and push the `prod` branch when the first production release is approved;
+  - add GitHub secrets `PROD_HOST`, `PROD_USER`, and `PROD_SSH_KEY`;
+  - create server-local `.env.prod` on `2.26.31.179`;
+  - bootstrap Let's Encrypt certificates for `detilda.com` and `detilda.ru`;
+  - run the first production deploy from the `prod` branch;
+  - verify `https://detilda.com/health` and `https://detilda.ru/health`.
 - Consider adding deeper Tilda-export validation after the first required-file gate:
   - detect `data-aida-export="yes"` / `data-tilda-project-id` markers in HTML;
   - require at least one HTML page;
