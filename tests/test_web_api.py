@@ -52,6 +52,34 @@ def test_index_renders_app_version(client: TestClient) -> None:
     assert "__APP_VERSION__" not in r.text
 
 
+def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
+    from web import app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "load_manifest",
+        lambda: {"version": "9.9.9"},
+    )
+
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "<h1>deTilda v9.9.9</h1>" in r.text
+
+
+def test_health_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
+    from web import app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "load_manifest",
+        lambda: {"version": "9.9.9"},
+    )
+
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["version"] == "9.9.9"
+
+
 # ---------------------------------------------------------------------------
 # /api/config
 # ---------------------------------------------------------------------------

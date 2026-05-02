@@ -592,8 +592,13 @@ def rename_and_cleanup_assets(
         if not path.is_file():
             continue
 
-        name_lower = path.name.lower()
         relative_path = utils.relpath(path, project_root)
+        
+        # ЗАЩИТА: Игнорируем файлы в системных и тестовых папках, если они попали в рабочий каталог
+        if any(p in relative_path.replace("\\", "/") for p in ("tests/", ".venv/", ".git/", "__pycache__/")):
+            continue
+
+        name_lower = path.name.lower()
 
         # Шаг 1: замена ресурса (favicon.ico, ga.js) → удалить Tilda-версию, запомнить в rename_map
         if _handle_resource_replacement(path, relative_path, rename_map, stats):

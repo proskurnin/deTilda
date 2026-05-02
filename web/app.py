@@ -22,6 +22,7 @@ from core.config_loader import ConfigLoader
 from core.packer import pack_result
 from core.schemas import WebConfig
 from core.version import APP_VERSION
+from core.utils import load_manifest
 from web.jobs import JobStatus, JobStore
 from web.worker import run_job
 
@@ -59,6 +60,12 @@ def _get_web_cfg() -> WebConfig:
     merged = {f: getattr(base, f) for f in fields}
     merged.update(override)
     return WebConfig(**merged)
+
+
+def _get_runtime_version() -> str:
+    manifest = load_manifest()
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    return str(version) if version else APP_VERSION
 
 
 def _cleanup_old_logs(logs_dir: Path, ttl_days: int) -> int:
@@ -146,12 +153,12 @@ AdminAuth = Annotated[HTTPBasicCredentials, Depends(_admin_auth)]
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     html = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    return html.replace("__APP_VERSION__", APP_VERSION)
+    return html.replace("__APP_VERSION__", _get_runtime_version())
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": APP_VERSION}
+    return {"status": "ok", "version": _get_runtime_version()}
 
 
 @app.post("/api/jobs", status_code=202)
