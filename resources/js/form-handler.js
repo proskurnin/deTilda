@@ -405,14 +405,14 @@
     if (!form || form.tagName !== 'FORM') return false;
     try {
       // Проверяем наличие маркеров Tilda/Aida
-      return !!(
+      var isTilda = !!(
         form.classList.contains('js-form-proccess') ||
         form.classList.contains('ai-form') ||
         form.getAttribute('data-aida-formskey') ||
         form.getAttribute('data-tilda-formskey') ||
-        form.querySelector('.tn-atom__form') ||
-        (form.parentElement && form.parentElement.classList.contains('tn-atom__form'))
+        (form.closest && (form.closest('.tn-atom__form') || form.closest('.r')))
       );
+      return isTilda;
     } catch (e) {
       return false;
     }
@@ -431,11 +431,11 @@
       }
 
       event.preventDefault();
-      event.stopImmediatePropagation();
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
 
       submitForm(form);
     } catch (e) {
-      console.error('[deTilda] Submit error:', e);
+      console.warn('[deTilda] Intercept error:', e);
     }
   }
 
@@ -454,12 +454,12 @@
       if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
         if (typeof form.reportValidity === 'function') form.reportValidity();
         event.preventDefault();
-        event.stopImmediatePropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
         return;
       }
 
       event.preventDefault();
-      event.stopImmediatePropagation();
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
       submitForm(form);
     } catch (e) {
       // Fail silently to not block UI
@@ -467,62 +467,67 @@
   }
 
   function submitForm(form) {
-    // Neutralize original action right before our fetch
-    form.setAttribute('action', '#');
-    form.removeAttribute('data-success-url');
+    try {
+      // Neutralize original action right before our fetch
+      form.setAttribute('action', '#');
+      form.removeAttribute('data-success-url');
 
-    fetch(resolveAction(form), {
-      method: 'POST',
-      body: new FormData(form),
-      credentials: 'same-origin',
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest'
-      }
-    })
-      .then(function (response) {
-        if (response.redirected) {
-          window.location.href = response.url;
-          return null;
+      fetch(resolveAction(form), {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
         }
-
-        var locationHeader = response.headers.get('Location');
-        if (locationHeader) {
-          window.location.href = locationHeader;
-          return null;
-        }
-
-        return response.text().then(function (text) {
-          var ok = response.ok;
-          var message = ok ? 'Заявка отправлена' : 'Ошибка отправки';
-
-          if (text) {
-            try {
-              var payload = JSON.parse(text);
-              if (typeof payload.ok === 'boolean') {
-                ok = payload.ok;
-              }
-              if (payload.message) {
-                message = payload.message;
-              } else if (payload.error && !ok) {
-                message = payload.error;
-              }
-            } catch (ignore) {
-              // Not JSON; keep fallback message.
-            }
-          }
-
-          showPopup(message, ok);
-          if (ok) {
-            hideFormPopup(form);
-            if (typeof form.reset === 'function') {
-              form.reset();
-            }
-          }
-        });
       })
-      .catch(function () {
-        showPopup('Ошибка сети', false);
-      });
+        .then(function (response) {
+          if (response.redirected) {
+            window.location.href = response.url;
+            return null;
+          }
+
+          var locationHeader = response.headers.get('Location');
+          if (locationHeader) {
+            window.location.href = locationHeader;
+            return null;
+          }
+
+          return response.text().then(function (text) {
+            var ok = response.ok;
+            var message = ok ? 'Заявка отправлена' : 'Ошибка отправки';
+
+            if (text) {
+              try {
+                var payload = JSON.parse(text);
+                if (typeof payload.ok === 'boolean') {
+                  ok = payload.ok;
+                }
+                if (payload.message) {
+                  message = payload.message;
+                } else if (payload.error && !ok) {
+                  message = payload.error;
+                }
+              } catch (ignore) {
+                // Not JSON; keep fallback message.
+              }
+            }
+
+            showPopup(message, ok);
+            if (ok) {
+              hideFormPopup(form);
+              if (typeof form.reset === 'function') {
+                form.reset();
+              }
+            }
+          });
+        })
+        .catch(function (err) {
+          console.error('[deTilda] Fetch error:', err);
+          showPopup('Ошибка сети', false);
+        });
+    } catch (e) {
+      showPopup('Ошибка инициализации отправки', false);
+    }
   }
 
   function initForm(form) {
@@ -558,13 +563,15 @@
     try {
       var recs = document.querySelectorAll('.ai-records');
       for (var i = 0; i < recs.length; i += 1) {
-        if (window.getComputedStyle(recs[i]).opacity === '0') {
-          recs[i].style.opacity = '1';
-          recs[i].style.visibility = 'visible';
+        var style = window.getComputedStyle(recs[i]);
+        if (style.opacity === '0' || style.visibility === 'hidden') {
+          recs[i].style.setProperty('opacity', '1', 'important');
+          recs[i].style.setProperty('visibility', 'visible', 'important');
+          recs[i].style.setProperty('display', 'block', 'important');
         }
       }
     } catch (e) {}
-    setTimeout(ensureVisible, 2000);
+    setTimeout(ensureVisible, 600);
   })();
 
   ensureInvalidStyle();
