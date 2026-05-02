@@ -21,8 +21,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from core.config_loader import ConfigLoader
 from core.packer import pack_result
 from core.schemas import WebConfig
-from core.version import APP_VERSION
 from core.utils import load_manifest
+from core.version import APP_VERSION
 from web.jobs import JobStatus, JobStore
 from web.worker import run_job
 
@@ -49,6 +49,11 @@ _CFG_INT_FIELDS = frozenset({
 })
 
 
+def _get_runtime_version() -> str:
+    manifest = load_manifest()
+    return str(manifest.get("version", APP_VERSION))
+
+
 def _get_web_cfg() -> WebConfig:
     base = _CONFIG.web()
     with _web_cfg_lock:
@@ -60,12 +65,6 @@ def _get_web_cfg() -> WebConfig:
     merged = {f: getattr(base, f) for f in fields}
     merged.update(override)
     return WebConfig(**merged)
-
-
-def _get_runtime_version() -> str:
-    manifest = load_manifest()
-    version = manifest.get("version") if isinstance(manifest, dict) else None
-    return str(version) if version else APP_VERSION
 
 
 def _cleanup_old_logs(logs_dir: Path, ttl_days: int) -> int:
