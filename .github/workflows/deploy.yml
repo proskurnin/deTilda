@@ -2,9 +2,9 @@ name: Test & Deploy
 
 on:
   push:
-    branches: [main, prod]
+    branches: [master, prod]
   pull_request:
-    branches: [main, prod]
+    branches: [master, prod]
 
 jobs:
   test:
@@ -19,7 +19,7 @@ jobs:
 
   deploy-staging:
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to staging
@@ -30,7 +30,7 @@ jobs:
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
             cd /home/deploy/staging
-            git pull origin main
+            git pull origin master
             docker compose -f docker-compose.staging.yml up -d --build
             docker image prune -f
             sudo cp nginx/staging.conf /etc/nginx/sites-available/detilda.proskurnin.com

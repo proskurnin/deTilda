@@ -1,11 +1,11 @@
 name: tests
 
-# Когда запускать: при push в main и при открытии PR на main
+# Когда запускать: при push в master и при открытии PR на master
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   test:
