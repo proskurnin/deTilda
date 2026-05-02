@@ -51,6 +51,22 @@ _REAL_CDN_HOST = "static.tildacdn.com"
 # Расширения файлов, в которых ищем CDN-ссылки
 _TARGET_EXTENSIONS = (".html", ".htm", ".css", ".js")
 
+_HTML_EXTENSIONS = (".html", ".htm")
+
+_ZERO_FORMS_MARKERS_RE = re.compile(
+    r"tn-atom__form|(?:ai|t)_zeroForms__init|data-(?:aida|tilda)-formskey",
+    re.IGNORECASE,
+)
+
+_ZERO_FORMS_RUNTIME_DEPENDENCIES = (
+    "css/aida-zero-form-horizontal.min.css",
+    "css/aida-zero-form-errorbox.min.css",
+    "js/aida-forms-1.0.min.js",
+    "js/aida-fallback-1.0.min.js",
+)
+
+_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
+
 # Прямой URL: https://static.tildacdn.com/path/file.ext или aidacdn (после til→ai)
 _DIRECT_URL_RE = re.compile(
     r"(?:https?:)?//static\.(?:tilda|aida)cdn\.[a-z]+/[^\s'\"\\)]+",
@@ -195,6 +211,19 @@ def _download_to_local(
             continue
 
     if data is None:
+        bundled = _RESOURCES_DIR / path
+        if bundled.is_file() and bundled.stat().st_size > 0:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                destination.write_bytes(bundled.read_bytes())
+            except Exception as exc:
+                logger.err(f"[cdn] Ошибка записи bundled runtime {destination}: {exc}")
+                cache[path] = _DOWNLOAD_FAILED
+                return None
+            logger.info(f"🌐 Локализован bundled runtime ресурс: → {path}")
+            cache[path] = destination
+            return destination
+
         # Запоминаем что путь недоступен — не пробуем повторно
         cache[path] = _DOWNLOAD_FAILED
         return None
@@ -221,6 +250,7 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
     result = CdnLocalizationResult()
     download_cache: dict[str, object] = {}
     failed_paths: set[str] = set()
+    zero_forms_seen = False
 
     def _record_download_failure(path: str) -> None:
         if path in failed_paths:
@@ -234,6 +264,9 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
             text = utils.safe_read(file_path)
         except Exception:
             continue
+
+        if file_path.suffix.lower() in _HTML_EXTENSIONS and _ZERO_FORMS_MARKERS_RE.search(text):
+            zero_forms_seen = True
 
         original = text
 
@@ -288,6 +321,14 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
         if text != original:
             utils.safe_write(file_path, text)
             result.files_updated += 1
+
+    if zero_forms_seen:
+        for path in _ZERO_FORMS_RUNTIME_DEPENDENCIES:
+            local = _download_to_local(path, project_root, download_cache)
+            if local is None:
+                _record_download_failure(path)
+                continue
+            result.urls_localized += 1
 
     if result.urls_localized:
         logger.info(

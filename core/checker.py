@@ -361,6 +361,12 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
         r"tn-atom__form|ai_zeroForms__init|data-aida-formskey|data-tilda-formskey",
         re.IGNORECASE,
     )
+    zero_forms_dependencies = (
+        "css/aida-zero-form-horizontal.min.css",
+        "css/aida-zero-form-errorbox.min.css",
+        "js/aida-forms-1.0.min.js",
+        "js/aida-fallback-1.0.min.js",
+    )
 
     forms_found = 0
     forms_hooked = 0
@@ -416,6 +422,15 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
                         "[forms-check] zero-block форма найдена, но runtime zero-forms "
                         f"не переписан полностью: {utils.relpath(runtime_path, project_root)}"
                     )
+        missing_dependencies = [
+            path for path in zero_forms_dependencies if not (project_root / path).is_file()
+        ]
+        if missing_dependencies:
+            result.warnings = 1
+            logger.warn(
+                "[forms-check] Найдена zero-block форма, но отсутствуют runtime-зависимости: "
+                + ", ".join(missing_dependencies)
+            )
     if result.warnings == 0:
         logger.info(f"[forms-check] Формы проверены: {forms_found}, все подключены корректно")
     return result

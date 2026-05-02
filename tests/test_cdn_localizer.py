@@ -159,6 +159,63 @@ def test_keeps_dynamic_runtime_cdn_base_in_js(tmp_path: Path, monkeypatch) -> No
     assert js.read_text(encoding="utf-8") == source
 
 
+def test_downloads_zero_form_runtime_dependencies(tmp_path: Path, monkeypatch) -> None:
+    """Zero-block forms need CSS/JS that aida-zero-forms loads dynamically."""
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<html><body><div class="tn-atom__form"></div></body></html>',
+        encoding="utf-8",
+    )
+
+    fetched_urls: list[str] = []
+
+    def _fetch(url: str, **_kw):
+        fetched_urls.append(url)
+        return (f"/* {url} */".encode("utf-8"), False)
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fetch)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
+
+    assert result.download_failures == 0
+    assert result.urls_localized >= 4
+    assert (tmp_path / "css" / "aida-zero-form-horizontal.min.css").is_file()
+    assert (tmp_path / "css" / "aida-zero-form-errorbox.min.css").is_file()
+    assert (tmp_path / "js" / "aida-forms-1.0.min.js").is_file()
+    assert (tmp_path / "js" / "aida-fallback-1.0.min.js").is_file()
+    assert "https://static.tildacdn.com/css/aida-zero-form-horizontal.min.css" in fetched_urls
+
+
+def test_uses_bundled_zero_form_dependencies_when_cdn_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Bundled CSS/fallback keeps zero forms usable in offline processing."""
+    import urllib.error
+
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<html><body><div class="tn-atom__form"></div></body></html>',
+        encoding="utf-8",
+    )
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "aida-forms-1.0.min.js").write_text("forms", encoding="utf-8")
+
+    def _fail(*_args, **_kw):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fail)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
+
+    assert (tmp_path / "css" / "aida-zero-form-horizontal.min.css").is_file()
+    assert (tmp_path / "css" / "aida-zero-form-errorbox.min.css").is_file()
+    assert (tmp_path / "js" / "aida-fallback-1.0.min.js").is_file()
+    assert result.download_failures == 0
+
+
 def test_processes_css_files(tmp_path: Path, monkeypatch) -> None:
     """CSS-файлы тоже обрабатываются."""
     css = tmp_path / "css" / "main.css"

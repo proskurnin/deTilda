@@ -85,6 +85,7 @@ _SRC_ATTR_RE = re.compile(
 # Tilda маркирует скрипты статистики комментарием <!-- Stat --> перед тегом.
 # Если находим такой комментарий перед <script> — удаляем вместе с ним.
 _STAT_COMMENT_TAIL_RE = re.compile(r"(\s*<!--\s*Stat\s*-->\s*)$", re.IGNORECASE)
+_SMOOTHSCROLL_CALL_RE = re.compile(r"\bSmoothScroll\s*\(")
 
 
 def _normalize_src(value: str) -> str:
@@ -132,6 +133,20 @@ def _iter_script_blocks(text: str) -> Iterator[tuple[int, int, str, str]]:
         block = text[start:end]
         yield start, end, block, start_tag
         pos = end
+
+
+def _guard_optional_smoothscroll(text: str) -> str:
+    """Avoid ReferenceError when an optional external SmoothScroll CDN script is unavailable."""
+    if "SmoothScroll" not in text:
+        return text
+
+    def _replace(match: re.Match[str]) -> str:
+        prefix = text[max(0, match.start() - 24):match.start()]
+        if re.search(r"(?:function|typeof|window\.)\s*$", prefix):
+            return match.group(0)
+        return "window.SmoothScroll&&SmoothScroll("
+
+    return _SMOOTHSCROLL_CALL_RE.sub(_replace, text)
 
 
 def _filter_disallowed_scripts(script_names: list[str], project_root: Path) -> list[str]:
@@ -255,13 +270,17 @@ def remove_disallowed_scripts(project_root: Path, loader: ConfigLoader) -> int:
                     f"{matched_names} в {utils.relpath(path, project_root)}"
                 )
 
-        if removed_in_file and text != original:
+        text = _guard_optional_smoothscroll(text)
+
+        if text != original:
             utils.safe_write(path, text)
             removed_tags += removed_in_file
             updated_files += 1
-            logger.info(
-                f"🗑 Удалены теги скриптов ({removed_in_file}) в {utils.relpath(path, project_root)}"
-            )
+            if removed_in_file:
+                logger.info(
+                    f"🗑 Удалены теги скриптов ({removed_in_file}) "
+                    f"в {utils.relpath(path, project_root)}"
+                )
 
     if removed_tags:
         logger.info(f"🧹 Скрипты удалены: всего {removed_tags} тегов в {updated_files} файлах.")

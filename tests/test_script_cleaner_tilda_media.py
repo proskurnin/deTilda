@@ -170,3 +170,21 @@ def test_script_cleaner_keeps_zero_form_runtime(tmp_path: Path) -> None:
     assert removed == 0
     assert "tilda-forms-1.0.min.js" in text
     assert "tilda-zero-forms-1.0.min.js" in text
+
+
+def test_script_cleaner_guards_optional_smoothscroll_call(tmp_path: Path) -> None:
+    html = tmp_path / "smooth.html"
+    html.write_text(
+        """
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/smoothscroll/1.4.10/SmoothScroll.js"></script>
+        <script>SmoothScroll({animationTime:800})</script>
+        """,
+        encoding="utf-8",
+    )
+
+    loader = _FakeLoader()
+    removed = remove_disallowed_scripts(tmp_path, loader)
+    text = html.read_text(encoding="utf-8")
+
+    assert removed == 0
+    assert "window.SmoothScroll&&SmoothScroll({animationTime:800})" in text

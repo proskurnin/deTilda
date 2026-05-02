@@ -45,6 +45,8 @@ Primary goals:
 - Version source of truth: `manifest.json`.
 - Runtime templates copied into processed sites: `resources/`.
 - Runtime script handling: `core/runtime_scripts.py`, `core/script_cleaner.py`.
+- Future plans and deferred work: `TODO.md`.
+- Change history: `CHANGELOG.md`.
 - Generated projects and temporary files usually live in `_workdir/`.
 - Transient logs live in `logs/`.
 
@@ -103,6 +105,8 @@ CI runs tests from `.github/workflows/tests.yml`.
 - Keep logs and reports informative.
 - Do not silently swallow critical processing errors.
 - Do not commit unless the user explicitly asks.
+- Record deferred plans in `TODO.md`.
+- Record completed user-visible or operational changes in `CHANGELOG.md`.
 
 ---
 
@@ -196,6 +200,14 @@ python tools/bump_version.py {patch|minor|major}
 
 when version metadata must be changed.
 
+After every version bump and deploy, verify the deployed version through:
+
+```bash
+curl -fsS https://detilda.proskurnin.com/health
+```
+
+Do not consider a bump/deploy task complete until `/health` shows the new version.
+
 ---
 
 ### Runtime Script Protection
@@ -273,6 +285,11 @@ python -m pytest tests/test_refs_anchor_links.py -q
 
 ## Validation Checklist
 
+Before finalizing planned or completed work:
+
+- update `TODO.md` when a plan is added, changed, completed, or deferred;
+- update `CHANGELOG.md` for completed user-visible or operational changes.
+
 Before finalizing changes, run:
 
 ```bash
@@ -282,12 +299,14 @@ python -m pytest tests/ -q
 For form/runtime-related changes, also verify:
 
 - forms are visible;
+- form rendering is checked at runtime, not only by inspecting HTML;
 - pop-up forms open;
 - pop-up forms are centered correctly;
 - validation/UI behavior is not broken;
 - local form submission still works;
 - forms are not submitted to Tilda servers;
 - browser console has no new critical errors;
+- browser console has no new form/runtime initialization errors;
 - required Tilda `data-*` attributes are preserved.
 
 For script cleaner/runtime changes, run relevant tests such as:
