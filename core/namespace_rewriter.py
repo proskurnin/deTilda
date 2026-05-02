@@ -175,6 +175,27 @@ def _ensure_zero_forms_bridge(text: str, filename: str) -> tuple[str, int]:
     return text + bridge, 1
 
 
+def _patch_zero_forms_resource_base(text: str, filename: str) -> tuple[str, int]:
+    """Load zero-form dynamic resources from the local script directory."""
+    if "zero-forms" not in filename.lower():
+        return text, 0
+    if "deTilda zero-forms local resource base" in text:
+        return text, 0
+
+    old = (
+        'd="https://static.aidacdn."+ai_zeroForms__getRootZone();'
+        '!s&&_&&-1!==_.indexOf("https://")&&(d=_.split("/js/")[0]);'
+    )
+    new = (
+        'd=_&&-1!==_.indexOf("/js/")?_.split("/js/")[0]:"";'
+        'd||(d="https://static.aidacdn."+ai_zeroForms__getRootZone());'
+        "/* deTilda zero-forms local resource base */"
+    )
+    if old not in text:
+        return text, 0
+    return text.replace(old, new, 1), 1
+
+
 def _rewrite_path_name(name: str) -> str:
     rewritten, _count = _apply_word_replacements(name)
     return rewritten
@@ -313,6 +334,8 @@ def rewrite_project_namespace(project_root: Path) -> NamespaceRewriteResult:
         text, count = _apply_rename_map(text, rename_map)
         replacements += count
         text, count = rewrite_text(text, path.suffix)
+        replacements += count
+        text, count = _patch_zero_forms_resource_base(text, path.name)
         replacements += count
         text, count = _ensure_zero_forms_bridge(text, path.name)
         replacements += count

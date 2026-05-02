@@ -2,6 +2,10 @@
 
 This file records user-visible and operational changes.
 
+## 5.4.7 - 2026-05-02
+
+- Patched Zero Forms dynamic resource loading to use the local script directory instead of `static.aidacdn`.
+
 ## 5.4.6 - 2026-05-02
 
 - Fixed Zero Forms runtime dependency handling so horizontal/errorbox CSS and fallback JS are bundled when CDN access is unavailable.

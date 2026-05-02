@@ -59,6 +59,27 @@ def test_rewrites_form_html_js_and_inline_function_names(tmp_path: Path) -> None
     assert "t_zeroForms__init" not in js
 
 
+def test_patches_zero_forms_dynamic_resource_base(tmp_path: Path) -> None:
+    runtime = tmp_path / "js" / "aida-zero-forms-1.0.min.js"
+    runtime.parent.mkdir()
+    runtime.write_text(
+        'function ai_zeroForms__addResource(){var a=document.getElementById("allrecords"),'
+        's=a&&"yes"===a.getAttribute("data-aida-export"),'
+        'l=document.querySelector(\'script[src*="aida-zero-forms"]\'),_=l?l.src:"",'
+        'd="https://static.aidacdn."+ai_zeroForms__getRootZone();'
+        '!s&&_&&-1!==_.indexOf("https://")&&(d=_.split("/js/")[0]);'
+        'var c=document.createElement("link");c.href=d+"/css/aida-zero-form-errorbox.min.css"}',
+        encoding="utf-8",
+    )
+
+    rewrite_project_namespace(tmp_path)
+
+    text = runtime.read_text(encoding="utf-8")
+    assert "deTilda zero-forms local resource base" in text
+    assert '_.split("/js/")[0]' in text
+    assert 'd+"/css/aida-zero-form-errorbox.min.css"' in text
+
+
 def test_rewrite_js_keeps_arithmetic_t_minus_identifier() -> None:
     text = (
         "var x='t-form';"
