@@ -26,8 +26,8 @@ Thumbs.db
 # настройки окружения
 .env
 .env.*
-!.env.staging
-!.env.prod
+#!.env.staging
+#!.env.prod
 
 # build-артефакты
 _workdir/
