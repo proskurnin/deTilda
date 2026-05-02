@@ -5,6 +5,7 @@ on:
     branches: [main, prod]
   pull_request:
     branches: [main, prod]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -19,7 +20,7 @@ jobs:
 
   deploy-staging:
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to staging
@@ -29,16 +30,19 @@ jobs:
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /home/deploy/staging
-            git pull origin main
-            docker compose -f docker-compose.staging.yml up -d --build
+            git fetch --prune origin main
+            git checkout -B main origin/main
+            docker compose -f docker-compose.staging.yml up -d --build --force-recreate
             docker image prune -f
             sudo cp nginx/staging.conf /etc/nginx/sites-available/detilda.proskurnin.com
             sudo nginx -t && sudo systemctl reload nginx
+            curl --fail --silent --show-error http://127.0.0.1:8000/health
 
   deploy-prod:
     needs: test
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/prod' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to production
@@ -48,7 +52,10 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /home/deploy/prod
-            git pull origin prod
-            docker compose -f docker-compose.prod.yml up -d --build
+            git fetch --prune origin prod
+            git checkout -B prod origin/prod
+            docker compose -f docker-compose.prod.yml up -d --build --force-recreate
             docker image prune -f
+            curl --fail --silent --show-error http://127.0.0.1:8000/health
