@@ -54,6 +54,9 @@ def test_rewrites_form_html_js_and_inline_function_names(tmp_path: Path) -> None
     js = renamed_script.read_text(encoding="utf-8")
     assert "function ai_zeroForms__init" in js
     assert ".ai-form [data-aida-formskey] .ai-input" in js
+    assert "deTilda zero-forms namespace bridge" in js
+    assert "w[legacy]=w[ai]" in js
+    assert "t_zeroForms__init" not in js
 
 
 def test_rewrite_js_keeps_arithmetic_t_minus_identifier() -> None:

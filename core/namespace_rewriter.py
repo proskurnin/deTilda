@@ -150,6 +150,31 @@ def rewrite_text(text: str, suffix: str) -> tuple[str, int]:
     return text, total
 
 
+def _ensure_zero_forms_bridge(text: str, filename: str) -> tuple[str, int]:
+    """Expose both zero-forms init names after namespace rewriting.
+
+    Tilda exports initialize zero-block forms from inline HTML. If an export is
+    partially namespaced, the page can wait for ai_zeroForms__init while the
+    runtime still exposes the legacy name, leaving .tn-atom__form empty.
+    """
+    if "zero-forms" not in filename.lower():
+        return text, 0
+    marker = "deTilda zero-forms namespace bridge"
+    if marker in text:
+        return text, 0
+
+    bridge = (
+        "\n;/* deTilda zero-forms namespace bridge */"
+        "(function(w){"
+        "var ai='ai_zeroForms__init';"
+        "var legacy='t'+'_zeroForms__init';"
+        "if(typeof w[ai]!=='function'&&typeof w[legacy]==='function')w[ai]=w[legacy];"
+        "if(typeof w[legacy]!=='function'&&typeof w[ai]==='function')w[legacy]=w[ai];"
+        "})(window);\n"
+    )
+    return text + bridge, 1
+
+
 def _rewrite_path_name(name: str) -> str:
     rewritten, _count = _apply_word_replacements(name)
     return rewritten
@@ -288,6 +313,8 @@ def rewrite_project_namespace(project_root: Path) -> NamespaceRewriteResult:
         text, count = _apply_rename_map(text, rename_map)
         replacements += count
         text, count = rewrite_text(text, path.suffix)
+        replacements += count
+        text, count = _ensure_zero_forms_bridge(text, path.name)
         replacements += count
 
         if text != original:
