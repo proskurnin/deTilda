@@ -32,11 +32,25 @@
   .stats-title { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .65rem; }
   .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
   .stat-row { display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 7px; padding: .35rem .65rem; font-size: .85rem; }
+  .stat-row.clickable { cursor: pointer; border: 1px solid transparent; }
+  .stat-row.clickable:hover, .stat-row.clickable:focus-visible { background: #eef2ff; border-color: #c7d2fe; outline: none; }
   .stat-row .k { color: #6b7280; }
   .stat-row .v { font-weight: 600; color: #111; }
   .stat-row.warn .v { color: #d97706; }
   .stat-row.bad  .v { color: #dc2626; }
   .stat-time { margin-top: .5rem; font-size: .78rem; color: #9ca3af; text-align: right; }
+
+  /* Details modal */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, .42); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 20; }
+  .modal-backdrop[hidden] { display: none; }
+  .modal { width: min(560px, 100%); max-height: min(680px, calc(100vh - 2rem)); overflow: hidden; background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); display: flex; flex-direction: column; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.1rem; border-bottom: 1px solid #e5e7eb; }
+  .modal-title { font-size: 1rem; font-weight: 650; color: #111827; }
+  .modal-close { width: 32px; height: 32px; border: 0; border-radius: 7px; background: #f3f4f6; color: #374151; font-size: 1.25rem; line-height: 1; cursor: pointer; }
+  .modal-close:hover, .modal-close:focus-visible { background: #e5e7eb; outline: none; }
+  .modal-body { overflow: auto; padding: 1rem 1.1rem; }
+  .detail-list { display: grid; gap: .45rem; list-style: none; }
+  .detail-list li { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 7px; padding: .55rem .7rem; color: #374151; font-size: .86rem; line-height: 1.35; word-break: break-word; }
 
   /* Progress steps */
   #progress-block { display: none; margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: .85rem; }
@@ -84,6 +98,18 @@
   <button id="btn-again" class="btn-ghost">Обработать ещё</button>
 </div>
 
+<div id="details-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="details-title">
+    <div class="modal-head">
+      <div id="details-title" class="modal-title"></div>
+      <button id="details-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-body">
+      <ul id="details-list" class="detail-list"></ul>
+    </div>
+  </div>
+</div>
+
 <script>
 const form      = document.getElementById('form');
 const btn       = document.getElementById('btn');
@@ -96,6 +122,12 @@ const statTime   = document.getElementById('stat-time');
 const errBox    = document.getElementById('err-box');
 const errMsg    = document.getElementById('err-msg');
 const errHint   = document.getElementById('err-hint');
+const detailsModal = document.getElementById('details-modal');
+const detailsTitle = document.getElementById('details-title');
+const detailsList  = document.getElementById('details-list');
+const detailsClose = document.getElementById('details-close');
+
+let currentStats = null;
 
 const STEPS = [
   { id: 'assets',          label: 'Ассеты' },
@@ -219,27 +251,68 @@ function showError(msg, code) {
 
 function showStats(s) {
   if (!s) return;
+  currentStats = s;
   const rows = [
-    { k: 'Переименовано файлов', v: s.renamed_assets,  cls: '' },
-    { k: 'Исправлено ссылок',   v: s.fixed_links,      cls: '' },
-    { k: 'Загружено с CDN',     v: s.downloaded,       cls: '' },
-    { k: 'Форм подключено',     v: s.forms_hooked,     cls: '' },
-    { k: 'Предупреждений',      v: s.warnings,         cls: s.warnings  > 0 ? 'warn' : '' },
-    { k: 'Ошибок',              v: s.errors,           cls: s.errors    > 0 ? 'bad'  : '' },
+    { key: 'renamed_assets', k: 'Переименовано файлов', v: s.renamed_assets,  cls: '' },
+    { key: 'fixed_links',    k: 'Исправлено ссылок',    v: s.fixed_links,     cls: '' },
+    { key: 'downloaded',     k: 'Загружено с CDN',      v: s.downloaded,      cls: '' },
+    { key: 'forms_hooked',   k: 'Форм подключено',      v: s.forms_hooked,    cls: '' },
+    { key: 'warnings',       k: 'Предупреждений',       v: s.warnings,        cls: s.warnings  > 0 ? 'warn' : '' },
+    { key: 'errors',         k: 'Ошибок',               v: s.errors,          cls: s.errors    > 0 ? 'bad'  : '' },
   ];
   statsGrid.innerHTML = rows.map(r => `
-    <div class="stat-row ${r.cls}">
+    <div class="stat-row clickable ${r.cls}" role="button" tabindex="0" data-detail-key="${r.key}" aria-label="${r.k}: открыть детали">
       <span class="k">${r.k}</span>
       <span class="v">${r.v}</span>
     </div>`).join('');
+  statsGrid.querySelectorAll('.stat-row').forEach(row => {
+    row.addEventListener('click', () => openDetails(row.dataset.detailKey));
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openDetails(row.dataset.detailKey);
+      }
+    });
+  });
   if (s.exec_time) {
     statTime.textContent = `Время обработки: ${s.exec_time} сек`;
   }
   statsBlock.style.display = 'block';
 }
 
+function openDetails(key) {
+  const detail = currentStats?.details?.[key] || {};
+  const items = Array.isArray(detail.items) && detail.items.length
+    ? detail.items
+    : ['Подробной информации для этого поля нет.'];
+
+  detailsTitle.textContent = detail.title || 'Детали';
+  detailsList.innerHTML = '';
+  items.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = String(item);
+    detailsList.appendChild(li);
+  });
+  detailsModal.hidden = false;
+  detailsClose.focus();
+}
+
+function closeDetails() {
+  detailsModal.hidden = true;
+}
+
+detailsClose.addEventListener('click', closeDetails);
+detailsModal.addEventListener('click', event => {
+  if (event.target === detailsModal) closeDetails();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !detailsModal.hidden) closeDetails();
+});
+
 btnAgain.addEventListener('click', () => {
   form.reset();
+  currentStats = null;
+  closeDetails();
   statsBlock.style.display = 'none';
   errBox.style.display = 'none';
   progressBlock.style.display = 'none';

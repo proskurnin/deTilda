@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from core.version import APP_VERSION  # noqa: E402
 import web.app as app_module  # noqa: E402
 from web.app import app, _STORE  # noqa: E402
+from web.jobs import JobStore  # noqa: E402
 
 
 @pytest.fixture()
@@ -202,6 +203,64 @@ def test_admin_stats_returns_json(client: TestClient, monkeypatch) -> None:
     data = r.json()
     assert "total_jobs" in data
     assert "config" in data
+
+
+def test_admin_jobs_are_paginated(client: TestClient, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    store = JobStore(persist_dir=tmp_path / "workdir")
+    monkeypatch.setattr(app_module, "_STORE", store)
+    monkeypatch.setattr(app_module, "_LOGS_DIR", tmp_path / "logs")
+
+    first = store.create()
+    second = store.create()
+    third = store.create()
+    log_dir = tmp_path / "logs" / second.id
+    log_dir.mkdir(parents=True)
+    (log_dir / f"{second.id}_detilda.log").write_text("test log", encoding="utf-8")
+
+    r = client.get("/admin/api/jobs?page=1&page_size=2", auth=("admin", "secret"))
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 3
+    assert data["page"] == 1
+    assert data["page_size"] == 2
+    assert data["pages"] == 2
+    assert len(data["items"]) == 2
+    by_id = {item["id"]: item for item in data["items"]}
+    assert by_id[third.id]["log_available"] is False
+    assert by_id[second.id]["log_available"] is True
+    assert by_id[second.id]["log_size"] == len("test log")
+    assert first.id not in by_id
+
+
+def test_admin_job_log_returns_log_content(client: TestClient, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setattr(app_module, "_LOGS_DIR", tmp_path / "logs")
+    job_id = "job-123"
+    log_dir = tmp_path / "logs" / job_id
+    log_dir.mkdir(parents=True)
+    (log_dir / f"{job_id}_detilda.log").write_text("line 1\nline 2\n", encoding="utf-8")
+
+    r = client.get(f"/admin/api/jobs/{job_id}/log", auth=("admin", "secret"))
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["job_id"] == job_id
+    assert data["filename"] == f"{job_id}_detilda.log"
+    assert data["log"] == "line 1\nline 2\n"
+
+
+def test_admin_job_log_returns_404_when_missing(client: TestClient, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setattr(app_module, "_LOGS_DIR", tmp_path / "logs")
+
+    r = client.get("/admin/api/jobs/missing/log", auth=("admin", "secret"))
+
+    assert r.status_code == 404
 
 
 def test_admin_cleanup_returns_removed_count(client: TestClient, monkeypatch) -> None:

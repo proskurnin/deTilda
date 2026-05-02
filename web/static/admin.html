@@ -40,6 +40,22 @@
   .msg { font-size: .8rem; }
   .msg-ok  { color: #166534; }
   .msg-err { color: #dc2626; }
+  .table-wrap { overflow-x: auto; }
+  .link-btn { background: none; color: #2563eb; padding: 0; border-radius: 0; font-size: .8rem; font-weight: 500; }
+  .link-btn:hover { color: #1d4ed8; text-decoration: underline; }
+  .link-btn:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
+  .pager { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; padding: .7rem 1rem; border-top: 1px solid #f1f5f9; color: #6b7280; font-size: .82rem; flex-wrap: wrap; }
+  .pager button { padding: .32rem .65rem; background: #f3f4f6; color: #374151; }
+  .pager button:disabled { color: #9ca3af; cursor: default; }
+  .pager select { border: 1px solid #d1d5db; border-radius: 6px; padding: .28rem .45rem; background: #fff; color: #374151; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, .48); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 20; }
+  .modal-backdrop[hidden] { display: none; }
+  .modal { width: min(900px, 100%); max-height: min(760px, calc(100vh - 2rem)); overflow: hidden; background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); display: flex; flex-direction: column; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1rem; border-bottom: 1px solid #e5e7eb; }
+  .modal-title { font-size: .95rem; font-weight: 650; }
+  .modal-close { width: 32px; height: 32px; padding: 0; background: #f3f4f6; color: #374151; font-size: 1.25rem; line-height: 1; }
+  .modal-body { overflow: auto; padding: 1rem; background: #0f172a; }
+  .log-view { white-space: pre-wrap; color: #dbeafe; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   /* Config form */
   .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; padding: 1rem 1.25rem; }
   .cfg-item { background: #f8fafc; border-radius: 8px; padding: .65rem .9rem; }
@@ -93,12 +109,39 @@
         <button class="btn-ghost" id="btn-refresh">Обновить</button>
       </div>
     </div>
-    <table>
-      <thead><tr><th>ID</th><th>Статус</th><th>Создана</th><th>Завершена</th><th>Детали</th></tr></thead>
-      <tbody id="jobs-body"></tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Статус</th><th>Создана</th><th>Завершена</th><th>Логи</th><th>Детали</th></tr></thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <span id="jobs-range">—</span>
+      <button id="jobs-prev" type="button">Назад</button>
+      <span id="jobs-page">—</span>
+      <button id="jobs-next" type="button">Вперёд</button>
+      <label for="jobs-page-size">На странице</label>
+      <select id="jobs-page-size">
+        <option value="10">10</option>
+        <option value="20" selected>20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
   </div>
 </main>
+
+<div id="log-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <div class="modal-head">
+      <div id="log-title" class="modal-title">Лог операции</div>
+      <button id="log-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-body">
+      <pre id="log-content" class="log-view"></pre>
+    </div>
+  </div>
+</div>
 
 <script>
 // All API requests use the server-injected auth token
@@ -134,6 +177,11 @@ function showMsg(id, text, cls) {
   setTimeout(() => { el.textContent = ''; el.className = 'msg'; }, 4000);
 }
 
+let jobsPage = 1;
+let jobsPageSize = 20;
+let jobsPages = 1;
+let jobsTotal = 0;
+
 function renderConfig(cfg) {
   document.getElementById('cfg-form').innerHTML = CFG_FIELDS.map(f => `
     <div class="cfg-item">
@@ -155,12 +203,18 @@ async function loadStats() {
 }
 
 async function loadJobs() {
-  const r = await authFetch('/admin/api/jobs');
+  const r = await authFetch(`/admin/api/jobs?page=${jobsPage}&page_size=${jobsPageSize}`);
   if (!r.ok) return;
-  const jobs = await r.json();
+  const data = await r.json();
+  const jobs = data.items || [];
+  jobsPage = data.page || 1;
+  jobsPageSize = data.page_size || jobsPageSize;
+  jobsPages = data.pages || 1;
+  jobsTotal = data.total || 0;
   const tbody = document.getElementById('jobs-body');
   if (!jobs.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет задач</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет задач</td></tr>';
+    renderJobsPager();
     return;
   }
   tbody.innerHTML = jobs.map(j => `
@@ -169,6 +223,9 @@ async function loadJobs() {
       <td><span class="status ${statusClass(j.status)}">${statusLabel(j.status)}</span></td>
       <td>${fmt(j.created_at)}</td>
       <td>${fmt(j.finished_at)}</td>
+      <td>${j.log_available
+        ? `<button class="link-btn" type="button" data-log-id="${j.id}">открыть</button>`
+        : '<span style="color:#9ca3af;font-size:.8rem">нет</span>'}</td>
       <td>${j.status === 'error'
         ? `<span class="err-text" title="${(j.error_detail||'').replace(/"/g,'&quot;')}">${j.error || '—'}</span>`
         : j.status === 'done'
@@ -177,6 +234,44 @@ async function loadJobs() {
               : '<span style="color:#9ca3af;font-size:.8rem">файл удалён</span>')
           : '—'}</td>
     </tr>`).join('');
+  tbody.querySelectorAll('[data-log-id]').forEach(btn => {
+    btn.addEventListener('click', () => openLog(btn.dataset.logId));
+  });
+  renderJobsPager();
+}
+
+function renderJobsPager() {
+  const start = jobsTotal === 0 ? 0 : (jobsPage - 1) * jobsPageSize + 1;
+  const end = Math.min(jobsPage * jobsPageSize, jobsTotal);
+  document.getElementById('jobs-range').textContent = jobsTotal ? `${start}–${end} из ${jobsTotal}` : '0 задач';
+  document.getElementById('jobs-page').textContent = `${jobsPage} / ${jobsPages}`;
+  document.getElementById('jobs-prev').disabled = jobsPage <= 1;
+  document.getElementById('jobs-next').disabled = jobsPage >= jobsPages;
+  document.getElementById('jobs-page-size').value = String(jobsPageSize);
+}
+
+async function openLog(jobId) {
+  const modal = document.getElementById('log-modal');
+  const title = document.getElementById('log-title');
+  const content = document.getElementById('log-content');
+  title.textContent = `Лог операции ${jobId.slice(0, 8)}…`;
+  content.textContent = 'Загрузка…';
+  modal.hidden = false;
+  document.getElementById('log-close').focus();
+
+  const r = await authFetch(`/admin/api/jobs/${jobId}/log`);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    content.textContent = err.detail || `Ошибка загрузки лога: ${r.status}`;
+    return;
+  }
+  const d = await r.json();
+  title.textContent = d.filename || title.textContent;
+  content.textContent = d.log || '';
+}
+
+function closeLog() {
+  document.getElementById('log-modal').hidden = true;
 }
 
 function showError(msg) {
@@ -193,6 +288,30 @@ async function refresh() {
 }
 
 document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('jobs-prev').addEventListener('click', async () => {
+  if (jobsPage > 1) {
+    jobsPage -= 1;
+    await loadJobs();
+  }
+});
+document.getElementById('jobs-next').addEventListener('click', async () => {
+  if (jobsPage < jobsPages) {
+    jobsPage += 1;
+    await loadJobs();
+  }
+});
+document.getElementById('jobs-page-size').addEventListener('change', async event => {
+  jobsPageSize = parseInt(event.target.value, 10);
+  jobsPage = 1;
+  await loadJobs();
+});
+document.getElementById('log-close').addEventListener('click', closeLog);
+document.getElementById('log-modal').addEventListener('click', event => {
+  if (event.target.id === 'log-modal') closeLog();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !document.getElementById('log-modal').hidden) closeLog();
+});
 
 document.getElementById('btn-save').addEventListener('click', async () => {
   const body = {};
@@ -217,7 +336,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
 document.getElementById('btn-cleanup').addEventListener('click', async () => {
   const r = await authFetch('/admin/api/cleanup', { method: 'POST' });
   const d = await r.json();
-  showMsg('cleanup-msg', `Удалено: ${d.removed}`, 'msg-ok');
+  showMsg('cleanup-msg', `Задач: ${d.removed_jobs}, логов: ${d.removed_logs}`, 'msg-ok');
   await refresh();
 });
 

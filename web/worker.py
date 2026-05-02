@@ -6,6 +6,7 @@ import traceback
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from core.api import process_archive
 from core.params import ProcessParams
@@ -72,6 +73,134 @@ def _set_error(job: Job, code: str, detail: str) -> None:
     job.error_detail = detail
 
 
+def _strip_log_prefix(line: str) -> str:
+    parts = line.strip().split(" ", 3)
+    if len(parts) == 4 and parts[0].count("-") == 2 and parts[1].count(":") == 2:
+        return f"{parts[2]} {parts[3]}".strip()
+    return line.strip()
+
+
+def _collect_log_messages(logs_dir: Path, *, limit: int = 50) -> dict[str, list[str]]:
+    messages: dict[str, list[str]] = {"warnings": [], "errors": []}
+    if not logs_dir.exists():
+        return messages
+
+    skip_warning_fragments = (
+        "Предупреждений:",
+        "завершено с предупреждениями",
+    )
+    skip_error_fragments = ("Ошибок:",)
+
+    for log_path in sorted(logs_dir.glob("*_detilda.log")):
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+
+        for raw_line in lines:
+            line = _strip_log_prefix(raw_line)
+            if not line:
+                continue
+
+            is_error = "💥" in raw_line or "⛔" in raw_line or "Traceback" in raw_line or " ERROR " in raw_line
+            is_warning = "⚠️" in raw_line or " WARNING " in raw_line
+            if (
+                is_error
+                and not any(fragment in line for fragment in skip_error_fragments)
+                and len(messages["errors"]) < limit
+            ):
+                messages["errors"].append(line)
+            elif (
+                is_warning
+                and not any(fragment in line for fragment in skip_warning_fragments)
+                and len(messages["warnings"]) < limit
+            ):
+                messages["warnings"].append(line)
+
+    return messages
+
+
+def _nonzero_items(items: list[tuple[str, Any]]) -> list[str]:
+    return [f"{label}: {value}" for label, value in items if value not in (0, "", None, False)]
+
+
+def _build_stats_details(stats: Any, logs_dir: Path) -> dict[str, dict[str, Any]]:
+    log_messages = _collect_log_messages(logs_dir)
+
+    warning_items = _nonzero_items(
+        [
+            ("Битых внутренних ссылок", stats.broken_links),
+            ("Битых htaccess-маршрутов", stats.broken_htaccess_routes),
+            ("Не удалось загрузить browser runtime assets", stats.browser_runtime_failed),
+            ("Потенциально неразрешённых изображений", stats.images_unresolved),
+            ("Namespace critical leftovers", stats.namespace_critical_leftovers),
+            ("Namespace warning leftovers", stats.namespace_warning_leftovers),
+            ("SSL bypass downloads", stats.ssl_bypassed_downloads),
+        ]
+    )
+    warning_items.extend(log_messages["warnings"])
+
+    error_items = log_messages["errors"]
+
+    return {
+        "renamed_assets": {
+            "title": "Переименовано файлов",
+            "items": _nonzero_items(
+                [
+                    ("Переименовано ассетов", stats.renamed_assets),
+                    ("Удалено ассетов", stats.removed_assets),
+                    ("Очищено файлов", stats.cleaned_files),
+                    ("Отформатировано HTML-файлов", stats.formatted_html_files),
+                    ("Namespace renamed paths", stats.namespace_renamed_paths),
+                    ("Namespace files updated", stats.namespace_files_updated),
+                ]
+            ) or ["Изменений файлов не было."],
+        },
+        "fixed_links": {
+            "title": "Исправлено ссылок",
+            "items": _nonzero_items(
+                [
+                    ("Исправлено ссылок", stats.fixed_links),
+                    ("Битых внутренних ссылок осталось", stats.broken_links),
+                    ("Битых htaccess-маршрутов найдено изначально", stats.htaccess_routes_initially_broken),
+                    ("Автоисправлено htaccess-маршрутов", stats.htaccess_routes_autofixed),
+                    ("Битых htaccess-маршрутов осталось", stats.broken_htaccess_routes),
+                ]
+            ) or ["Ссылки не требовали правок."],
+        },
+        "downloaded": {
+            "title": "Загружено с CDN",
+            "items": _nonzero_items(
+                [
+                    ("Загружено удалённых ассетов", stats.downloaded_remote_assets),
+                    ("Browser runtime pages", stats.browser_runtime_pages),
+                    ("Browser runtime requests", stats.browser_runtime_requests),
+                    ("Browser runtime downloads", stats.browser_runtime_downloaded),
+                    ("Browser runtime failed", stats.browser_runtime_failed),
+                    ("SSL bypass downloads", stats.ssl_bypassed_downloads),
+                ]
+            ) or ["CDN-загрузок не было."],
+        },
+        "forms_hooked": {
+            "title": "Формы",
+            "items": _nonzero_items(
+                [
+                    ("Форм найдено", stats.forms_found),
+                    ("Форм подключено к handler", stats.forms_hooked),
+                ]
+            ) or ["Формы не найдены."],
+        },
+        "warnings": {
+            "title": "Предупреждения",
+            "items": warning_items or ["Предупреждений нет."],
+        },
+        "errors": {
+            "title": "Ошибки",
+            "items": error_items or ["Ошибок нет."],
+        },
+    }
+
+
 def run_job(
     job: Job,
     store: JobStore,
@@ -123,6 +252,7 @@ def run_job(
             "exec_time":      round(stats.exec_time, 1),
             "warnings":       stats.warnings,
             "errors":         stats.errors,
+            "details":        _build_stats_details(stats, logs_dir),
         }
         job.status = JobStatus.DONE
 

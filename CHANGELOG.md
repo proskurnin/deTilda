@@ -2,6 +2,11 @@
 
 This file records user-visible and operational changes.
 
+## 5.5.0 - 2026-05-02
+
+- Added clickable processing-result metrics in the web UI with a details modal for counters, warnings, and errors.
+- Added admin job table pagination and per-job log viewing in a modal.
+
 ## 5.4.7 - 2026-05-02
 
 - Patched Zero Forms dynamic resource loading to use the local script directory instead of `static.aidacdn`.

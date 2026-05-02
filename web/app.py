@@ -84,6 +84,28 @@ def _cleanup_old_logs(logs_dir: Path, ttl_days: int) -> int:
     return removed
 
 
+def _find_job_log(job_id: str) -> Path | None:
+    """Return the main deTilda log for a web job, if it is still available."""
+    log_dir = _LOGS_DIR / job_id
+    if log_dir.is_dir():
+        candidates = sorted(log_dir.glob("*_detilda.log"))
+        if candidates:
+            return candidates[0]
+
+    legacy_log = _LOGS_DIR / f"{job_id}_detilda.log"
+    if legacy_log.is_file():
+        return legacy_log
+    return None
+
+
+def _admin_job_dict(job) -> dict:
+    data = job.to_admin_dict()
+    log_path = _find_job_log(job.id)
+    data["log_available"] = bool(log_path)
+    data["log_size"] = log_path.stat().st_size if log_path else 0
+    return data
+
+
 def _admin_auth(
     credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)],
 ) -> HTTPBasicCredentials:
@@ -254,8 +276,42 @@ async def admin_panel(creds: AdminAuth) -> str:
 
 
 @app.get("/admin/api/jobs")
-async def admin_list_jobs(_: AdminAuth) -> list:
-    return [j.to_admin_dict() for j in _STORE.list_all()]
+async def admin_list_jobs(
+    _: AdminAuth,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    jobs = _STORE.list_all()
+    total = len(jobs)
+    pages = max((total + page_size - 1) // page_size, 1)
+    page = min(page, pages)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return {
+        "items": [_admin_job_dict(j) for j in jobs[start:end]],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
+    }
+
+
+@app.get("/admin/api/jobs/{job_id}/log")
+async def admin_job_log(job_id: str, _: AdminAuth) -> dict:
+    log_path = _find_job_log(job_id)
+    if log_path is None:
+        raise HTTPException(status_code=404, detail="Лог задачи не найден")
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        raise HTTPException(status_code=410, detail="Лог задачи недоступен")
+    return {
+        "job_id": job_id,
+        "filename": log_path.name,
+        "log": content,
+    }
 
 
 @app.get("/admin/api/stats")
