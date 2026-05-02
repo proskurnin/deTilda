@@ -30,10 +30,11 @@ jobs:
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            set -euo pipefail
+            set -eu
             cd /home/deploy/staging
             git fetch --prune origin main
             git checkout -B main origin/main
+            git reset --hard origin/main
             docker compose -f docker-compose.staging.yml up -d --build --force-recreate
             docker image prune -f
             sudo cp nginx/staging.conf /etc/nginx/sites-available/detilda.proskurnin.com
@@ -52,10 +53,11 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
-            set -euo pipefail
+            set -eu
             cd /home/deploy/prod
             git fetch --prune origin prod
             git checkout -B prod origin/prod
+            git reset --hard origin/prod
             docker compose -f docker-compose.prod.yml up -d --build --force-recreate
             docker image prune -f
             curl --fail --silent --show-error http://127.0.0.1:8000/health
