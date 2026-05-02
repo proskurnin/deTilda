@@ -32,6 +32,7 @@ jobs:
           script: |
             set -eu
             cd /home/deploy/staging
+            sudo chown -R "$(id -u):$(id -g)" /home/deploy/staging
             git fetch --prune origin main
             git checkout -B main origin/main
             git reset --hard origin/main
@@ -55,6 +56,7 @@ jobs:
           script: |
             set -eu
             cd /home/deploy/prod
+            sudo chown -R "$(id -u):$(id -g)" /home/deploy/prod
             git fetch --prune origin prod
             git checkout -B prod origin/prod
             git reset --hard origin/prod
