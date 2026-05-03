@@ -6,7 +6,7 @@
 <title>deTilda</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
   .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: min(500px, 100%); }
   .title-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .25rem; flex-wrap: wrap; }
   h1 { font-size: 1.5rem; margin: 0; }
@@ -68,6 +68,7 @@
   .batch-state { font-size: .78rem; color: #6b7280; }
   .batch-link { color: #2563eb; text-decoration: none; font-size: .82rem; font-weight: 600; }
   .batch-link:hover { text-decoration: underline; }
+  .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; letter-spacing: 0; }
 </style>
 </head>
 <body>
@@ -105,6 +106,7 @@
   <a  id="download" class="btn-success" href="#">Скачать результат</a>
   <button id="btn-again" class="btn-ghost">Обработать ещё</button>
 </div>
+<footer class="site-footer">made with &hearts; by Roman A. Proskurnin</footer>
 
 <div id="details-modal" class="modal-backdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="details-title">
