@@ -30,6 +30,7 @@ class Job:
     error_code: Optional[str] = None   # machine-readable key
     error_detail: Optional[str] = None # raw exception (admin only)
     stats: Optional[dict] = None
+    domain: Optional[str] = None
     progress: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -41,6 +42,7 @@ class Job:
             "error": self.error,
             "error_code": self.error_code,
             "stats": self.stats,
+            "domain": self.domain,
             "progress": self.progress,
         }
 
@@ -68,6 +70,7 @@ class Job:
             error_code=data.get("error_code"),
             error_detail=data.get("error_detail"),
             stats=data.get("stats"),
+            domain=data.get("domain"),
             progress=data.get("progress", []),
         )
 

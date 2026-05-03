@@ -44,6 +44,8 @@
   .link-btn { background: none; color: #2563eb; padding: 0; border-radius: 0; font-size: .8rem; font-weight: 500; }
   .link-btn:hover { color: #1d4ed8; text-decoration: underline; }
   .link-btn:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
+  .domain-link { color: #2563eb; font-size: .82rem; font-weight: 500; text-decoration: none; }
+  .domain-link:hover { color: #1d4ed8; text-decoration: underline; }
   .pager { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; padding: .7rem 1rem; border-top: 1px solid #f1f5f9; color: #6b7280; font-size: .82rem; flex-wrap: wrap; }
   .pager button { padding: .32rem .65rem; background: #f3f4f6; color: #374151; }
   .pager button:disabled { color: #9ca3af; cursor: default; }
@@ -83,6 +85,9 @@
   .settings-item input { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: .42rem .55rem; margin-bottom: .55rem; background: #fff; }
   .header-btn { margin-left: 0; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.16); }
   .header-btn:hover { background: rgba(255,255,255,.2); }
+  .collapse-toggle { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; min-width: 118px; }
+  .collapse-toggle:hover { background: #e5e7eb; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -143,9 +148,12 @@ window._ADMIN_USER = __ADMIN_USER_JSON__;
   <div class="card">
     <div class="card-head">
       <h2>Безопасность</h2>
-      <span id="password-msg" class="msg"></span>
+      <div class="actions">
+        <span id="password-msg" class="msg"></span>
+        <button id="security-toggle" class="collapse-toggle" type="button" aria-expanded="false" aria-controls="security-panel">Показать</button>
+      </div>
     </div>
-    <div class="settings-grid">
+    <div id="security-panel" class="settings-grid" hidden>
       <form id="password-form" class="settings-item" onsubmit="return false">
         <h3>Смена пароля администратора</h3>
         <label for="current-password">Текущий пароль</label>
@@ -171,7 +179,7 @@ window._ADMIN_USER = __ADMIN_USER_JSON__;
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Статус</th><th>Создана</th><th>Завершена</th><th>Логи</th><th>Детали</th></tr></thead>
+        <thead><tr><th>ID</th><th>Домен</th><th>Статус</th><th>Создана</th><th>Длительность</th><th>Логи</th><th>Детали</th></tr></thead>
         <tbody id="jobs-body"></tbody>
       </table>
     </div>
@@ -272,6 +280,16 @@ function statusLabel(s) {
 function fmt(iso) {
   return iso ? new Date(iso).toLocaleString('ru-RU') : '—';
 }
+function fmtDuration(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours) return `${hours} ч ${minutes} мин`;
+  if (minutes) return `${minutes} мин ${secs} сек`;
+  return `${secs} сек`;
+}
 function showMsg(id, text, cls) {
   const el = document.getElementById(id);
   el.textContent = text;
@@ -319,16 +337,19 @@ async function loadJobs() {
   jobsTotal = data.total || 0;
   const tbody = document.getElementById('jobs-body');
   if (!jobs.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет задач</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет задач</td></tr>';
     renderJobsPager();
     return;
   }
   tbody.innerHTML = jobs.map(j => `
     <tr>
       <td class="mono">${j.id.slice(0, 8)}…</td>
+      <td>${j.domain && j.domain_url
+        ? `<a class="domain-link" href="${escapeHtml(j.domain_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(j.domain)}</a>`
+        : '<span style="color:#9ca3af;font-size:.8rem">—</span>'}</td>
       <td><span class="status ${statusClass(j.status)}">${statusLabel(j.status)}</span></td>
       <td>${fmt(j.created_at)}</td>
-      <td>${fmt(j.finished_at)}</td>
+      <td>${fmtDuration(j.duration_sec)}</td>
       <td>${j.log_available
         ? `<button class="link-btn" type="button" data-log-id="${j.id}">открыть</button>`
         : '<span style="color:#9ca3af;font-size:.8rem">нет</span>'}</td>
@@ -423,6 +444,13 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 });
 
 document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('security-toggle').addEventListener('click', () => {
+  const panel = document.getElementById('security-panel');
+  const toggle = document.getElementById('security-toggle');
+  panel.hidden = !panel.hidden;
+  toggle.setAttribute('aria-expanded', String(!panel.hidden));
+  toggle.textContent = panel.hidden ? 'Показать' : 'Скрыть';
+});
 document.getElementById('jobs-prev').addEventListener('click', async () => {
   if (jobsPage > 1) {
     jobsPage -= 1;

@@ -14,6 +14,7 @@ import time
 import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -105,9 +106,25 @@ def _find_job_log(job_id: str) -> Path | None:
     return None
 
 
+def _job_duration_seconds(job) -> int:
+    start = job.created_at
+    end = job.finished_at or datetime.now(timezone.utc)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return max(0, int((end - start).total_seconds()))
+
+
 def _admin_job_dict(job) -> dict:
     data = job.to_admin_dict()
     log_path = _find_job_log(job.id)
+    domain = data.get("domain")
+    if not domain and job.result_path:
+        domain = _domain_from_robots(job.result_path)
+    data["domain"] = domain
+    data["domain_url"] = f"https://{domain}" if domain else None
+    data["duration_sec"] = _job_duration_seconds(job)
     data["log_available"] = bool(log_path)
     data["log_size"] = log_path.stat().st_size if log_path else 0
     return data
@@ -162,6 +179,27 @@ def _validate_tilda_export_zip(content: bytes, required_files: list[str]) -> Non
         )
 
 
+def _read_zip_text(content: bytes, filename: str) -> str | None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            files = [name for name in zf.namelist() if name and not name.endswith("/")]
+            first_parts = {name.split("/", 1)[0] for name in files if "/" in name}
+            has_root_files = any("/" not in name for name in files)
+            strip_root = len(first_parts) == 1 and not has_root_files
+            root = next(iter(first_parts)) if strip_root else ""
+            target = filename.lower()
+            for name in files:
+                normalized = name.replace("\\", "/").lstrip("/")
+                rootless = normalized
+                if strip_root and rootless.startswith(root + "/"):
+                    rootless = rootless[len(root) + 1:]
+                if rootless.lower() == target:
+                    return zf.read(name).decode("utf-8", errors="replace")
+    except (OSError, UnicodeError, zipfile.BadZipFile):
+        return None
+    return None
+
+
 def _safe_zip_stem(value: str) -> str:
     stem = re.sub(r"^https?://", "", value.strip(), flags=re.IGNORECASE)
     stem = stem.split("/", 1)[0].split(":", 1)[0].lower()
@@ -191,6 +229,28 @@ def _domain_from_robots(project_root: Path) -> str | None:
         if key == "sitemap" and value and sitemap_domain is None:
             sitemap_domain = _safe_zip_stem(value)
     return sitemap_domain
+
+
+def _domain_from_robots_text(text: str) -> str | None:
+    sitemap_domain = None
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "host" and value:
+            return _safe_zip_stem(value)
+        if key == "sitemap" and value and sitemap_domain is None:
+            sitemap_domain = _safe_zip_stem(value)
+    return sitemap_domain
+
+
+def _domain_from_zip_content(content: bytes) -> str | None:
+    robots = _read_zip_text(content, "robots.txt")
+    if not robots:
+        return None
+    return _domain_from_robots_text(robots)
 
 
 def _download_filename(job) -> str:
@@ -333,7 +393,7 @@ async def create_job(
         raise HTTPException(status_code=429, detail="Слишком много активных задач. Повторите позже.")
 
     max_bytes = web_cfg.max_upload_size_mb * 1024 * 1024
-    prepared: list[tuple[UploadFile, Path]] = []
+    prepared: list[tuple[UploadFile, Path, str | None]] = []
     try:
         for upload in uploads:
             suffix = Path(upload.filename or "").suffix.lower()
@@ -350,17 +410,20 @@ async def create_job(
                     detail=f"{upload.filename}: файл слишком большой. Максимум: {web_cfg.max_upload_size_mb} МБ",
                 )
             _validate_tilda_export_zip(content, web_cfg.required_archive_files)
+            domain = _domain_from_zip_content(content)
 
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             tmp.write(content)
             tmp.flush()
             tmp.close()
-            prepared.append((upload, Path(tmp.name)))
+            prepared.append((upload, Path(tmp.name), domain))
 
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         created: list[dict] = []
-        for upload, tmp_path in prepared:
+        for upload, tmp_path, domain in prepared:
             job = _STORE.create()
+            job.domain = domain
+            _STORE.update(job)
             _EXECUTOR.submit(
                 run_job,
                 job=job,
@@ -373,9 +436,10 @@ async def create_job(
                 "job_id": job.id,
                 "status": job.status.value,
                 "filename": upload.filename or "",
+                "domain": domain,
             })
     except HTTPException:
-        for _, tmp_path in prepared:
+        for _, tmp_path, _ in prepared:
             tmp_path.unlink(missing_ok=True)
         raise
 

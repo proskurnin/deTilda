@@ -13,6 +13,9 @@ This file is the canonical place for future plans and follow-up work.
 
 ## Planned Work
 
+- Доработать веб-форму:
+  - Добавить поле Google Analytics Measurement ID, для того чтобы скрипт устанавливался на страницу верно;
+  - verify `https://detilda.com/health` and `https://detilda.ru/health` after the GitHub Actions deploy.
 - Finish automated production deploy:
   - rerun a GitHub Actions production deploy from the `prod` branch after the `/tmp/detilda.env.prod` ownership fix;
   - verify `https://detilda.com/health` and `https://detilda.ru/health` after the GitHub Actions deploy.
