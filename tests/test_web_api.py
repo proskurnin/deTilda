@@ -5,6 +5,7 @@ import io
 import sys
 import time
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,7 @@ def test_create_job_returns_202(client: TestClient) -> None:
     assert "job_id" in body
     assert len(body["jobs"]) == 1
     assert body["status"] in ("pending", "running", "done")
+    assert body["domain"] == "example.com"
 
 
 def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
@@ -121,6 +123,7 @@ def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
     assert "jobs" in body
     assert len(body["jobs"]) == 2
     assert {item["filename"] for item in body["jobs"]} == {"one.zip", "two.zip"}
+    assert {item["domain"] for item in body["jobs"]} == {"example.com"}
 
 
 def test_create_job_rejects_non_zip(client: TestClient) -> None:
@@ -266,6 +269,13 @@ def test_admin_accepts_correct_credentials(client: TestClient, monkeypatch) -> N
     assert r.status_code == 200
     assert "deTilda" in r.text
     assert "__ADMIN_USER_JSON__" not in r.text
+    assert 'id="security-panel" class="settings-grid" hidden' in r.text
+    assert 'id="security-toggle"' in r.text
+    assert 'aria-expanded="false"' in r.text
+    assert "<th>Домен</th>" in r.text
+    assert "<th>Длительность</th>" in r.text
+    assert "<th>Завершена</th>" not in r.text
+    assert 'target="_blank"' in r.text
 
 
 def test_admin_stats_returns_json(client: TestClient, monkeypatch) -> None:
@@ -287,7 +297,12 @@ def test_admin_jobs_are_paginated(client: TestClient, monkeypatch, tmp_path) -> 
 
     first = store.create()
     second = store.create()
+    second.domain = "logs.example.com"
+    second.finished_at = second.created_at + timedelta(seconds=75)
+    store.update(second)
     third = store.create()
+    third.domain = "latest.example.com"
+    store.update(third)
     log_dir = tmp_path / "logs" / second.id
     log_dir.mkdir(parents=True)
     (log_dir / f"{second.id}_detilda.log").write_text("test log", encoding="utf-8")
@@ -303,8 +318,13 @@ def test_admin_jobs_are_paginated(client: TestClient, monkeypatch, tmp_path) -> 
     assert len(data["items"]) == 2
     by_id = {item["id"]: item for item in data["items"]}
     assert by_id[third.id]["log_available"] is False
+    assert by_id[third.id]["domain"] == "latest.example.com"
+    assert by_id[third.id]["domain_url"] == "https://latest.example.com"
     assert by_id[second.id]["log_available"] is True
     assert by_id[second.id]["log_size"] == len("test log")
+    assert by_id[second.id]["domain"] == "logs.example.com"
+    assert by_id[second.id]["domain_url"] == "https://logs.example.com"
+    assert by_id[second.id]["duration_sec"] == 75
     assert first.id not in by_id
 
 

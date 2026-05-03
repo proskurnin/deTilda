@@ -14,6 +14,22 @@ Each release entry should explain:
 
 ### Added
 
+- Nothing yet.
+
+### Changed
+
+- Nothing yet.
+
+### Verified
+
+- Nothing yet.
+
+## 5.7.0 - 2026-05-03
+
+### Added
+
+- Added the “Домен” column to the admin “Задачи” table. The value is parsed from the processed archive `robots.txt` and rendered as an external link that opens in a new tab.
+- Added the “Длительность” column to the admin “Задачи” table. It replaces “Завершена” and shows elapsed processing time from job creation to completion, or current elapsed time for unfinished jobs.
 - Added production nginx configs for `detilda.com` and `detilda.ru`:
   - `nginx/prod.bootstrap.conf` for the first HTTP-only certificate bootstrap;
   - `nginx/prod.conf` for the final SSL reverse proxy.
@@ -42,6 +58,9 @@ Each release entry should explain:
   - `https://detilda.proskurnin.com/health`: version `5.6.0`.
 - Added and verified a new deploy SSH key for `deploy@2.26.31.179`; `deploy` has passwordless sudo.
 - Tested GitHub Actions production deploy secrets with commit `c99a8a4d964e50d7cf5a7fb7fa067842dff8b9c0`; CI tests passed and deploy reached the server, but failed on a stale root-owned `/tmp/detilda.env.prod` file. The deploy workflow now removes stale temp env backups before copying.
+- Ran `python -m pytest tests/test_web_api.py -q`: `28 passed`.
+- Ran `python -m pytest tests/ -q`: `318 passed`, `2 warnings`.
+- Verified `/admin` with Playwright against local FastAPI: headers are `ID`, `Домен`, `Статус`, `Создана`, `Длительность`, `Логи`, `Детали`; browser console errors were empty.
 
 ## 5.6.0 - 2026-05-03
 
