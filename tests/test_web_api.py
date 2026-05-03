@@ -59,6 +59,7 @@ def test_index_renders_app_version(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert f"<h1>deTilda v{APP_VERSION}</h1>" in r.text
+    assert "made with &hearts; by Roman A. Proskurnin" in r.text
     assert f"v{APP_VERSION}" in r.text
     assert 'id="app-version"' not in r.text
     assert "__APP_VERSION__" not in r.text
