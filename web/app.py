@@ -30,7 +30,7 @@ from core.utils import load_manifest
 from core.version import APP_VERSION
 from web.auth import User, UserStore
 from web.jobs import JobStatus, JobStore
-from web.worker import run_job
+from web.worker import run_job, _job_report_path
 
 _CONFIG = ConfigLoader()
 _LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
@@ -392,6 +392,12 @@ def _download_filename(job) -> str:
     return f"detilda_{job.id[:8]}.zip"
 
 
+def _report_filename(job) -> str:
+    if job.domain:
+        return f"{job.domain}_processing_report.json"
+    return f"detilda_{job.id[:8]}_processing_report.json"
+
+
 def _admin_auth(
     credentials: Annotated[HTTPBasicCredentials, Depends(_http_basic)],
 ) -> HTTPBasicCredentials:
@@ -630,6 +636,9 @@ async def create_job(
         created: list[dict] = []
         for upload, tmp_path, domain, validation_details, upload_email, upload_ga_measurement_id in prepared:
             job = _STORE.create(owner_user_id=user.id)
+            job.filename = upload.filename or ""
+            job.email = upload_email
+            job.ga_measurement_id = upload_ga_measurement_id
             job.domain = domain
             job.validation_details = validation_details
             _STORE.update(job)
@@ -687,6 +696,25 @@ async def download_result(job_id: str, user: CurrentUser) -> Response:
         content=zip_bytes,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{_download_filename(job)}"'},
+    )
+
+
+@app.get("/api/jobs/{job_id}/report")
+async def download_report(job_id: str, user: CurrentUser) -> Response:
+    job = _STORE.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    if job.owner_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+
+    report_path = _job_report_path(_LOGS_DIR / job.id)
+    if not report_path.exists():
+        raise HTTPException(status_code=410, detail="Отчёт ещё не создан или уже удалён")
+
+    return Response(
+        content=report_path.read_bytes(),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{_report_filename(job)}"'},
     )
 
 

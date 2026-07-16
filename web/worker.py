@@ -1,6 +1,7 @@
 """Background worker: runs pipeline in a thread pool."""
 from __future__ import annotations
 
+import json
 import shutil
 import traceback
 import zipfile
@@ -10,6 +11,7 @@ from typing import Any
 
 from core.api import process_archive
 from core.params import ProcessParams
+from core.version import APP_VERSION
 from web.jobs import Job, JobStatus, JobStore
 
 _WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
@@ -209,6 +211,82 @@ def _build_stats_details(stats: Any, logs_dir: Path) -> dict[str, dict[str, Any]
     }
 
 
+def _job_report_path(logs_dir: Path) -> Path:
+    return logs_dir / "processing_report.json"
+
+
+def _build_processing_report(
+    job: Job,
+    logs_dir: Path,
+    *,
+    email: str,
+    ga_measurement_id: str,
+    validation_details: dict[str, Any] | None,
+) -> dict[str, Any]:
+    log_messages = _collect_log_messages(logs_dir)
+    stats = job.stats or {}
+    details = stats.get("details") if isinstance(stats.get("details"), dict) else {}
+    warning_items = details.get("warnings", {}).get("items") if isinstance(details.get("warnings"), dict) else None
+    error_items = details.get("errors", {}).get("items") if isinstance(details.get("errors"), dict) else None
+
+    return {
+        "job_id": job.id,
+        "version": APP_VERSION,
+        "input": {
+            "filename": job.filename or "",
+            "domain": job.domain,
+        },
+        "params": {
+            "email": email,
+            "ga_measurement_id": ga_measurement_id,
+        },
+        "status": job.status.value,
+        "created_at": job.created_at.isoformat(),
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "progress": list(job.progress or []),
+        "validation": validation_details or job.validation_details or {},
+        "stats": stats,
+        "warnings": list(warning_items or log_messages["warnings"]),
+        "errors": list(error_items or log_messages["errors"]),
+        "result": {
+            "archive_ready": job.status == JobStatus.DONE and bool(job.result_path and job.result_path.exists()),
+            "result_path": str(job.result_path) if job.result_path else None,
+        },
+        "error": {
+            "code": job.error_code,
+            "message": job.error,
+            "detail": job.error_detail,
+        } if job.status == JobStatus.ERROR else None,
+    }
+
+
+def _write_processing_report(
+    job: Job,
+    logs_dir: Path,
+    *,
+    email: str,
+    ga_measurement_id: str,
+    validation_details: dict[str, Any] | None,
+) -> Path | None:
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        report_path = _job_report_path(logs_dir)
+        report = _build_processing_report(
+            job,
+            logs_dir,
+            email=email,
+            ga_measurement_id=ga_measurement_id,
+            validation_details=validation_details,
+        )
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return report_path
+    except OSError:
+        return None
+
+
 def run_job(
     job: Job,
     store: JobStore,
@@ -301,6 +379,13 @@ def run_job(
         job.status = JobStatus.ERROR
     finally:
         job.finished_at = datetime.now(timezone.utc)
+        _write_processing_report(
+            job,
+            logs_dir,
+            email=email,
+            ga_measurement_id=ga_measurement_id,
+            validation_details=validation_details,
+        )
         store.update(job)
         try:
             upload_path.unlink(missing_ok=True)

@@ -104,6 +104,7 @@
   .job-meta { min-width: 0; font-size: .82rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .job-status { color: #6b7280; font-size: .78rem; }
   .job-error { margin-top: .16rem; color: #b91c1c; font-size: .76rem; line-height: 1.25; overflow-wrap: anywhere; }
+  .job-actions { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; flex-wrap: wrap; }
   .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; letter-spacing: 0; }
 </style>
 </head>
@@ -583,6 +584,26 @@ async function downloadJob(jobId) {
   URL.revokeObjectURL(url);
 }
 
+async function downloadJobReport(jobId) {
+  const r = await fetch(`/api/jobs/${jobId}/report`, { headers: authHeaders() });
+  if (!r.ok) {
+    setStatus('Не удалось скачать отчёт', false, true);
+    return;
+  }
+  const blob = await r.blob();
+  const disposition = r.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}_processing_report.json`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function statusLabel(s) {
   return { pending: 'ожидание', running: 'обработка', done: 'готово', error: 'ошибка' }[s] || s || 'ожидание';
 }
@@ -666,6 +687,91 @@ function openDetails(key) {
   detailsClose.focus();
 }
 
+function addDetailItems(title, values) {
+  detailsList.appendChild(detailHeader(title));
+  values.forEach(value => detailsList.appendChild(detailItem(value)));
+}
+
+function detailHeader(text) {
+  const li = document.createElement('li');
+  li.style.background = '#eef2ff';
+  li.style.borderColor = '#c7d2fe';
+  li.style.color = '#1e3a8a';
+  li.style.fontWeight = '650';
+  li.textContent = text;
+  return li;
+}
+
+function detailItem(value) {
+  const li = document.createElement('li');
+  li.textContent = String(value);
+  return li;
+}
+
+function currentPipelineStep(job) {
+  const done = new Set(job?.progress || []);
+  const active = STEPS.find(step => !done.has(step.id));
+  return active ? active.label : 'Завершено';
+}
+
+function statsDetailItems(job, key, fallback) {
+  const detail = job?.stats?.details?.[key];
+  if (detail && Array.isArray(detail.items) && detail.items.length) return detail.items;
+  return fallback;
+}
+
+function renderJobDetails(job) {
+  const title = job.domain || job.id?.slice(0, 8) || 'Задача';
+  detailsTitle.textContent = `Детали: ${title}`;
+  detailsList.innerHTML = '';
+
+  addDetailItems('Сводка', [
+    `ID: ${job.id}`,
+    `Статус: ${statusLabel(job.status)}`,
+    `Текущий этап: ${currentPipelineStep(job)}`,
+    `Создана: ${job.created_at || 'нет данных'}`,
+    `Завершена: ${job.finished_at || 'нет данных'}`,
+  ]);
+
+  if (job.error || job.error_code) {
+    addDetailItems('Ошибка', [
+      `Код: ${job.error_code || 'unknown'}`,
+      jobErrorText(job),
+    ]);
+  }
+
+  const validationItems = job.validation_details?.items || job.stats?.details?.validation?.items || [];
+  addDetailItems('Валидация архива', validationItems.length ? validationItems : ['Деталей валидации нет.']);
+
+  const progressItems = (job.progress || []).map(stepId => {
+    const step = STEPS.find(item => item.id === stepId);
+    return step ? step.label : stepId;
+  });
+  addDetailItems('Этапы pipeline', progressItems.length ? progressItems : ['Pipeline еще не начал выполняться.']);
+
+  addDetailItems('Предупреждения', statsDetailItems(job, 'warnings', ['Предупреждений нет.']));
+  addDetailItems('Ошибки', statsDetailItems(job, 'errors', ['Ошибок нет.']));
+
+  detailsModal.hidden = false;
+  detailsClose.focus();
+}
+
+async function openJobDetails(jobId) {
+  detailsTitle.textContent = 'Детали задачи';
+  detailsList.innerHTML = '';
+  detailsList.appendChild(detailItem('Загрузка деталей…'));
+  detailsModal.hidden = false;
+  detailsClose.focus();
+
+  const r = await fetch(`/api/jobs/${jobId}`, { headers: authHeaders() }).catch(() => null);
+  if (!r || !r.ok) {
+    detailsList.innerHTML = '';
+    detailsList.appendChild(detailItem('Не удалось загрузить детали задачи.'));
+    return;
+  }
+  renderJobDetails(await r.json());
+}
+
 function closeDetails() {
   detailsModal.hidden = true;
 }
@@ -723,11 +829,21 @@ async function loadMyJobs() {
         <div class="job-status">${escapeHtml(statusLabel(job.status))}</div>
         ${error}
       </div>
-      <div>${action}</div>
+      <div class="job-actions">
+        <button class="link-btn batch-link" type="button" data-job-details="${job.id}">детали</button>
+        <button class="link-btn batch-link" type="button" data-job-report="${job.id}">отчёт</button>
+        ${action}
+      </div>
     </div>`;
   }).join('');
   myJobsEl.querySelectorAll('[data-download-job]').forEach(btn => {
     btn.addEventListener('click', () => downloadJob(btn.dataset.downloadJob));
+  });
+  myJobsEl.querySelectorAll('[data-job-details]').forEach(btn => {
+    btn.addEventListener('click', () => openJobDetails(btn.dataset.jobDetails));
+  });
+  myJobsEl.querySelectorAll('[data-job-report]').forEach(btn => {
+    btn.addEventListener('click', () => downloadJobReport(btn.dataset.jobReport));
   });
 }
 
