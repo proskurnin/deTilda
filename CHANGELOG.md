@@ -24,6 +24,21 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.6 - 2026-07-17
+
+### Added
+
+- Nothing yet.
+
+### Changed
+
+- Published a patch release to redeploy the current `5.7.5` code state through
+  the standard Stage and Prod pipeline.
+
+### Verified
+
+- Ran `python -m pytest tests/ -q`: `346 passed, 2 warnings`.
+
 ## 5.7.5 - 2026-07-17
 
 ### Added
