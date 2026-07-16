@@ -24,6 +24,25 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.4 - 2026-07-16
+
+### Added
+
+- Added per-file upload settings for multi-file public processing: users can keep
+  one shared form email / Google Analytics Measurement ID, or enable an iOS-style
+  toggle and set unique email and GA4 IDs for each uploaded ZIP.
+- Added `info@` helper buttons next to public upload email fields; they fill the
+  email from the selected ZIP filename without its `.zip` extension.
+
+### Changed
+
+- Nothing yet.
+
+### Verified
+
+- Ran `python -m pytest tests/test_web_api.py -q`: `36 passed`.
+- Ran `python -m pytest tests/ -q`: `341 passed, 2 warnings`.
+
 ## 5.7.3 - 2026-07-16
 
 ### Changed

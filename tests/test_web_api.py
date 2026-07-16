@@ -28,6 +28,7 @@ from web.jobs import JobStatus, JobStore  # noqa: E402
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> TestClient:
     app_module._web_cfg_override.clear()
+    app_module._rate_map.clear()
     monkeypatch.setattr(app_module, "_STORE", JobStore(persist_dir=tmp_path / "workdir"))
     monkeypatch.setattr(app_module, "_USER_STORE", UserStore(persist_dir=tmp_path / "workdir"))
     monkeypatch.setattr(app_module, "_LOGS_DIR", tmp_path / "logs")
@@ -36,6 +37,7 @@ def client(tmp_path, monkeypatch) -> TestClient:
         yield TestClient(app, raise_server_exceptions=False)
     finally:
         app_module._web_cfg_override.clear()
+        app_module._rate_map.clear()
 
 
 def _make_zip(name: str = "site") -> bytes:
@@ -88,6 +90,20 @@ def test_index_renders_my_jobs_error_details(client: TestClient) -> None:
     assert "state.dataset.status = 'error'" in r.text
 
 
+def test_index_renders_per_file_upload_settings(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'id="email_info_btn"' in r.text
+    assert 'id="per_file_enabled"' in r.text
+    assert 'name="email_per_file"' in r.text
+    assert 'name="ga_measurement_id_per_file"' in r.text
+    assert "function domainFromZipName(filename)" in r.text
+    assert "`info@${domain}`" in r.text
+    assert 'data-info-email-index="${index}"' in r.text
+    assert "function renderPerFileSettings()" in r.text
+    assert "files.length > 1" in r.text
+
+
 def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
     r = client.get("/")
@@ -119,7 +135,16 @@ def test_config_returns_web_settings(client: TestClient) -> None:
 # POST /api/jobs
 # ---------------------------------------------------------------------------
 
-def test_create_job_returns_202(client: TestClient) -> None:
+def test_create_job_returns_202(client: TestClient, monkeypatch) -> None:
+    class FakeExecutor:
+        def submit(self, fn, **kwargs):
+            job = kwargs["job"]
+            job.status = JobStatus.DONE
+            kwargs["store"].update(job)
+            kwargs["upload_path"].unlink(missing_ok=True)
+            return None
+
+    monkeypatch.setattr(app_module, "_EXECUTOR", FakeExecutor())
     headers = _auth_headers(client)
     r = client.post(
         "/api/jobs",
@@ -144,7 +169,16 @@ def test_create_job_requires_registered_user(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
+def test_create_jobs_accepts_multiple_files(client: TestClient, monkeypatch) -> None:
+    class FakeExecutor:
+        def submit(self, fn, **kwargs):
+            job = kwargs["job"]
+            job.status = JobStatus.DONE
+            kwargs["store"].update(job)
+            kwargs["upload_path"].unlink(missing_ok=True)
+            return None
+
+    monkeypatch.setattr(app_module, "_EXECUTOR", FakeExecutor())
     headers = _auth_headers(client)
     r = client.post(
         "/api/jobs",
@@ -161,6 +195,55 @@ def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
     assert len(body["jobs"]) == 2
     assert {item["filename"] for item in body["jobs"]} == {"one.zip", "two.zip"}
     assert {item["domain"] for item in body["jobs"]} == {"example.com"}
+
+
+def test_create_jobs_accepts_per_file_email_and_ga(client: TestClient, monkeypatch) -> None:
+    captured: list[dict] = []
+
+    class FakeExecutor:
+        def submit(self, fn, **kwargs):
+            captured.append(kwargs)
+            job = kwargs["job"]
+            job.status = JobStatus.DONE
+            kwargs["store"].update(job)
+            kwargs["upload_path"].unlink(missing_ok=True)
+            return None
+
+    monkeypatch.setattr(app_module, "_EXECUTOR", FakeExecutor())
+    headers = _auth_headers(client)
+    r = client.post(
+        "/api/jobs",
+        files=[
+            ("file", ("one.zip", _make_zip("one"), "application/zip")),
+            ("file", ("two.zip", _make_zip("two"), "application/zip")),
+            ("email", (None, "common@example.com")),
+            ("ga_measurement_id", (None, "G-COMMON")),
+            ("email_per_file", (None, "one@example.com")),
+            ("email_per_file", (None, "two@example.com")),
+            ("ga_measurement_id_per_file", (None, "g-one123")),
+            ("ga_measurement_id_per_file", (None, "g-two456")),
+        ],
+        headers=headers,
+    )
+
+    assert r.status_code == 202
+    assert [item["email"] for item in captured] == ["one@example.com", "two@example.com"]
+    assert [item["ga_measurement_id"] for item in captured] == ["G-ONE123", "G-TWO456"]
+
+
+def test_create_jobs_rejects_invalid_per_file_ga(client: TestClient) -> None:
+    r = client.post(
+        "/api/jobs",
+        files=[
+            ("file", ("one.zip", _make_zip("one"), "application/zip")),
+            ("file", ("two.zip", _make_zip("two"), "application/zip")),
+            ("ga_measurement_id_per_file", (None, "G-VALID123")),
+            ("ga_measurement_id_per_file", (None, "UA-OLD")),
+        ],
+        headers=_auth_headers(client),
+    )
+    assert r.status_code == 422
+    assert "Measurement ID" in r.json()["detail"]
 
 
 def test_create_job_rejects_non_zip(client: TestClient) -> None:
