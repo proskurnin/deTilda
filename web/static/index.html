@@ -24,6 +24,26 @@
   .auth-tab.active { background: #2563eb; color: #fff; }
   .auth-msg { margin-top: .75rem; color: #dc2626; font-size: .85rem; min-height: 1.2rem; }
   .hint { color: #9ca3af; font-size: .78rem; margin-top: .3rem; }
+  .input-action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; align-items: center; }
+  .field-action { padding: .55rem .65rem; border: 1px solid #d1d5db; border-radius: 8px; background: #f8fafc; color: #2563eb; font-size: .86rem; font-weight: 650; cursor: pointer; white-space: nowrap; }
+  .field-action:hover, .field-action:focus-visible { background: #eef2ff; border-color: #bfdbfe; outline: none; }
+  .per-file-toggle { display: none; align-items: center; justify-content: space-between; gap: .85rem; margin-top: 1rem; padding: .7rem .8rem; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; }
+  .per-file-toggle-text { min-width: 0; }
+  .per-file-toggle-title { color: #374151; font-size: .86rem; font-weight: 600; }
+  .per-file-toggle-sub { color: #9ca3af; font-size: .76rem; margin-top: .12rem; }
+  .switch { position: relative; width: 46px; height: 28px; flex-shrink: 0; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch-slider { position: absolute; inset: 0; cursor: pointer; background: #d1d5db; border-radius: 999px; transition: background .18s ease; }
+  .switch-slider::before { content: ""; position: absolute; width: 24px; height: 24px; left: 2px; top: 2px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(15,23,42,.24); transition: transform .18s ease; }
+  .switch input:checked + .switch-slider { background: #22c55e; }
+  .switch input:checked + .switch-slider::before { transform: translateX(18px); }
+  .switch input:focus-visible + .switch-slider { outline: 2px solid #2563eb; outline-offset: 2px; }
+  .per-file-settings { display: none; margin-top: .85rem; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .per-file-row { padding: .8rem; border-bottom: 1px solid #eef2f7; background: #fff; }
+  .per-file-row:last-child { border-bottom: 0; }
+  .per-file-name { color: #374151; font-size: .84rem; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .per-file-grid { display: grid; grid-template-columns: 1fr; gap: .65rem; margin-top: .65rem; }
+  .per-file-field label { margin-top: 0; font-size: .76rem; color: #6b7280; }
   [hidden] { display: none !important; }
 
   /* Status line */
@@ -121,10 +141,24 @@
     <label for="file">ZIP-архив экспорта Tilda</label>
     <input type="file" id="file" name="file" accept=".zip" multiple required>
     <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
-    <input type="email" id="email" name="email" placeholder="owner@example.com">
+    <div class="input-action-row">
+      <input type="email" id="email" name="email" placeholder="owner@example.com">
+      <button class="field-action" id="email_info_btn" type="button">info@</button>
+    </div>
     <label for="ga_measurement_id">Google Analytics Measurement ID <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
     <input type="text" id="ga_measurement_id" name="ga_measurement_id" placeholder="G-ABC1234567" pattern="G-[A-Za-z0-9]+">
     <div class="hint">Если поле пустое, GA4 в итоговом сайте не включается.</div>
+    <div id="per-file-toggle" class="per-file-toggle">
+      <div class="per-file-toggle-text">
+        <div class="per-file-toggle-title">Индивидуальные настройки файлов</div>
+        <div class="per-file-toggle-sub">Отдельные email и Google Analytics для каждого сайта</div>
+      </div>
+      <label class="switch" for="per_file_enabled">
+        <input type="checkbox" id="per_file_enabled">
+        <span class="switch-slider"></span>
+      </label>
+    </div>
+    <div id="per-file-settings" class="per-file-settings"></div>
     <button type="submit" class="btn-primary" id="btn">Обработать</button>
   </form>
 
@@ -184,6 +218,13 @@ const userEmailEl = document.getElementById('user-email');
 const logoutBtn = document.getElementById('logout-btn');
 const myJobsEl = document.getElementById('my-jobs');
 const form      = document.getElementById('form');
+const fileInput = document.getElementById('file');
+const commonEmailInput = document.getElementById('email');
+const commonEmailInfoBtn = document.getElementById('email_info_btn');
+const commonGaInput = document.getElementById('ga_measurement_id');
+const perFileToggle = document.getElementById('per-file-toggle');
+const perFileEnabled = document.getElementById('per_file_enabled');
+const perFileSettings = document.getElementById('per-file-settings');
 const btn       = document.getElementById('btn');
 const statusEl  = document.getElementById('status');
 const downloadEl = document.getElementById('download');
@@ -339,6 +380,71 @@ function setStatus(text, spinning, isErr) {
     ? `<span class="spinner"></span>${text}`
     : text;
 }
+
+function selectedFiles() {
+  return Array.from(fileInput.files || []);
+}
+
+function domainFromZipName(filename) {
+  return String(filename || '').replace(/\.zip$/i, '').trim();
+}
+
+function infoEmailForFile(file) {
+  const domain = domainFromZipName(file?.name || '');
+  return domain ? `info@${domain}` : '';
+}
+
+function fillCommonInfoEmail() {
+  const email = infoEmailForFile(selectedFiles()[0]);
+  if (email) commonEmailInput.value = email;
+}
+
+function renderPerFileSettings() {
+  const files = selectedFiles();
+  const showToggle = files.length > 1;
+  perFileToggle.style.display = showToggle ? 'flex' : 'none';
+  if (!showToggle) {
+    perFileEnabled.checked = false;
+  }
+  if (!showToggle || !perFileEnabled.checked) {
+    perFileSettings.style.display = 'none';
+    perFileSettings.innerHTML = '';
+    return;
+  }
+
+  const commonEmail = commonEmailInput.value.trim();
+  const commonGa = commonGaInput.value.trim().toUpperCase();
+  perFileSettings.innerHTML = files.map((file, index) => `
+    <div class="per-file-row">
+      <div class="per-file-name">${escapeHtml(file.name || `Файл ${index + 1}`)}</div>
+      <div class="per-file-grid">
+        <div class="per-file-field">
+          <label for="email_per_file_${index}">Email для форм</label>
+          <div class="input-action-row">
+            <input type="email" id="email_per_file_${index}" name="email_per_file" placeholder="owner@example.com" value="${escapeHtml(commonEmail)}">
+            <button class="field-action" type="button" data-info-email-index="${index}">info@</button>
+          </div>
+        </div>
+        <div class="per-file-field">
+          <label for="ga_per_file_${index}">Google Analytics Measurement ID</label>
+          <input type="text" id="ga_per_file_${index}" name="ga_measurement_id_per_file" placeholder="G-ABC1234567" pattern="G-[A-Za-z0-9]+" value="${escapeHtml(commonGa)}">
+        </div>
+      </div>
+    </div>`).join('');
+  perFileSettings.querySelectorAll('[data-info-email-index]').forEach(action => {
+    action.addEventListener('click', () => {
+      const index = Number(action.dataset.infoEmailIndex);
+      const input = document.getElementById(`email_per_file_${index}`);
+      const email = infoEmailForFile(files[index]);
+      if (input && email) input.value = email;
+    });
+  });
+  perFileSettings.style.display = 'block';
+}
+
+fileInput.addEventListener('change', renderPerFileSettings);
+perFileEnabled.addEventListener('change', renderPerFileSettings);
+commonEmailInfoBtn.addEventListener('click', fillCommonInfoEmail);
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -574,6 +680,7 @@ document.addEventListener('keydown', event => {
 
 btnAgain.addEventListener('click', () => {
   form.reset();
+  renderPerFileSettings();
   currentStats = null;
   currentDownloadJobId = null;
   closeDetails();

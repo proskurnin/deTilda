@@ -86,6 +86,19 @@ class ZipValidationResult:
         }
 
 
+def _normalize_ga_measurement_id(value: str) -> str:
+    ga_id = value.strip().upper()
+    if ga_id and not _GA_MEASUREMENT_ID_RE.fullmatch(ga_id):
+        raise HTTPException(status_code=422, detail="Google Analytics Measurement ID должен иметь формат G-XXXXXXXX.")
+    return ga_id
+
+
+def _value_for_upload(values: list[str] | None, index: int, default: str) -> str:
+    if values is None or index >= len(values):
+        return default
+    return values[index].strip()
+
+
 def _get_runtime_version() -> str:
     manifest = load_manifest()
     return str(manifest.get("version", APP_VERSION))
@@ -563,12 +576,13 @@ async def create_job(
     file: list[UploadFile] = File(...),
     email: str = Form(default=""),
     ga_measurement_id: str = Form(default=""),
+    email_per_file: Annotated[list[str] | None, Form()] = None,
+    ga_measurement_id_per_file: Annotated[list[str] | None, Form()] = None,
 ) -> dict:
     web_cfg = _get_web_cfg()
     uploads = file
-    ga_measurement_id = ga_measurement_id.strip().upper()
-    if ga_measurement_id and not _GA_MEASUREMENT_ID_RE.fullmatch(ga_measurement_id):
-        raise HTTPException(status_code=422, detail="Google Analytics Measurement ID должен иметь формат G-XXXXXXXX.")
+    email = email.strip()
+    ga_measurement_id = _normalize_ga_measurement_id(ga_measurement_id)
 
     if not uploads:
         raise HTTPException(status_code=400, detail="Файлы не выбраны.")
@@ -576,9 +590,9 @@ async def create_job(
         raise HTTPException(status_code=429, detail="Слишком много активных задач. Повторите позже.")
 
     max_bytes = web_cfg.max_upload_size_mb * 1024 * 1024
-    prepared: list[tuple[UploadFile, Path, str | None, dict]] = []
+    prepared: list[tuple[UploadFile, Path, str | None, dict, str, str]] = []
     try:
-        for upload in uploads:
+        for index, upload in enumerate(uploads):
             suffix = Path(upload.filename or "").suffix.lower()
             if suffix not in web_cfg.allowed_extensions:
                 raise HTTPException(
@@ -594,16 +608,27 @@ async def create_job(
                 )
             validation = _validate_tilda_export_zip(content, web_cfg.required_archive_files)
             domain = _domain_from_zip_content(content)
+            upload_email = _value_for_upload(email_per_file, index, email)
+            upload_ga_measurement_id = _normalize_ga_measurement_id(
+                _value_for_upload(ga_measurement_id_per_file, index, ga_measurement_id)
+            )
 
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             tmp.write(content)
             tmp.flush()
             tmp.close()
-            prepared.append((upload, Path(tmp.name), domain, validation.to_job_details()))
+            prepared.append((
+                upload,
+                Path(tmp.name),
+                domain,
+                validation.to_job_details(),
+                upload_email,
+                upload_ga_measurement_id,
+            ))
 
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         created: list[dict] = []
-        for upload, tmp_path, domain, validation_details in prepared:
+        for upload, tmp_path, domain, validation_details, upload_email, upload_ga_measurement_id in prepared:
             job = _STORE.create(owner_user_id=user.id)
             job.domain = domain
             job.validation_details = validation_details
@@ -613,9 +638,9 @@ async def create_job(
                 job=job,
                 store=_STORE,
                 upload_path=tmp_path,
-                email=email,
+                email=upload_email,
                 logs_dir=_LOGS_DIR / job.id,
-                ga_measurement_id=ga_measurement_id,
+                ga_measurement_id=upload_ga_measurement_id,
                 validation_details=validation_details,
             )
             created.append({
@@ -625,7 +650,7 @@ async def create_job(
                 "domain": domain,
             })
     except HTTPException:
-        for _, tmp_path, _, _ in prepared:
+        for _, tmp_path, _, _, _, _ in prepared:
             tmp_path.unlink(missing_ok=True)
         raise
 
