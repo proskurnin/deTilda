@@ -47,6 +47,9 @@ class PipelineStats:
     downloaded_remote_assets: int = 0
     forms_found: int = 0
     forms_hooked: int = 0
+    zero_form_smoke_checked: bool = False
+    zero_form_smoke_failed: bool = False
+    zero_form_smoke_messages: list[str] | None = None
     formatted_html_files: int = 0
     html_prettify_skipped: bool = False
     images_updated_files: int = 0
@@ -324,6 +327,19 @@ class DetildaPipeline:
                 logger.error(f"[pipeline] Шаг forms_check завершился с ошибкой: {exc}")
                 stats.warnings += 1
             self._notify("forms_check")
+
+            try:
+                with logger.module_scope("zero-form-smoke"):
+                    zero_smoke = checker.smoke_check_zero_forms_runtime(context.project_root)
+                stats.zero_form_smoke_checked = zero_smoke.checked
+                stats.zero_form_smoke_failed = zero_smoke.failed
+                stats.zero_form_smoke_messages = zero_smoke.messages
+                if zero_smoke.failed:
+                    stats.errors += 1
+            except Exception as exc:
+                logger.error(f"[pipeline] Шаг zero-form-smoke завершился с ошибкой: {exc}")
+                stats.errors += 1
+            self._notify("zero-form-smoke")
 
             try:
                 with logger.module_scope("html_prettify"):

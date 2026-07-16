@@ -8,7 +8,7 @@ from web.jobs import JobStatus, JobStore
 
 def test_job_store_restores_sqlite_history(tmp_path) -> None:
     store = JobStore(persist_dir=tmp_path)
-    job = store.create()
+    job = store.create(owner_user_id="user-1")
     job.status = JobStatus.DONE
     job.finished_at = datetime.now(timezone.utc)
     job.stats = {"fixed_links": 3}
@@ -22,6 +22,7 @@ def test_job_store_restores_sqlite_history(tmp_path) -> None:
     assert jobs[0].id == job.id
     assert jobs[0].status == JobStatus.DONE
     assert jobs[0].stats == {"fixed_links": 3}
+    assert jobs[0].owner_user_id == "user-1"
 
 
 def test_expire_old_keeps_admin_history_in_sqlite(tmp_path) -> None:
@@ -52,3 +53,12 @@ def test_restore_marks_interrupted_jobs_as_errors(tmp_path) -> None:
     assert restored_job.status == JobStatus.ERROR
     assert restored_job.error == "Прервано перезапуском сервера"
     assert restored_job.finished_at is not None
+
+
+def test_job_store_lists_jobs_for_user(tmp_path) -> None:
+    store = JobStore(persist_dir=tmp_path)
+    first = store.create(owner_user_id="user-1")
+    second = store.create(owner_user_id="user-2")
+
+    assert [job.id for job in store.list_for_user("user-1")] == [first.id]
+    assert second.id not in [job.id for job in store.list_for_user("user-1")]

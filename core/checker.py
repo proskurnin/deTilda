@@ -34,9 +34,11 @@ __all__ = [
     "FormIntegrationResult",
     "LinkCheckerResult",
     "TildaRemnantsResult",
+    "ZeroFormSmokeResult",
     "check_forms_integration",
     "check_links",
     "check_tilda_remnants",
+    "smoke_check_zero_forms_runtime",
 ]
 
 
@@ -59,6 +61,13 @@ class FormIntegrationResult:
     forms_found: int = 0
     forms_hooked: int = 0
     warnings: int = 0  # 1 если есть непривязанные формы, иначе 0
+
+
+@dataclass
+class ZeroFormSmokeResult:
+    checked: bool = False
+    failed: bool = False
+    messages: list[str] = field(default_factory=list)
 
 
 def _compile_link_patterns(patterns: Iterable[str]) -> list[re.Pattern[str]]:
@@ -433,4 +442,60 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
             )
     if result.warnings == 0:
         logger.info(f"[forms-check] Формы проверены: {forms_found}, все подключены корректно")
+    return result
+
+
+def _project_has_zero_forms(project_root: Path) -> bool:
+    zero_forms_markers = re.compile(
+        r"tn-atom__form|ai_zeroForms__init|data-aida-formskey|data-tilda-formskey",
+        re.IGNORECASE,
+    )
+    for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
+        try:
+            if zero_forms_markers.search(utils.safe_read(file_path)):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def smoke_check_zero_forms_runtime(project_root: Path) -> ZeroFormSmokeResult:
+    """Offline smoke-check for processed zero-block form runtime."""
+    project_root = Path(project_root)
+    result = ZeroFormSmokeResult()
+    if not _project_has_zero_forms(project_root):
+        result.messages.append("Zero-block формы не найдены.")
+        logger.info("[zero-form-smoke] Zero-block формы не найдены")
+        return result
+
+    result.checked = True
+    runtime_js = project_root / "js" / "aida-zero-forms-1.0.min.js"
+    if not runtime_js.is_file():
+        result.failed = True
+        result.messages.append("Не найден js/aida-zero-forms-1.0.min.js.")
+        logger.err("[zero-form-smoke] Не найден js/aida-zero-forms-1.0.min.js")
+        return result
+
+    try:
+        runtime_text = utils.safe_read(runtime_js)
+    except Exception as exc:
+        result.failed = True
+        result.messages.append(f"Не удалось прочитать js/aida-zero-forms-1.0.min.js: {exc}")
+        logger.err(f"[zero-form-smoke] Не удалось прочитать runtime: {exc}")
+        return result
+
+    checks = [
+        ("runtime содержит ai_zeroForms__init", "ai_zeroForms__init" in runtime_text),
+        ("runtime не содержит legacy t_zeroForms__init", "t_zeroForms__init" not in runtime_text),
+        ("runtime содержит namespace bridge", "deTilda zero-forms namespace bridge" in runtime_text),
+        ("runtime содержит local resource base", "deTilda zero-forms local resource base" in runtime_text),
+    ]
+    failed_checks = [label for label, ok in checks if not ok]
+    if failed_checks:
+        result.failed = True
+        result.messages.extend(failed_checks)
+        logger.err("[zero-form-smoke] Ошибка runtime: " + "; ".join(failed_checks))
+    else:
+        result.messages.append("Zero-block runtime прошёл smoke-check.")
+        logger.info("[zero-form-smoke] Zero-block runtime прошёл smoke-check")
     return result

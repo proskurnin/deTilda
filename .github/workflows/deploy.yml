@@ -64,6 +64,7 @@ jobs:
               fi
               sleep 2
             done
+            python3 tools/smoke_test_health.py https://detilda.proskurnin.com --attempts 10 --delay-sec 3
 
   deploy-prod:
     needs: test
@@ -111,3 +112,4 @@ jobs:
               fi
               sleep 2
             done
+            python3 tools/smoke_test_health.py https://detilda.com https://detilda.ru --attempts 10 --delay-sec 3
