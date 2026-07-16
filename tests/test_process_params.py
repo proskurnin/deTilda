@@ -59,3 +59,26 @@ def test_no_params_falls_back_to_config(minimal_zip: Path, tmp_path: Path) -> No
     process_archive(minimal_zip, logs_dir=tmp_path / "logs")
     php = minimal_zip.parent / "site" / "send_email.php"
     assert "r@prororo.com" in php.read_text(encoding="utf-8")
+
+
+def test_params_ga_measurement_id_written_to_ga_config(minimal_zip: Path, tmp_path: Path) -> None:
+    process_archive(
+        minimal_zip,
+        params=ProcessParams(ga_measurement_id="g-abc1234567"),
+        logs_dir=tmp_path / "logs",
+    )
+
+    ga_config = minimal_zip.parent / "site" / "js" / "ga-config.js"
+    assert ga_config.exists()
+    assert 'window.DETILDA_GA_ID = "G-ABC1234567";' in ga_config.read_text(encoding="utf-8")
+
+
+def test_invalid_ga_measurement_id_disables_ga(minimal_zip: Path, tmp_path: Path) -> None:
+    process_archive(
+        minimal_zip,
+        params=ProcessParams(ga_measurement_id="UA-OLD"),
+        logs_dir=tmp_path / "logs",
+    )
+
+    ga_config = minimal_zip.parent / "site" / "js" / "ga-config.js"
+    assert 'window.DETILDA_GA_ID = "";' in ga_config.read_text(encoding="utf-8")

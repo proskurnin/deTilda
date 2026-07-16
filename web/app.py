@@ -14,6 +14,7 @@ import time
 import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -27,6 +28,7 @@ from core.packer import pack_result
 from core.schemas import WebConfig
 from core.utils import load_manifest
 from core.version import APP_VERSION
+from web.auth import User, UserStore
 from web.jobs import JobStatus, JobStore
 from web.worker import run_job
 
@@ -34,6 +36,7 @@ _CONFIG = ConfigLoader()
 _LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
 _WORKDIR = Path(__file__).resolve().parents[1] / "_workdir"
 _STORE = JobStore(persist_dir=_WORKDIR)
+_USER_STORE = UserStore(persist_dir=_WORKDIR)
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
 # Per-IP rate limiting
@@ -54,6 +57,33 @@ _CFG_INT_FIELDS = frozenset({
 })
 _CFG_LIST_FIELDS = frozenset({"required_archive_files"})
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_TILDA_EXPORT_MARKERS_RE = re.compile(
+    r'data-aida-export=["\']yes["\']|data-tilda-project-id',
+    re.IGNORECASE,
+)
+_HTML_ASSET_REF_RE = re.compile(
+    r"""(?:src|href|data-original|data-lazy)=["'](?P<link>[^"']+)["']""",
+    re.IGNORECASE,
+)
+_GA_MEASUREMENT_ID_RE = re.compile(r"^G-[A-Z0-9]+$", re.IGNORECASE)
+
+
+@dataclass
+class ZipValidationResult:
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
+
+    def to_job_details(self) -> dict:
+        items: list[str] = []
+        items.extend(f"Ошибка: {item}" for item in self.errors)
+        items.extend(f"Предупреждение: {item}" for item in self.warnings)
+        items.extend(self.info)
+        return {
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "items": items or ["Архив прошёл базовую валидацию."],
+        }
 
 
 def _get_runtime_version() -> str:
@@ -130,22 +160,6 @@ def _admin_job_dict(job) -> dict:
     return data
 
 
-def _archive_rootless_names(names: list[str]) -> set[str]:
-    files = [name for name in names if name and not name.endswith("/")]
-    first_parts = {name.split("/", 1)[0] for name in files if "/" in name}
-    has_root_files = any("/" not in name for name in files)
-    strip_root = len(first_parts) == 1 and not has_root_files
-    root = next(iter(first_parts)) if strip_root else ""
-
-    rootless: set[str] = set()
-    for name in files:
-        normalized = name.replace("\\", "/").lstrip("/")
-        if strip_root and normalized.startswith(root + "/"):
-            normalized = normalized[len(root) + 1:]
-        rootless.add(normalized.lower())
-    return rootless
-
-
 def _required_file_aliases(filename: str) -> set[str]:
     normalized = filename.strip().replace("\\", "/").lstrip("/").lower()
     aliases = {normalized}
@@ -156,27 +170,131 @@ def _required_file_aliases(filename: str) -> set[str]:
     return aliases
 
 
-def _validate_tilda_export_zip(content: bytes, required_files: list[str]) -> None:
-    if not required_files:
-        return
+def _strip_archive_root(names: list[str]) -> tuple[list[tuple[str, str]], set[str], set[str]]:
+    files = [name for name in names if name and not name.endswith("/")]
+    first_parts = {name.split("/", 1)[0] for name in files if "/" in name}
+    has_root_files = any("/" not in name for name in files)
+    strip_root = len(first_parts) == 1 and not has_root_files
+    root = next(iter(first_parts)) if strip_root else ""
+
+    pairs: list[tuple[str, str]] = []
+    rootless_files: set[str] = set()
+    rootless_dirs: set[str] = set()
+    for name in files:
+        normalized = name.replace("\\", "/").lstrip("/")
+        rootless = normalized
+        if strip_root and rootless.startswith(root + "/"):
+            rootless = rootless[len(root) + 1:]
+        lowered = rootless.lower()
+        pairs.append((name, rootless))
+        rootless_files.add(lowered)
+        parts = lowered.split("/")
+        for idx in range(1, len(parts)):
+            rootless_dirs.add("/".join(parts[:idx]))
+    return pairs, rootless_files, rootless_dirs
+
+
+def _is_local_archive_ref(link: str) -> bool:
+    link = link.strip()
+    if not link or link.startswith(("#", "mailto:", "tel:", "javascript:", "data:")):
+        return False
+    split = re.split(r"[?#]", link, maxsplit=1)[0]
+    if not split or split.startswith(("http://", "https://", "//")):
+        return False
+    return "/" in split.lstrip("./")
+
+
+def _top_level_dir_from_ref(link: str) -> str | None:
+    split = re.split(r"[?#]", link.strip(), maxsplit=1)[0]
+    split = split.replace("\\", "/").lstrip("/")
+    while split.startswith("./"):
+        split = split[2:]
+    if split.startswith("../"):
+        return None
+    parts = [part for part in split.split("/") if part and part != "."]
+    if len(parts) < 2:
+        return None
+    return parts[0].lower()
+
+
+def _validate_tilda_export_zip(content: bytes, required_files: list[str]) -> ZipValidationResult:
+    result = ZipValidationResult()
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            rootless = _archive_rootless_names(zf.namelist())
+            entries = zf.namelist()
+            pairs, rootless, rootless_dirs = _strip_archive_root(entries)
+            html_entries = [
+                (original, rootless_name)
+                for original, rootless_name in pairs
+                if rootless_name.lower().endswith((".html", ".htm"))
+            ]
+
+            missing = [
+                filename for filename in required_files
+                if not (_required_file_aliases(filename) & rootless)
+            ]
+            if missing:
+                result.errors.append("Не найдены обязательные файлы: " + ", ".join(missing))
+
+            if not html_entries:
+                result.errors.append("В архиве не найдены HTML-страницы.")
+            else:
+                result.info.append(f"HTML-страниц найдено: {len(html_entries)}")
+                content_pages = [
+                    rootless_name for _original, rootless_name in html_entries
+                    if Path(rootless_name).name.lower() != "404.html"
+                ]
+                if not content_pages:
+                    result.errors.append("В архиве не найдены HTML-страницы сайта кроме 404.html.")
+
+            marker_pages = 0
+            referenced_dirs: set[str] = set()
+            for original, rootless_name in html_entries:
+                try:
+                    html = zf.read(original).decode("utf-8", errors="replace")
+                except (OSError, UnicodeError):
+                    continue
+                if _TILDA_EXPORT_MARKERS_RE.search(html):
+                    marker_pages += 1
+                for match in _HTML_ASSET_REF_RE.finditer(html):
+                    link = match.group("link")
+                    if not _is_local_archive_ref(link):
+                        continue
+                    top_dir = _top_level_dir_from_ref(link)
+                    if top_dir:
+                        referenced_dirs.add(top_dir)
+
+            if marker_pages:
+                result.info.append(f"Tilda/Aida export markers найдены на страницах: {marker_pages}")
+            elif html_entries:
+                result.warnings.append(
+                    "В HTML не найдены маркеры data-aida-export=\"yes\" или data-tilda-project-id."
+                )
+
+            missing_dirs = sorted(
+                folder for folder in referenced_dirs
+                if folder not in rootless_dirs and folder not in rootless
+            )
+            if missing_dirs:
+                result.warnings.append(
+                    "HTML ссылается на отсутствующие asset-папки: " + ", ".join(missing_dirs)
+                )
+            elif referenced_dirs:
+                result.info.append(
+                    "Asset-папки из HTML найдены: " + ", ".join(sorted(referenced_dirs))
+                )
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Файл повреждён или не является ZIP-архивом.")
 
-    missing = [
-        filename for filename in required_files
-        if not (_required_file_aliases(filename) & rootless)
-    ]
-    if missing:
+    if result.errors:
         raise HTTPException(
             status_code=400,
             detail=(
                 "Архив не похож на полный экспорт Tilda. "
-                "Не найдены обязательные файлы: " + ", ".join(missing)
+                + " ".join(result.errors)
             ),
         )
+    return result
 
 
 def _read_zip_text(content: bytes, filename: str) -> str | None:
@@ -363,6 +481,25 @@ RateLimited = Annotated[None, Depends(_rate_limit)]
 AdminAuth = Annotated[HTTPBasicCredentials, Depends(_admin_auth)]
 
 
+def _extract_bearer_token(request: Request) -> str:
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Требуется вход в аккаунт")
+    return token.strip()
+
+
+def _current_user(request: Request) -> User:
+    token = _extract_bearer_token(request)
+    user = _USER_STORE.get_user_by_token(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Сессия недействительна")
+    return user
+
+
+CurrentUser = Annotated[User, Depends(_current_user)]
+
+
 # ---------------------------------------------------------------------------
 # Public endpoints
 # ---------------------------------------------------------------------------
@@ -378,14 +515,60 @@ async def health() -> dict:
     return {"status": "ok", "version": _get_runtime_version()}
 
 
+@app.post("/api/auth/register", status_code=201)
+async def register_user(body: dict = Body(...)) -> dict:
+    email = str(body.get("email", ""))
+    password = str(body.get("password", ""))
+    try:
+        user = _USER_STORE.create_user(email=email, password=password)
+    except ValueError as exc:
+        code = str(exc)
+        messages = {
+            "invalid_email": "Введите корректный email.",
+            "weak_password": "Пароль должен быть не короче 8 символов.",
+            "email_exists": "Пользователь с таким email уже зарегистрирован.",
+        }
+        status = 409 if code == "email_exists" else 422
+        raise HTTPException(status_code=status, detail=messages.get(code, "Не удалось зарегистрировать пользователя."))
+    token = _USER_STORE.create_session(user.id)
+    return {"token": token, "user": user.to_dict()}
+
+
+@app.post("/api/auth/login")
+async def login_user(body: dict = Body(...)) -> dict:
+    email = str(body.get("email", ""))
+    password = str(body.get("password", ""))
+    user = _USER_STORE.authenticate(email=email, password=password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Неверный email или пароль.")
+    token = _USER_STORE.create_session(user.id)
+    return {"token": token, "user": user.to_dict()}
+
+
+@app.get("/api/me")
+async def get_me(user: CurrentUser) -> dict:
+    return {"user": user.to_dict()}
+
+
+@app.post("/api/auth/logout")
+async def logout_user(request: Request, user: CurrentUser) -> dict:
+    _USER_STORE.revoke_session(_extract_bearer_token(request))
+    return {"ok": True, "user_id": user.id}
+
+
 @app.post("/api/jobs", status_code=202)
 async def create_job(
     _: RateLimited,
+    user: CurrentUser,
     file: list[UploadFile] = File(...),
     email: str = Form(default=""),
+    ga_measurement_id: str = Form(default=""),
 ) -> dict:
     web_cfg = _get_web_cfg()
     uploads = file
+    ga_measurement_id = ga_measurement_id.strip().upper()
+    if ga_measurement_id and not _GA_MEASUREMENT_ID_RE.fullmatch(ga_measurement_id):
+        raise HTTPException(status_code=422, detail="Google Analytics Measurement ID должен иметь формат G-XXXXXXXX.")
 
     if not uploads:
         raise HTTPException(status_code=400, detail="Файлы не выбраны.")
@@ -393,7 +576,7 @@ async def create_job(
         raise HTTPException(status_code=429, detail="Слишком много активных задач. Повторите позже.")
 
     max_bytes = web_cfg.max_upload_size_mb * 1024 * 1024
-    prepared: list[tuple[UploadFile, Path, str | None]] = []
+    prepared: list[tuple[UploadFile, Path, str | None, dict]] = []
     try:
         for upload in uploads:
             suffix = Path(upload.filename or "").suffix.lower()
@@ -409,20 +592,21 @@ async def create_job(
                     status_code=413,
                     detail=f"{upload.filename}: файл слишком большой. Максимум: {web_cfg.max_upload_size_mb} МБ",
                 )
-            _validate_tilda_export_zip(content, web_cfg.required_archive_files)
+            validation = _validate_tilda_export_zip(content, web_cfg.required_archive_files)
             domain = _domain_from_zip_content(content)
 
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             tmp.write(content)
             tmp.flush()
             tmp.close()
-            prepared.append((upload, Path(tmp.name), domain))
+            prepared.append((upload, Path(tmp.name), domain, validation.to_job_details()))
 
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         created: list[dict] = []
-        for upload, tmp_path, domain in prepared:
-            job = _STORE.create()
+        for upload, tmp_path, domain, validation_details in prepared:
+            job = _STORE.create(owner_user_id=user.id)
             job.domain = domain
+            job.validation_details = validation_details
             _STORE.update(job)
             _EXECUTOR.submit(
                 run_job,
@@ -431,6 +615,8 @@ async def create_job(
                 upload_path=tmp_path,
                 email=email,
                 logs_dir=_LOGS_DIR / job.id,
+                ga_measurement_id=ga_measurement_id,
+                validation_details=validation_details,
             )
             created.append({
                 "job_id": job.id,
@@ -439,7 +625,7 @@ async def create_job(
                 "domain": domain,
             })
     except HTTPException:
-        for _, tmp_path, _ in prepared:
+        for _, tmp_path, _, _ in prepared:
             tmp_path.unlink(missing_ok=True)
         raise
 
@@ -450,17 +636,21 @@ async def create_job(
 
 
 @app.get("/api/jobs/{job_id}")
-async def get_job(job_id: str) -> dict:
+async def get_job(job_id: str, user: CurrentUser) -> dict:
     job = _STORE.get(job_id)
     if job is None:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    if job.owner_user_id != user.id:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     return job.to_dict()
 
 
 @app.get("/api/jobs/{job_id}/download")
-async def download_result(job_id: str) -> Response:
+async def download_result(job_id: str, user: CurrentUser) -> Response:
     job = _STORE.get(job_id)
     if job is None:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    if job.owner_user_id != user.id:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     if job.status != JobStatus.DONE:
         raise HTTPException(status_code=409, detail=f"Задача ещё не завершена: {job.status.value}")
@@ -473,6 +663,13 @@ async def download_result(job_id: str) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{_download_filename(job)}"'},
     )
+
+
+@app.get("/api/jobs")
+async def list_my_jobs(user: CurrentUser) -> dict:
+    return {
+        "items": [job.to_dict() for job in _STORE.list_for_user(user.id)],
+    }
 
 
 @app.get("/api/config")

@@ -12,11 +12,19 @@
   h1 { font-size: 1.5rem; margin: 0; }
   .sub { color: #6b7280; font-size: .9rem; margin-bottom: 1.75rem; }
   label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .3rem; margin-top: 1.1rem; }
-  input[type=email], input[type=file] { width: 100%; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .95rem; }
+  input[type=email], input[type=file], input[type=password], input[type=text] { width: 100%; padding: .55rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .95rem; }
   .btn-primary { margin-top: 1.25rem; width: 100%; padding: .65rem; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; }
   .btn-primary:disabled { background: #9ca3af; cursor: default; }
   .btn-success { display: none; width: 100%; padding: .65rem; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; text-align: center; text-decoration: none; margin-top: .75rem; }
   .btn-ghost { display: none; width: 100%; padding: .6rem; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; font-size: .9rem; cursor: pointer; margin-top: .5rem; }
+  .btn-inline { padding: .35rem .65rem; background: #f3f4f6; color: #374151; border: 0; border-radius: 7px; font-size: .82rem; cursor: pointer; }
+  .user-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; color: #6b7280; font-size: .85rem; }
+  .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; margin-bottom: 1rem; }
+  .auth-tab { padding: .45rem; border: 0; border-radius: 7px; cursor: pointer; background: #f3f4f6; color: #374151; font-weight: 600; }
+  .auth-tab.active { background: #2563eb; color: #fff; }
+  .auth-msg { margin-top: .75rem; color: #dc2626; font-size: .85rem; min-height: 1.2rem; }
+  .hint { color: #9ca3af; font-size: .78rem; margin-top: .3rem; }
+  [hidden] { display: none !important; }
 
   /* Status line */
   #status { margin-top: 1rem; font-size: .9rem; color: #374151; min-height: 1.4rem; display: flex; align-items: center; gap: .4rem; }
@@ -68,11 +76,41 @@
   .batch-state { font-size: .78rem; color: #6b7280; }
   .batch-link { color: #2563eb; text-decoration: none; font-size: .82rem; font-weight: 600; }
   .batch-link:hover { text-decoration: underline; }
+  .link-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+  .jobs-list { margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: .8rem; }
+  .jobs-title { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .45rem; }
+  .job-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .5rem; padding: .45rem 0; border-bottom: 1px solid #f8fafc; align-items: center; }
+  .job-row:last-child { border-bottom: 0; }
+  .job-meta { min-width: 0; font-size: .82rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-status { color: #6b7280; font-size: .78rem; }
   .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; letter-spacing: 0; }
 </style>
 </head>
 <body>
-<div class="card">
+<div class="card" id="auth-card">
+  <div class="title-row">
+    <h1>deTilda v__APP_VERSION__</h1>
+  </div>
+  <p class="sub">Войдите, чтобы обрабатывать Tilda ZIP-экспорты и видеть только свои задачи</p>
+  <div class="auth-tabs">
+    <button id="login-tab" class="auth-tab active" type="button">Вход</button>
+    <button id="register-tab" class="auth-tab" type="button">Регистрация</button>
+  </div>
+  <form id="auth-form">
+    <label for="auth-email">Email</label>
+    <input type="email" id="auth-email" autocomplete="email" required>
+    <label for="auth-password">Пароль</label>
+    <input type="password" id="auth-password" autocomplete="current-password" minlength="8" required>
+    <button type="submit" class="btn-primary" id="auth-btn">Войти</button>
+    <div id="auth-msg" class="auth-msg"></div>
+  </form>
+</div>
+
+<div class="card" id="app-card" hidden>
+  <div class="user-row">
+    <span>Личный кабинет: <strong id="user-email"></strong></span>
+    <button class="btn-inline" id="logout-btn" type="button">Выйти</button>
+  </div>
   <div class="title-row">
     <h1>deTilda v__APP_VERSION__</h1>
   </div>
@@ -83,6 +121,9 @@
     <input type="file" id="file" name="file" accept=".zip" multiple required>
     <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
     <input type="email" id="email" name="email" placeholder="owner@example.com">
+    <label for="ga_measurement_id">Google Analytics Measurement ID <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
+    <input type="text" id="ga_measurement_id" name="ga_measurement_id" placeholder="G-ABC1234567" pattern="G-[A-Za-z0-9]+">
+    <div class="hint">Если поле пустое, GA4 в итоговом сайте не включается.</div>
     <button type="submit" class="btn-primary" id="btn">Обработать</button>
   </form>
 
@@ -105,6 +146,11 @@
 
   <a  id="download" class="btn-success" href="#">Скачать результат</a>
   <button id="btn-again" class="btn-ghost">Обработать ещё</button>
+
+  <div class="jobs-list">
+    <div class="jobs-title">Мои задачи</div>
+    <div id="my-jobs"></div>
+  </div>
 </div>
 <footer class="site-footer">made with &hearts; by Roman A. Proskurnin</footer>
 
@@ -121,6 +167,21 @@
 </div>
 
 <script>
+const AUTH_KEY = 'detildaUserAuth';
+let authToken = localStorage.getItem(AUTH_KEY) || '';
+let currentUser = null;
+let authMode = 'login';
+
+const authCard = document.getElementById('auth-card');
+const appCard = document.getElementById('app-card');
+const authForm = document.getElementById('auth-form');
+const authBtn = document.getElementById('auth-btn');
+const authMsg = document.getElementById('auth-msg');
+const loginTab = document.getElementById('login-tab');
+const registerTab = document.getElementById('register-tab');
+const userEmailEl = document.getElementById('user-email');
+const logoutBtn = document.getElementById('logout-btn');
+const myJobsEl = document.getElementById('my-jobs');
 const form      = document.getElementById('form');
 const btn       = document.getElementById('btn');
 const statusEl  = document.getElementById('status');
@@ -139,6 +200,92 @@ const detailsList  = document.getElementById('details-list');
 const detailsClose = document.getElementById('details-close');
 
 let currentStats = null;
+let currentDownloadJobId = null;
+
+function authHeaders(extra = {}) {
+  return authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  loginTab.classList.toggle('active', mode === 'login');
+  registerTab.classList.toggle('active', mode === 'register');
+  authBtn.textContent = mode === 'login' ? 'Войти' : 'Зарегистрироваться';
+  document.getElementById('auth-password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  authMsg.textContent = '';
+}
+
+function showAuth() {
+  authCard.hidden = false;
+  appCard.hidden = true;
+}
+
+function showApp(user) {
+  currentUser = user;
+  userEmailEl.textContent = user.email || '';
+  authCard.hidden = true;
+  appCard.hidden = false;
+  loadMyJobs();
+}
+
+async function initAuth() {
+  if (!authToken) {
+    showAuth();
+    return;
+  }
+  const r = await fetch('/api/me', { headers: authHeaders() }).catch(() => null);
+  if (!r || !r.ok) {
+    localStorage.removeItem(AUTH_KEY);
+    authToken = '';
+    showAuth();
+    return;
+  }
+  const d = await r.json();
+  showApp(d.user);
+}
+
+loginTab.addEventListener('click', () => setAuthMode('login'));
+registerTab.addEventListener('click', () => setAuthMode('register'));
+
+authForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  authMsg.textContent = '';
+  authBtn.disabled = true;
+  const payload = {
+    email: document.getElementById('auth-email').value.trim(),
+    password: document.getElementById('auth-password').value,
+  };
+  const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+  let r;
+  try {
+    r = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    authMsg.textContent = 'Ошибка сети';
+    authBtn.disabled = false;
+    return;
+  }
+  const d = await r.json().catch(() => ({}));
+  authBtn.disabled = false;
+  if (!r.ok) {
+    authMsg.textContent = d.detail || 'Не удалось войти';
+    return;
+  }
+  authToken = d.token;
+  localStorage.setItem(AUTH_KEY, authToken);
+  showApp(d.user);
+});
+
+logoutBtn.addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => null);
+  localStorage.removeItem(AUTH_KEY);
+  authToken = '';
+  currentUser = null;
+  showAuth();
+});
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, ch => ({
@@ -164,6 +311,7 @@ const STEPS = [
   { id: 'images',          label: 'Изображения' },
   { id: 'script_cleaner',  label: 'Tilda-скрипты' },
   { id: 'forms_check',     label: 'Проверка форм' },
+  { id: 'zero-form-smoke', label: 'Zero-form smoke' },
   { id: 'html_prettify',   label: 'HTML-форматирование' },
   { id: 'checker',         label: 'Проверка ссылок' },
   { id: 'tilda-remnants',  label: 'Остатки Tilda' },
@@ -205,7 +353,7 @@ form.addEventListener('submit', async e => {
   const fd = new FormData(form);
   let resp;
   try {
-    resp = await fetch('/api/jobs', { method: 'POST', body: fd });
+    resp = await fetch('/api/jobs', { method: 'POST', body: fd, headers: authHeaders() });
   } catch {
     setStatus('Ошибка сети', false, true);
     btn.disabled = false;
@@ -256,7 +404,7 @@ async function poll(jobId, opts = {}) {
   const interval = setInterval(async () => {
     let data;
     try {
-      const r = await fetch(`/api/jobs/${jobId}`);
+      const r = await fetch(`/api/jobs/${jobId}`, { headers: authHeaders() });
       data = await r.json();
     } catch { return; }
 
@@ -270,16 +418,20 @@ async function poll(jobId, opts = {}) {
       clearInterval(interval);
       if (isBatch && row) {
         row.querySelector('.batch-state').textContent = 'готово';
-        row.lastElementChild.innerHTML = `<a class="batch-link" href="/api/jobs/${jobId}/download">скачать</a>`;
+        row.lastElementChild.innerHTML = `<button class="link-btn batch-link" type="button" data-download-job="${jobId}">скачать</button>`;
+        row.lastElementChild.querySelector('button').addEventListener('click', () => downloadJob(jobId));
+        loadMyJobs();
         finishBatchIfDone();
       } else {
         setStatus('', false, false);
         progressBlock.style.display = 'none';
         showStats(data.stats);
-        downloadEl.href = `/api/jobs/${jobId}/download`;
+        currentDownloadJobId = jobId;
+        downloadEl.href = '#';
         downloadEl.style.display = 'block';
         btnAgain.style.display = 'block';
         btn.disabled = false;
+        loadMyJobs();
       }
     } else if (data.status === 'error') {
       clearInterval(interval);
@@ -295,6 +447,26 @@ async function poll(jobId, opts = {}) {
       }
     }
   }, 2000);
+}
+
+async function downloadJob(jobId) {
+  const r = await fetch(`/api/jobs/${jobId}/download`, { headers: authHeaders() });
+  if (!r.ok) {
+    setStatus('Не удалось скачать результат', false, true);
+    return;
+  }
+  const blob = await r.blob();
+  const disposition = r.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}.zip`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function statusLabel(s) {
@@ -315,6 +487,7 @@ const ERROR_HINTS = {
   empty_archive:  'Убедитесь что экспортировали полный сайт, а не отдельную страницу.',
   unpack_failed:  'Проверьте что загружен ZIP-экспорт Tilda, а не другой архив.',
   pipeline_error: 'Попробуйте загрузить архив снова. Если ошибка повторяется — обратитесь в поддержку.',
+  zero_form_smoke_failed: 'Архив не выдан, потому что zero-block runtime выглядит некорректным.',
   unknown:        'Попробуйте позже или обратитесь в поддержку.',
 };
 
@@ -332,6 +505,7 @@ function showStats(s) {
     { key: 'fixed_links',    k: 'Исправлено ссылок',    v: s.fixed_links,     cls: '' },
     { key: 'downloaded',     k: 'Загружено с CDN',      v: s.downloaded,      cls: '' },
     { key: 'forms_hooked',   k: 'Форм подключено',      v: s.forms_hooked,    cls: '' },
+    { key: 'validation',     k: 'Валидация архива',     v: s.validation_warnings || 0, cls: (s.validation_warnings || 0) > 0 ? 'warn' : '' },
     { key: 'warnings',       k: 'Предупреждений',       v: s.warnings,        cls: s.warnings  > 0 ? 'warn' : '' },
     { key: 'errors',         k: 'Ошибок',               v: s.errors,          cls: s.errors    > 0 ? 'bad'  : '' },
   ];
@@ -387,6 +561,7 @@ document.addEventListener('keydown', event => {
 btnAgain.addEventListener('click', () => {
   form.reset();
   currentStats = null;
+  currentDownloadJobId = null;
   closeDetails();
   batchList.style.display = 'none';
   batchList.innerHTML = '';
@@ -397,6 +572,41 @@ btnAgain.addEventListener('click', () => {
   btnAgain.style.display = 'none';
   setStatus('', false, false);
 });
+
+downloadEl.addEventListener('click', event => {
+  event.preventDefault();
+  if (currentDownloadJobId) downloadJob(currentDownloadJobId);
+});
+
+async function loadMyJobs() {
+  if (!authToken) return;
+  const r = await fetch('/api/jobs', { headers: authHeaders() }).catch(() => null);
+  if (!r || !r.ok) return;
+  const d = await r.json();
+  const items = d.items || [];
+  if (!items.length) {
+    myJobsEl.innerHTML = '<div class="job-status">Задач пока нет.</div>';
+    return;
+  }
+  myJobsEl.innerHTML = items.slice(0, 10).map(job => {
+    const domain = job.domain || job.id.slice(0, 8);
+    const action = job.status === 'done'
+      ? `<button class="link-btn batch-link" type="button" data-download-job="${job.id}">скачать</button>`
+      : '';
+    return `<div class="job-row">
+      <div>
+        <div class="job-meta">${escapeHtml(domain)}</div>
+        <div class="job-status">${escapeHtml(statusLabel(job.status))}</div>
+      </div>
+      <div>${action}</div>
+    </div>`;
+  }).join('');
+  myJobsEl.querySelectorAll('[data-download-job]').forEach(btn => {
+    btn.addEventListener('click', () => downloadJob(btn.dataset.downloadJob));
+  });
+}
+
+initAuth();
 </script>
 </body>
 </html>

@@ -24,6 +24,32 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.1 - 2026-07-16
+
+### Added
+
+- Added public user registration/login with bearer sessions. Public processing endpoints now require a registered user, and each user can see/download only their own jobs.
+- Added a personal-account section on the public web UI with current user, logout, upload form, and recent user jobs.
+- Added a Google Analytics Measurement ID field to the public upload form. The value is written to generated `js/ga-config.js`; invalid or empty values keep GA4 disabled.
+- Added deeper Tilda ZIP validation before queueing jobs:
+  - required files are still checked first;
+  - at least one non-`404.html` HTML page is required;
+  - `data-aida-export="yes"` / `data-tilda-project-id` markers are detected;
+  - asset folders referenced by HTML are checked;
+  - validation details are exposed in result stats.
+- Added offline zero-block form runtime smoke-check for processed `js/aida-zero-forms-1.0.min.js`; critical failures block archive delivery.
+- Added `tools/smoke_test_health.py` for comparing expected `manifest.json` version against deployed `/health`.
+- Added a generated-archive browser-console smoke test. It opens a processed archive with Playwright and fails on browser console/page errors, while skipping cleanly when Chromium is unavailable.
+
+### Changed
+
+- GitHub Actions deploy now verifies public staging `/health` after staging deploy and both public production `/health` endpoints after production deploy.
+
+### Verified
+
+- Ran `python -m pytest tests/test_process_params.py tests/test_forms.py tests/test_checker_forms.py tests/test_web_auth.py tests/test_web_jobs.py tests/test_web_worker_details.py tests/test_web_api.py tests/test_smoke_test_health.py -q`: `65 passed`.
+- Ran `python -m pytest tests/ -q`: `334 passed, 2 warnings`.
+
 ## 5.7.0 - 2026-05-03
 
 ### Added

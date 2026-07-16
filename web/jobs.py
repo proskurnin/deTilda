@@ -31,6 +31,8 @@ class Job:
     error_detail: Optional[str] = None # raw exception (admin only)
     stats: Optional[dict] = None
     domain: Optional[str] = None
+    validation_details: Optional[dict] = None
+    owner_user_id: Optional[str] = None
     progress: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -43,6 +45,7 @@ class Job:
             "error_code": self.error_code,
             "stats": self.stats,
             "domain": self.domain,
+            "validation_details": self.validation_details,
             "progress": self.progress,
         }
 
@@ -56,6 +59,7 @@ class Job:
         d = self.to_admin_dict()
         d["result_path"] = str(self.result_path) if self.result_path else None
         d["progress"] = self.progress
+        d["owner_user_id"] = self.owner_user_id
         return d
 
     @classmethod
@@ -71,6 +75,8 @@ class Job:
             error_detail=data.get("error_detail"),
             stats=data.get("stats"),
             domain=data.get("domain"),
+            validation_details=data.get("validation_details"),
+            owner_user_id=data.get("owner_user_id"),
             progress=data.get("progress", []),
         )
 
@@ -186,8 +192,8 @@ class JobStore:
                 pass
         return loaded
 
-    def create(self) -> Job:
-        job = Job(id=str(uuid.uuid4()))
+    def create(self, owner_user_id: str | None = None) -> Job:
+        job = Job(id=str(uuid.uuid4()), owner_user_id=owner_user_id)
         with self._lock:
             self._jobs[job.id] = job
         self._save(job)
@@ -229,3 +235,9 @@ class JobStore:
                 pass
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+
+    def list_for_user(self, user_id: str) -> list:
+        return [
+            job for job in self.list_all()
+            if job.owner_user_id == user_id
+        ]

@@ -20,13 +20,18 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 from core.version import APP_VERSION  # noqa: E402
 import web.app as app_module  # noqa: E402
-from web.app import app, _STORE  # noqa: E402
+from web.app import app  # noqa: E402
+from web.auth import UserStore  # noqa: E402
 from web.jobs import JobStatus, JobStore  # noqa: E402
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client(tmp_path, monkeypatch) -> TestClient:
     app_module._web_cfg_override.clear()
+    monkeypatch.setattr(app_module, "_STORE", JobStore(persist_dir=tmp_path / "workdir"))
+    monkeypatch.setattr(app_module, "_USER_STORE", UserStore(persist_dir=tmp_path / "workdir"))
+    monkeypatch.setattr(app_module, "_LOGS_DIR", tmp_path / "logs")
+    monkeypatch.setattr(app_module, "_WORKDIR", tmp_path / "workdir")
     try:
         yield TestClient(app, raise_server_exceptions=False)
     finally:
@@ -43,6 +48,15 @@ def _make_zip(name: str = "site") -> bytes:
         zf.writestr(f"{name}/readme.txt", "Tilda export")
         zf.writestr(f"{name}/robots.txt", "Host: example.com\nSitemap: https://example.com/sitemap.xml\n")
     return buf.getvalue()
+
+
+def _auth_headers(client: TestClient, email: str = "user@example.com") -> dict[str, str]:
+    r = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "strong-pass-123"},
+    )
+    assert r.status_code == 201
+    return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +111,12 @@ def test_config_returns_web_settings(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 def test_create_job_returns_202(client: TestClient) -> None:
+    headers = _auth_headers(client)
     r = client.post(
         "/api/jobs",
         files={"file": ("site.zip", _make_zip(), "application/zip")},
-        data={"email": "test@example.com"},
+        data={"email": "test@example.com", "ga_measurement_id": "G-ABC1234567"},
+        headers=headers,
     )
     assert r.status_code == 202
     body = r.json()
@@ -110,7 +126,17 @@ def test_create_job_returns_202(client: TestClient) -> None:
     assert body["domain"] == "example.com"
 
 
+def test_create_job_requires_registered_user(client: TestClient) -> None:
+    r = client.post(
+        "/api/jobs",
+        files={"file": ("site.zip", _make_zip(), "application/zip")},
+        data={"email": "test@example.com"},
+    )
+    assert r.status_code == 401
+
+
 def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
+    headers = _auth_headers(client)
     r = client.post(
         "/api/jobs",
         files=[
@@ -118,6 +144,7 @@ def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
             ("file", ("two.zip", _make_zip("two"), "application/zip")),
         ],
         data={"email": "test@example.com"},
+        headers=headers,
     )
     assert r.status_code == 202
     body = r.json()
@@ -128,15 +155,18 @@ def test_create_jobs_accepts_multiple_files(client: TestClient) -> None:
 
 
 def test_create_job_rejects_non_zip(client: TestClient) -> None:
+    headers = _auth_headers(client)
     r = client.post(
         "/api/jobs",
         files={"file": ("site.tar.gz", b"fake", "application/gzip")},
         data={"email": ""},
+        headers=headers,
     )
     assert r.status_code == 400
 
 
 def test_create_job_rejects_archive_without_required_tilda_files(client: TestClient) -> None:
+    headers = _auth_headers(client)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("site/index.html", "<html></html>")
@@ -145,6 +175,7 @@ def test_create_job_rejects_archive_without_required_tilda_files(client: TestCli
         "/api/jobs",
         files={"file": ("site.zip", buf.getvalue(), "application/zip")},
         data={"email": ""},
+        headers=headers,
     )
 
     assert r.status_code == 400
@@ -152,10 +183,43 @@ def test_create_job_rejects_archive_without_required_tilda_files(client: TestCli
     assert "robots.txt" in r.json()["detail"]
 
 
+def test_create_job_rejects_archive_without_html(client: TestClient) -> None:
+    headers = _auth_headers(client)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("site/htaccess", "RewriteEngine On\n")
+        zf.writestr("site/sitemap.xml", "<?xml version='1.0'?><urlset></urlset>")
+        zf.writestr("site/404.html", "404")
+        zf.writestr("site/readme.txt", "Tilda export")
+        zf.writestr("site/robots.txt", "Host: example.com\n")
+
+    r = client.post(
+        "/api/jobs",
+        files={"file": ("site.zip", buf.getvalue(), "application/zip")},
+        data={"email": ""},
+        headers=headers,
+    )
+
+    assert r.status_code == 400
+    assert "HTML-страницы" in r.json()["detail"]
+
+
+def test_create_job_rejects_invalid_ga_measurement_id(client: TestClient) -> None:
+    r = client.post(
+        "/api/jobs",
+        files={"file": ("site.zip", _make_zip(), "application/zip")},
+        data={"ga_measurement_id": "UA-OLD"},
+        headers=_auth_headers(client),
+    )
+    assert r.status_code == 422
+    assert "Measurement ID" in r.json()["detail"]
+
+
 def test_create_job_rejects_oversized_file(client: TestClient, monkeypatch) -> None:
     from web import app as app_module
     from core.schemas import WebConfig
 
+    headers = _auth_headers(client)
     monkeypatch.setattr(
         app_module._CONFIG, "_cache",
         app_module._CONFIG._load().__class__(
@@ -172,6 +236,7 @@ def test_create_job_rejects_oversized_file(client: TestClient, monkeypatch) -> N
             "/api/jobs",
             files={"file": ("site.zip", _make_zip(), "application/zip")},
             data={"email": ""},
+            headers=headers,
         )
         assert r.status_code == 413
     finally:
@@ -183,23 +248,47 @@ def test_create_job_rejects_oversized_file(client: TestClient, monkeypatch) -> N
 # ---------------------------------------------------------------------------
 
 def test_get_job_not_found(client: TestClient) -> None:
-    r = client.get("/api/jobs/nonexistent-id")
+    r = client.get("/api/jobs/nonexistent-id", headers=_auth_headers(client))
     assert r.status_code == 404
 
 
 def test_get_job_returns_status(client: TestClient) -> None:
+    headers = _auth_headers(client)
     create = client.post(
         "/api/jobs",
         files={"file": ("site.zip", _make_zip(), "application/zip")},
         data={"email": ""},
+        headers=headers,
     )
     assert create.status_code == 202
     job_id = create.json()["job_id"]
 
-    r = client.get(f"/api/jobs/{job_id}")
+    r = client.get(f"/api/jobs/{job_id}", headers=headers)
     assert r.status_code == 200
     assert r.json()["id"] == job_id
     assert "status" in r.json()
+
+
+def test_users_only_see_their_own_jobs(client: TestClient) -> None:
+    first_headers = _auth_headers(client, "first@example.com")
+    second_headers = _auth_headers(client, "second@example.com")
+
+    create = client.post(
+        "/api/jobs",
+        files={"file": ("site.zip", _make_zip(), "application/zip")},
+        data={"email": ""},
+        headers=first_headers,
+    )
+    assert create.status_code == 202
+    job_id = create.json()["job_id"]
+
+    hidden = client.get(f"/api/jobs/{job_id}", headers=second_headers)
+    assert hidden.status_code == 404
+
+    first_jobs = client.get("/api/jobs", headers=first_headers)
+    second_jobs = client.get("/api/jobs", headers=second_headers)
+    assert job_id in {item["id"] for item in first_jobs.json()["items"]}
+    assert job_id not in {item["id"] for item in second_jobs.json()["items"]}
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +297,12 @@ def test_get_job_returns_status(client: TestClient) -> None:
 
 def test_download_not_done_returns_409(client: TestClient) -> None:
     """Download before job finishes returns 409."""
-    job = _STORE.create()
+    headers = _auth_headers(client)
+    user = app_module._USER_STORE.get_user_by_token(headers["Authorization"].split(" ", 1)[1])
+    assert user is not None
+    job = app_module._STORE.create(owner_user_id=user.id)
     # job.status stays PENDING
-    r = client.get(f"/api/jobs/{job.id}/download")
+    r = client.get(f"/api/jobs/{job.id}/download", headers=headers)
     assert r.status_code == 409
 
 
@@ -220,7 +312,12 @@ def test_download_filename_uses_domain_from_robots(
     tmp_path,
 ) -> None:
     store = JobStore(persist_dir=tmp_path / "workdir")
+    user_store = UserStore(persist_dir=tmp_path / "workdir")
     monkeypatch.setattr(app_module, "_STORE", store)
+    monkeypatch.setattr(app_module, "_USER_STORE", user_store)
+    headers = _auth_headers(client, "download@example.com")
+    user = user_store.get_user_by_token(headers["Authorization"].split(" ", 1)[1])
+    assert user is not None
     project = tmp_path / "result"
     project.mkdir()
     (project / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -228,12 +325,12 @@ def test_download_filename_uses_domain_from_robots(
         "Sitemap: https://www.example.org/sitemap.xml\n",
         encoding="utf-8",
     )
-    job = store.create()
+    job = store.create(owner_user_id=user.id)
     job.status = JobStatus.DONE
     job.result_path = project
     store.update(job)
 
-    r = client.get(f"/api/jobs/{job.id}/download")
+    r = client.get(f"/api/jobs/{job.id}/download", headers=headers)
 
     assert r.status_code == 200
     assert 'filename="example.org.zip"' in r.headers["content-disposition"]
@@ -445,3 +542,4 @@ def test_admin_change_password_rejects_wrong_current_password(
     )
 
     assert r.status_code == 403
+    headers = _auth_headers(client)

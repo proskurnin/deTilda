@@ -59,6 +59,10 @@ _ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Ошибка при обработке сайта.",
         "Попробуйте загрузить архив снова. Если ошибка повторяется — обратитесь в поддержку.",
     ),
+    "zero_form_smoke_failed": (
+        "Zero-block формы не прошли runtime smoke-check.",
+        "Архив не выдан, потому что js/aida-zero-forms-1.0.min.js выглядит некорректным.",
+    ),
     "unknown": (
         "Внутренняя ошибка сервера.",
         "Попробуйте позже или обратитесь в поддержку.",
@@ -187,8 +191,12 @@ def _build_stats_details(stats: Any, logs_dir: Path) -> dict[str, dict[str, Any]
                 [
                     ("Форм найдено", stats.forms_found),
                     ("Форм подключено к handler", stats.forms_hooked),
+                    ("Zero-form smoke checked", int(bool(stats.zero_form_smoke_checked))),
+                    ("Zero-form smoke failed", int(bool(stats.zero_form_smoke_failed))),
                 ]
-            ) or ["Формы не найдены."],
+            )
+            + list(stats.zero_form_smoke_messages or [])
+            or ["Формы не найдены."],
         },
         "warnings": {
             "title": "Предупреждения",
@@ -207,6 +215,8 @@ def run_job(
     upload_path: Path,
     email: str,
     logs_dir: Path,
+    ga_measurement_id: str = "",
+    validation_details: dict[str, Any] | None = None,
 ) -> None:
     """Execute pipeline and update job state. Runs in a thread pool."""
     try:
@@ -232,7 +242,7 @@ def run_job(
         try:
             stats = process_archive(
                 archive_path,
-                params=ProcessParams(email=email),
+                params=ProcessParams(email=email, ga_measurement_id=ga_measurement_id),
                 logs_dir=logs_dir,
                 on_step_done=_on_step,
             )
@@ -243,6 +253,35 @@ def run_job(
             return
 
         job.result_path = stats.project_root
+        details = _build_stats_details(stats, logs_dir)
+        if validation_details:
+            details["validation"] = {
+                "title": "Валидация архива",
+                "items": list(validation_details.get("items") or []),
+            }
+
+        if stats.zero_form_smoke_failed:
+            _set_error(
+                job,
+                "zero_form_smoke_failed",
+                "; ".join(stats.zero_form_smoke_messages or []),
+            )
+            job.result_path = stats.project_root
+            job.stats = {
+                "renamed_assets": stats.renamed_assets,
+                "fixed_links":    stats.fixed_links,
+                "broken_links":   stats.broken_links,
+                "downloaded":     stats.downloaded_remote_assets,
+                "forms_hooked":   stats.forms_hooked,
+                "exec_time":      round(stats.exec_time, 1),
+                "warnings":       stats.warnings,
+                "errors":         stats.errors,
+                "validation_warnings": len((validation_details or {}).get("warnings") or []),
+                "details":        details,
+            }
+            job.status = JobStatus.ERROR
+            return
+
         job.stats = {
             "renamed_assets": stats.renamed_assets,
             "fixed_links":    stats.fixed_links,
@@ -252,7 +291,8 @@ def run_job(
             "exec_time":      round(stats.exec_time, 1),
             "warnings":       stats.warnings,
             "errors":         stats.errors,
-            "details":        _build_stats_details(stats, logs_dir),
+            "validation_warnings": len((validation_details or {}).get("warnings") or []),
+            "details":        details,
         }
         job.status = JobStatus.DONE
 

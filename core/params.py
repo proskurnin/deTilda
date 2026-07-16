@@ -16,5 +16,8 @@ class ProcessParams:
 
     email: адрес получателя форм сайта (подставляется в send_email.php).
            Если пустой — используются test_recipients из config.yaml.
+    ga_measurement_id: GA4 Measurement ID для js/ga-config.js.
+           Если пустой или невалидный — аналитика остаётся отключённой.
     """
     email: str = ""
+    ga_measurement_id: str = ""
