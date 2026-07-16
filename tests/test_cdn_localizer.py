@@ -184,7 +184,8 @@ def test_downloads_zero_form_runtime_dependencies(tmp_path: Path, monkeypatch) -
     assert (tmp_path / "css" / "aida-zero-form-errorbox.min.css").is_file()
     assert (tmp_path / "js" / "aida-forms-1.0.min.js").is_file()
     assert (tmp_path / "js" / "aida-fallback-1.0.min.js").is_file()
-    assert "https://static.tildacdn.com/css/aida-zero-form-horizontal.min.css" in fetched_urls
+    assert "https://static.tildacdn.com/css/tilda-zero-form-horizontal.min.css" in fetched_urls
+    assert not any("aida-zero-form-horizontal" in url for url in fetched_urls)
 
 
 def test_uses_bundled_zero_form_dependencies_when_cdn_unavailable(
@@ -274,10 +275,8 @@ def test_caches_downloads(tmp_path: Path, monkeypatch) -> None:
     assert call_count["n"] == 1
 
 
-def test_falls_back_to_reversed_path_on_404(tmp_path: Path, monkeypatch) -> None:
-    """Если URL с aida даёт 404 — пробуем с заменой aida→tilda."""
-    import urllib.error
-
+def test_aida_path_downloads_from_original_tilda_url(tmp_path: Path, monkeypatch) -> None:
+    """Если path уже переписан в aida, скачиваем сразу оригинальный tilda path."""
     js = tmp_path / "test.js"
     js.write_text(
         'var u = "https://static.aidacdn.com/fonts/aidasans/aidasans-vf.woff2";',
@@ -287,8 +286,6 @@ def test_falls_back_to_reversed_path_on_404(tmp_path: Path, monkeypatch) -> None
     fetched_urls: list[str] = []
     def _fetch(url, **_kw):
         fetched_urls.append(url)
-        if "aidasans" in url:
-            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
         return (b"font", False)
 
     monkeypatch.setattr(downloader, "fetch_bytes", _fetch)
@@ -296,9 +293,7 @@ def test_falls_back_to_reversed_path_on_404(tmp_path: Path, monkeypatch) -> None
 
     cdn_localizer.localize_cdn_urls(tmp_path)
 
-    # Сначала запрос с aidasans → 404, потом с tildasans → успех
-    assert any("aidasans" in u for u in fetched_urls)
-    assert any("tildasans" in u for u in fetched_urls)
+    assert fetched_urls == ["https://static.tildacdn.com/fonts/tildasans/tildasans-vf.woff2"]
     # Файл сохранён по original path (с aida — как в JS)
     assert (tmp_path / "fonts" / "aidasans" / "aidasans-vf.woff2").exists()
     # JS обновлён на относительный путь
@@ -405,11 +400,29 @@ def test_negative_cache_skips_repeated_failed_path(tmp_path: Path, monkeypatch) 
 
     result = cdn_localizer.localize_cdn_urls(tmp_path)
 
-    # Один URL → одна попытка с aida path → одна с reverse path = 2 запроса всего
-    # А не 4 (двойное обращение от двух файлов)
-    assert call_count["n"] <= 2, f"Слишком много повторных попыток: {call_count['n']}"
+    # Один URL → одна попытка, а не повтор от второго файла.
+    assert call_count["n"] == 1
     assert result.download_failures == 1
     assert result.failed_urls == ["https://static.tildacdn.com/missing/x.png"]
+
+
+def test_directory_cdn_url_is_not_reported_as_failed_resource(tmp_path: Path, monkeypatch) -> None:
+    html = tmp_path / "index.html"
+    html.write_text(
+        '<script src="https://static.tildacdn.com/js/"></script>',
+        encoding="utf-8",
+    )
+
+    def _fetch(*_args, **_kw):
+        raise AssertionError("directory CDN URL must not be fetched")
+
+    monkeypatch.setattr(downloader, "fetch_bytes", _fetch)
+    monkeypatch.setattr(cdn_localizer, "fetch_bytes", downloader.fetch_bytes)
+
+    result = cdn_localizer.localize_cdn_urls(tmp_path)
+
+    assert result.download_failures == 0
+    assert result.failed_urls == []
 
 
 def test_uses_browser_like_user_agent_for_cdn_downloads(tmp_path: Path, monkeypatch) -> None:

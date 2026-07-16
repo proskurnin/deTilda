@@ -79,6 +79,15 @@ def test_index_renders_app_version(client: TestClient) -> None:
     assert "__APP_VERSION__" not in r.text
 
 
+def test_index_renders_my_jobs_error_details(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function jobErrorText(job)" in r.text
+    assert "job-error" in r.text
+    assert "${escapeHtml(jobErrorText(job))}" in r.text
+    assert "state.dataset.status = 'error'" in r.text
+
+
 def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
     r = client.get("/")

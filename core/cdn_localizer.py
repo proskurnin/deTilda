@@ -135,12 +135,15 @@ def is_static_tilda_cdn_url(url: str) -> bool:
     return _extract_path_from_url(url) is not None
 
 
+def _is_downloadable_cdn_path(path: str) -> bool:
+    return bool(path) and not path.endswith("/")
+
+
 def _candidate_urls_for_path(path: str) -> list[str]:
-    candidates = [path]
+    if not _is_downloadable_cdn_path(path):
+        return []
     reversed_path = _reverse_path_for_real_cdn(path)
-    if reversed_path != path:
-        candidates.append(reversed_path)
-    return [f"https://{_REAL_CDN_HOST}/{candidate}" for candidate in candidates]
+    return [f"https://{_REAL_CDN_HOST}/{reversed_path}"]
 
 
 def download_cdn_url(
@@ -166,9 +169,8 @@ def _download_to_local(
 ) -> Path | None:
     """Скачивает path с реального tildacdn.com в project_root/path с сохранением структуры.
 
-    Сначала пробует path как есть (URL мог не пострадать от til→ai).
-    Если 404 — применяет обратное преобразование aida→tilda и пробует снова
-    (URL был переименован refs.py, но файл на CDN под оригинальным именем).
+    Скачивает только оригинальный Tilda path. Если path уже переименован в
+    aida-форму, перед запросом применяет обратное преобразование aida→tilda.
 
     Negative cache: если путь не скачался — больше не пробуем (кеш _DOWNLOAD_FAILED).
     Это критично — без него один и тот же битый URL будет пытаться скачаться
@@ -181,7 +183,7 @@ def _download_to_local(
         return None
     if isinstance(cached, Path):
         return cached
-    if not path or path.endswith("/"):
+    if not _is_downloadable_cdn_path(path):
         cache[path] = _DOWNLOAD_FAILED
         return None
 
@@ -253,6 +255,8 @@ def localize_cdn_urls(project_root: Path) -> CdnLocalizationResult:
     zero_forms_seen = False
 
     def _record_download_failure(path: str) -> None:
+        if not _is_downloadable_cdn_path(path):
+            return
         if path in failed_paths:
             return
         failed_paths.add(path)

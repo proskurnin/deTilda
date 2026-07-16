@@ -24,6 +24,24 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.3 - 2026-07-16
+
+### Changed
+
+- CDN localization now downloads renamed `aida-*` resources from their original
+  `tilda-*` URLs directly, avoiding guaranteed 404 attempts against nonexistent
+  `aida-*` files on `static.tildacdn.com`.
+- The public “Мои задачи” list now shows the user-facing error reason and hint
+  for failed jobs instead of only the generic `ошибка` status.
+
+### Verified
+
+- Ran `python -m pytest tests/test_cdn_localizer.py tests/test_web_api.py::test_index_renders_my_jobs_error_details tests/test_web_worker_details.py -q`: `27 passed`.
+- Ran `python -m pytest tests/test_cdn_localizer.py tests/test_web_api.py -q`: `57 passed`.
+- Ran `python -m pytest tests/ -q`: `338 passed, 2 warnings`.
+- Reprocessed `input/raizel.ltd.zip` and confirmed old `aida-*` CDN warnings and
+  `Unresolved URL: https://static.tildacdn.com/js/` are absent.
+
 ## 5.7.2 - 2026-07-16
 
 ### Changed
