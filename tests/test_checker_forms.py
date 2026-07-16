@@ -89,6 +89,21 @@ def test_forms_check_warns_when_zero_form_dependencies_missing(tmp_path: Path) -
     assert result.warnings == 1
 
 
+def test_forms_check_accepts_zero_block_form_without_separate_runtime(tmp_path: Path) -> None:
+    page = tmp_path / "index.html"
+    page.write_text(
+        '<html><body><div class="tn-atom__form"></div>'
+        '<script src="js/form-handler.js"></script></body></html>',
+        encoding="utf-8",
+    )
+
+    result = check_forms_integration(tmp_path)
+
+    assert result.forms_found == 1
+    assert result.forms_hooked == 1
+    assert result.warnings == 0
+
+
 def test_zero_form_smoke_skips_project_without_zero_forms(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text("<html><body>plain</body></html>", encoding="utf-8")
 
@@ -98,9 +113,21 @@ def test_zero_form_smoke_skips_project_without_zero_forms(tmp_path: Path) -> Non
     assert result.failed is False
 
 
-def test_zero_form_smoke_passes_rewritten_runtime(tmp_path: Path) -> None:
+def test_zero_form_smoke_skips_zero_block_form_without_separate_runtime(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text(
         '<html><body><div class="tn-atom__form"></div></body></html>',
+        encoding="utf-8",
+    )
+
+    result = smoke_check_zero_forms_runtime(tmp_path)
+
+    assert result.checked is False
+    assert result.failed is False
+
+
+def test_zero_form_smoke_passes_rewritten_runtime(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text(
+        '<html><body><script>ai_zeroForms__init("123")</script></body></html>',
         encoding="utf-8",
     )
     runtime = tmp_path / "js" / "aida-zero-forms-1.0.min.js"
@@ -120,7 +147,7 @@ def test_zero_form_smoke_passes_rewritten_runtime(tmp_path: Path) -> None:
 
 def test_zero_form_smoke_fails_invalid_runtime(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text(
-        '<html><body><div class="tn-atom__form"></div></body></html>',
+        '<html><body><script>ai_zeroForms__init("123")</script></body></html>',
         encoding="utf-8",
     )
     runtime = tmp_path / "js" / "aida-zero-forms-1.0.min.js"

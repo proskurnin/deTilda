@@ -41,6 +41,11 @@ __all__ = [
     "smoke_check_zero_forms_runtime",
 ]
 
+ZERO_FORMS_RUNTIME_MARKERS = re.compile(
+    r"(?:ai|t)_zeroForms__init|(?:aida|tilda)-zero-forms",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class LinkCheckerResult:
@@ -366,10 +371,6 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
         re.IGNORECASE,
     )
     handler_pattern = re.compile(r"form-handler\.js", re.IGNORECASE)
-    zero_forms_markers = re.compile(
-        r"tn-atom__form|ai_zeroForms__init|data-aida-formskey|data-tilda-formskey",
-        re.IGNORECASE,
-    )
     zero_forms_dependencies = (
         "css/aida-zero-form-horizontal.min.css",
         "css/aida-zero-form-errorbox.min.css",
@@ -379,7 +380,7 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
 
     forms_found = 0
     forms_hooked = 0
-    zero_forms_seen = False
+    zero_forms_runtime_required = False
 
     for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:
@@ -394,8 +395,10 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
 
         count_on_page = len(file_forms_matches)
         forms_found += count_on_page
-        zero_forms_seen = zero_forms_seen or bool(zero_forms_markers.search(content))
-        
+        zero_forms_runtime_required = zero_forms_runtime_required or bool(
+            ZERO_FORMS_RUNTIME_MARKERS.search(content)
+        )
+
         # Если на странице есть хотя бы один handler, считаем все формы этой страницы защищёнными
         if handler_pattern.search(content):
             forms_hooked += count_on_page
@@ -406,10 +409,13 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
         logger.warn(
             f"[forms-check] Найдено форм: {forms_found}, подключено к handler: {forms_hooked}"
         )
-    if zero_forms_seen:
-        runtime_js = project_root / "js" / "aida-zero-forms-1.0.min.js"
-        legacy_runtime_js = project_root / "js" / "tilda-zero-forms-1.0.min.js"
-        runtime_path = runtime_js if runtime_js.exists() else legacy_runtime_js
+    runtime_js = project_root / "js" / "aida-zero-forms-1.0.min.js"
+    legacy_runtime_js = project_root / "js" / "tilda-zero-forms-1.0.min.js"
+    runtime_path = runtime_js if runtime_js.exists() else legacy_runtime_js
+    if runtime_path.exists():
+        zero_forms_runtime_required = True
+
+    if zero_forms_runtime_required:
         if not runtime_path.exists():
             result.warnings = 1
             logger.warn(
@@ -445,14 +451,15 @@ def check_forms_integration(project_root: Path) -> FormIntegrationResult:
     return result
 
 
-def _project_has_zero_forms(project_root: Path) -> bool:
-    zero_forms_markers = re.compile(
-        r"tn-atom__form|ai_zeroForms__init|data-aida-formskey|data-tilda-formskey",
-        re.IGNORECASE,
-    )
+def _project_requires_zero_forms_runtime(project_root: Path) -> bool:
+    runtime_js = project_root / "js" / "aida-zero-forms-1.0.min.js"
+    legacy_runtime_js = project_root / "js" / "tilda-zero-forms-1.0.min.js"
+    if runtime_js.is_file() or legacy_runtime_js.is_file():
+        return True
+
     for file_path in utils.list_files_recursive(project_root, extensions=(".html", ".htm")):
         try:
-            if zero_forms_markers.search(utils.safe_read(file_path)):
+            if ZERO_FORMS_RUNTIME_MARKERS.search(utils.safe_read(file_path)):
                 return True
         except Exception:
             continue
@@ -463,9 +470,9 @@ def smoke_check_zero_forms_runtime(project_root: Path) -> ZeroFormSmokeResult:
     """Offline smoke-check for processed zero-block form runtime."""
     project_root = Path(project_root)
     result = ZeroFormSmokeResult()
-    if not _project_has_zero_forms(project_root):
-        result.messages.append("Zero-block формы не найдены.")
-        logger.info("[zero-form-smoke] Zero-block формы не найдены")
+    if not _project_requires_zero_forms_runtime(project_root):
+        result.messages.append("Отдельный zero-forms runtime не требуется.")
+        logger.info("[zero-form-smoke] Отдельный zero-forms runtime не требуется")
         return result
 
     result.checked = True

@@ -24,6 +24,20 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.2 - 2026-07-16
+
+### Changed
+
+- Fixed zero-block form runtime smoke-check so exports with `tilda-zero-1.1.min.js` +
+  `tilda-forms-1.0.min.js`, but without a separate `tilda-zero-forms-1.0.min.js`, are not
+  incorrectly blocked.
+
+### Verified
+
+- Ran `python -m pytest tests/test_checker_forms.py -q`: `10 passed`.
+- Ran `python -m pytest tests/ -q`: `336 passed, 2 warnings`.
+- Reprocessed `input/raizel.ltd.zip`: `errors=0`, `zero_form_smoke_failed=False`, forms `60/60`.
+
 ## 5.7.1 - 2026-07-16
 
 ### Added
