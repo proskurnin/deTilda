@@ -83,6 +83,7 @@
   .job-row:last-child { border-bottom: 0; }
   .job-meta { min-width: 0; font-size: .82rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .job-status { color: #6b7280; font-size: .78rem; }
+  .job-error { margin-top: .16rem; color: #b91c1c; font-size: .76rem; line-height: 1.25; overflow-wrap: anywhere; }
   .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; letter-spacing: 0; }
 </style>
 </head>
@@ -411,13 +412,18 @@ async function poll(jobId, opts = {}) {
     if (data.progress && !isBatch) renderProgress(data.progress);
     if (row) {
       const state = row.querySelector('.batch-state');
-      if (state) state.textContent = statusLabel(data.status);
+      if (state) {
+        state.textContent = statusLabel(data.status);
+        state.dataset.status = data.status || '';
+      }
     }
 
     if (data.status === 'done') {
       clearInterval(interval);
       if (isBatch && row) {
-        row.querySelector('.batch-state').textContent = 'готово';
+        const state = row.querySelector('.batch-state');
+        state.textContent = 'готово';
+        state.dataset.status = 'done';
         row.lastElementChild.innerHTML = `<button class="link-btn batch-link" type="button" data-download-job="${jobId}">скачать</button>`;
         row.lastElementChild.querySelector('button').addEventListener('click', () => downloadJob(jobId));
         loadMyJobs();
@@ -436,8 +442,10 @@ async function poll(jobId, opts = {}) {
     } else if (data.status === 'error') {
       clearInterval(interval);
       if (isBatch && row) {
-        row.querySelector('.batch-state').textContent = data.error || 'ошибка';
-        row.querySelector('.batch-state').style.color = '#dc2626';
+        const state = row.querySelector('.batch-state');
+        state.textContent = jobErrorText(data);
+        state.dataset.status = 'error';
+        state.style.color = '#dc2626';
         finishBatchIfDone();
       } else {
         progressBlock.style.display = 'none';
@@ -474,8 +482,8 @@ function statusLabel(s) {
 }
 
 function finishBatchIfDone() {
-  const states = [...batchList.querySelectorAll('.batch-state')].map(el => el.textContent);
-  const done = states.every(text => text === 'готово' || text.includes('ошибка'));
+  const states = [...batchList.querySelectorAll('.batch-state')].map(el => el.dataset.status || el.textContent);
+  const done = states.every(text => text === 'done' || text === 'готово' || text === 'error' || text.includes('ошибка'));
   if (!done) return;
   setStatus('', false, false);
   btnAgain.style.display = 'block';
@@ -495,6 +503,12 @@ function showError(msg, code) {
   errMsg.textContent  = msg || 'Произошла ошибка при обработке.';
   errHint.textContent = ERROR_HINTS[code] || ERROR_HINTS.unknown;
   errBox.style.display = 'block';
+}
+
+function jobErrorText(job) {
+  const message = job?.error || 'Ошибка обработки.';
+  const hint = ERROR_HINTS[job?.error_code] || '';
+  return hint ? `${message} ${hint}` : message;
 }
 
 function showStats(s) {
@@ -593,10 +607,14 @@ async function loadMyJobs() {
     const action = job.status === 'done'
       ? `<button class="link-btn batch-link" type="button" data-download-job="${job.id}">скачать</button>`
       : '';
+    const error = job.status === 'error'
+      ? `<div class="job-error">${escapeHtml(jobErrorText(job))}</div>`
+      : '';
     return `<div class="job-row">
       <div>
         <div class="job-meta">${escapeHtml(domain)}</div>
         <div class="job-status">${escapeHtml(statusLabel(job.status))}</div>
+        ${error}
       </div>
       <div>${action}</div>
     </div>`;
