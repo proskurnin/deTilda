@@ -104,6 +104,21 @@ def test_index_renders_per_file_upload_settings(client: TestClient) -> None:
     assert "files.length > 1" in r.text
 
 
+def test_index_renders_job_details_modal_hooks(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'data-job-details="${job.id}"' in r.text
+    assert 'data-job-report="${job.id}"' in r.text
+    assert "async function openJobDetails(jobId)" in r.text
+    assert "async function downloadJobReport(jobId)" in r.text
+    assert "function renderJobDetails(job)" in r.text
+    assert "`/api/jobs/${jobId}`" in r.text
+    assert "`/api/jobs/${jobId}/report`" in r.text
+    assert "Этапы pipeline" in r.text
+    assert "Предупреждения" in r.text
+    assert "Ошибки" in r.text
+
+
 def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
     r = client.get("/")
@@ -158,6 +173,12 @@ def test_create_job_returns_202(client: TestClient, monkeypatch) -> None:
     assert len(body["jobs"]) == 1
     assert body["status"] in ("pending", "running", "done")
     assert body["domain"] == "example.com"
+
+    job = app_module._STORE.get(body["job_id"])
+    assert job is not None
+    assert job.filename == "site.zip"
+    assert job.email == "test@example.com"
+    assert job.ga_measurement_id == "G-ABC1234567"
 
 
 def test_create_job_requires_registered_user(client: TestClient) -> None:
@@ -426,6 +447,53 @@ def test_download_filename_uses_domain_from_robots(
 
     assert r.status_code == 200
     assert 'filename="example.org.zip"' in r.headers["content-disposition"]
+
+
+def test_download_report_returns_processing_report(client: TestClient, tmp_path) -> None:
+    headers = _auth_headers(client, "report@example.com")
+    user = app_module._USER_STORE.get_user_by_token(headers["Authorization"].split(" ", 1)[1])
+    assert user is not None
+    job = app_module._STORE.create(owner_user_id=user.id)
+    job.domain = "example.com"
+    app_module._STORE.update(job)
+    report_dir = app_module._LOGS_DIR / job.id
+    report_dir.mkdir(parents=True)
+    (report_dir / "processing_report.json").write_text('{"job_id":"%s"}' % job.id, encoding="utf-8")
+
+    r = client.get(f"/api/jobs/{job.id}/report", headers=headers)
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["job_id"] == job.id
+    assert 'filename="example.com_processing_report.json"' in r.headers["content-disposition"]
+
+
+def test_download_report_hidden_from_other_users(client: TestClient) -> None:
+    first_headers = _auth_headers(client, "report-owner@example.com")
+    second_headers = _auth_headers(client, "report-other@example.com")
+    user = app_module._USER_STORE.get_user_by_token(first_headers["Authorization"].split(" ", 1)[1])
+    assert user is not None
+    job = app_module._STORE.create(owner_user_id=user.id)
+    app_module._STORE.update(job)
+    report_dir = app_module._LOGS_DIR / job.id
+    report_dir.mkdir(parents=True)
+    (report_dir / "processing_report.json").write_text("{}", encoding="utf-8")
+
+    r = client.get(f"/api/jobs/{job.id}/report", headers=second_headers)
+
+    assert r.status_code == 404
+
+
+def test_download_report_returns_410_when_missing(client: TestClient) -> None:
+    headers = _auth_headers(client, "missing-report@example.com")
+    user = app_module._USER_STORE.get_user_by_token(headers["Authorization"].split(" ", 1)[1])
+    assert user is not None
+    job = app_module._STORE.create(owner_user_id=user.id)
+
+    r = client.get(f"/api/jobs/{job.id}/report", headers=headers)
+
+    assert r.status_code == 410
+    assert "Отчёт" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,9 @@ class Job:
     error_code: Optional[str] = None   # machine-readable key
     error_detail: Optional[str] = None # raw exception (admin only)
     stats: Optional[dict] = None
+    filename: Optional[str] = None
+    email: str = ""
+    ga_measurement_id: str = ""
     domain: Optional[str] = None
     validation_details: Optional[dict] = None
     owner_user_id: Optional[str] = None
@@ -44,6 +47,9 @@ class Job:
             "error": self.error,
             "error_code": self.error_code,
             "stats": self.stats,
+            "filename": self.filename,
+            "email": self.email,
+            "ga_measurement_id": self.ga_measurement_id,
             "domain": self.domain,
             "validation_details": self.validation_details,
             "progress": self.progress,
@@ -74,6 +80,9 @@ class Job:
             error_code=data.get("error_code"),
             error_detail=data.get("error_detail"),
             stats=data.get("stats"),
+            filename=data.get("filename"),
+            email=data.get("email", ""),
+            ga_measurement_id=data.get("ga_measurement_id", ""),
             domain=data.get("domain"),
             validation_details=data.get("validation_details"),
             owner_user_id=data.get("owner_user_id"),

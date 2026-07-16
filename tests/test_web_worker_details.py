@@ -1,8 +1,11 @@
 """Tests for detailed web job result metadata."""
 from __future__ import annotations
 
+import json
+
 from core.pipeline import PipelineStats
-from web.worker import _build_stats_details, _collect_log_messages
+from web.jobs import Job, JobStatus
+from web.worker import _build_stats_details, _collect_log_messages, _write_processing_report
 
 
 def test_collect_log_messages_extracts_warnings_and_errors(tmp_path) -> None:
@@ -53,3 +56,43 @@ def test_build_stats_details_includes_pipeline_counters_and_log_messages(tmp_pat
     assert "Потенциально неразрешённых изображений: 1" in details["warnings"]["items"]
     assert "⚠️ [images] unresolved image: bg.jpg" in details["warnings"]["items"]
     assert details["errors"]["items"] == ["Ошибок нет."]
+
+
+def test_write_processing_report_contains_job_context(tmp_path) -> None:
+    project_root = tmp_path / "result"
+    project_root.mkdir()
+    job = Job(id="job-1")
+    job.filename = "site.zip"
+    job.domain = "example.com"
+    job.email = "owner@example.com"
+    job.ga_measurement_id = "G-ABC123"
+    job.progress = ["assets", "forms"]
+    job.validation_details = {"items": ["Архив прошёл базовую валидацию."], "warnings": []}
+    job.stats = {
+        "warnings": 1,
+        "errors": 0,
+        "details": {
+            "warnings": {"items": ["⚠️ warning"]},
+            "errors": {"items": ["Ошибок нет."]},
+        },
+    }
+    job.result_path = project_root
+    job.status = JobStatus.DONE
+
+    report_path = _write_processing_report(
+        job,
+        tmp_path / "logs",
+        email=job.email,
+        ga_measurement_id=job.ga_measurement_id,
+        validation_details=job.validation_details,
+    )
+
+    assert report_path is not None
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    assert data["job_id"] == "job-1"
+    assert data["input"] == {"filename": "site.zip", "domain": "example.com"}
+    assert data["params"] == {"email": "owner@example.com", "ga_measurement_id": "G-ABC123"}
+    assert data["progress"] == ["assets", "forms"]
+    assert data["validation"]["items"] == ["Архив прошёл базовую валидацию."]
+    assert data["warnings"] == ["⚠️ warning"]
+    assert data["result"]["archive_ready"] is True

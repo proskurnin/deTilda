@@ -24,6 +24,27 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.5 - 2026-07-17
+
+### Added
+
+- Added job details in the public “Мои задачи” list: users can open a modal with
+  status, current pipeline step, validation details, progress, warnings, and errors.
+- Added `processing_report.json` generation for each queued web job with input
+  filename/domain, deTilda version, email/GA parameters, progress, validation,
+  warnings, errors, result availability, and error reason when applicable.
+- Added a protected public report download endpoint and “отчёт” action in
+  “Мои задачи” for downloading each job's `processing_report.json`.
+
+### Changed
+
+- Nothing yet.
+
+### Verified
+
+- Ran `python -m pytest tests/test_web_api.py tests/test_web_worker_details.py -q`: `43 passed`.
+- Ran `python -m pytest tests/ -q`: `346 passed, 2 warnings`.
+
 ## 5.7.4 - 2026-07-16
 
 ### Added
