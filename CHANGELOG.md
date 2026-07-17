@@ -24,6 +24,23 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.7 - 2026-07-17
+
+### Added
+
+- Saved the post-`5.7.6` verification context and follow-up release plan in
+  `TODO.md`, including Stage/Prod health checks, relevant commits, and the next
+  diagnostics workflow for `input/raizel.ltd.zip`.
+
+### Changed
+
+- Published a patch release after completing the planned Stage flow, problem
+  archive, zero-block diagnostics, and multi-file upload UX checks.
+
+### Verified
+
+- Ran `python -m pytest tests/ -q`: `346 passed, 2 warnings`.
+
 ## 5.7.6 - 2026-07-17
 
 ### Added
