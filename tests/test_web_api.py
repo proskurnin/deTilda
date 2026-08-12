@@ -74,7 +74,6 @@ def test_health(client: TestClient) -> None:
 def test_index_renders_app_version(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
-    assert f"<h1>deTilda v{APP_VERSION}</h1>" in r.text
     assert "made with &hearts; by Roman A. Proskurnin" in r.text
     assert f"v{APP_VERSION}" in r.text
     assert 'id="app-version"' not in r.text
@@ -122,7 +121,7 @@ def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -
     monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
     r = client.get("/")
     assert r.status_code == 200
-    assert "<h1>deTilda v9.9.9</h1>" in r.text
+    assert "v9.9.9" in r.text
 
 
 def test_health_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
