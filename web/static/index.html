@@ -7,7 +7,8 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
-  .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: min(500px, 100%); }
+  .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: 100%; max-width: 500px; }
+  .card.wide { max-width: 740px; }
   .title-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .25rem; flex-wrap: wrap; }
   h1 { font-size: 1.5rem; margin: 0; }
   .sub { color: #6b7280; font-size: .9rem; margin-bottom: 1.75rem; }
@@ -97,15 +98,43 @@
   .batch-link { color: #2563eb; text-decoration: none; font-size: .82rem; font-weight: 600; }
   .batch-link:hover { text-decoration: underline; }
   .link-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
-  .jobs-list { margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: .8rem; }
-  .jobs-title { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .45rem; }
-  .job-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .5rem; padding: .45rem 0; border-bottom: 1px solid #f8fafc; align-items: center; }
-  .job-row:last-child { border-bottom: 0; }
-  .job-meta { min-width: 0; font-size: .82rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job-status { color: #6b7280; font-size: .78rem; }
-  .job-error { margin-top: .16rem; color: #b91c1c; font-size: .76rem; line-height: 1.25; overflow-wrap: anywhere; }
-  .job-actions { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; flex-wrap: wrap; }
-  .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; letter-spacing: 0; }
+  .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; }
+
+  /* Page navigation tabs */
+  .page-nav { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; margin-bottom: 1.25rem; }
+  .page-tab { padding: .45rem; border: 0; border-radius: 7px; cursor: pointer; background: #f3f4f6; color: #374151; font-weight: 600; font-size: .9rem; }
+  .page-tab.active { background: #2563eb; color: #fff; }
+  .page-tab:not(.active):hover { background: #e5e7eb; }
+
+  /* History page */
+  .h-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .h-title { font-size: 1rem; font-weight: 650; color: #111; }
+  .btn-sm { padding: .3rem .7rem; background: #f3f4f6; color: #374151; border: 0; border-radius: 7px; font-size: .8rem; cursor: pointer; font-weight: 500; }
+  .btn-sm:hover { background: #e5e7eb; }
+  .h-wrap { overflow-x: auto; margin: 0 -2rem; padding: 0 2rem; }
+  .h-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+  .h-table th { text-align: left; padding: .45rem .6rem; color: #6b7280; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+  .h-table td { padding: .55rem .6rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .h-table tbody tr:last-child td { border-bottom: 0; }
+  .h-table tbody tr:hover td { background: #f8fafc; }
+  .col-site { max-width: 200px; }
+  .site-name { font-weight: 500; color: #111; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .site-file { font-size: .75rem; color: #9ca3af; margin-top: .1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .site-err { font-size: .75rem; color: #dc2626; margin-top: .15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+  .col-date { white-space: nowrap; color: #6b7280; font-size: .8rem; }
+  .col-actions { white-space: nowrap; }
+  .action-links { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .action-link { padding: .22rem .5rem; border: 0; border-radius: 5px; background: #f3f4f6; color: #374151; font-size: .78rem; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .action-link:hover { background: #e5e7eb; }
+  .action-link.dl { background: #f0fdf4; color: #15803d; }
+  .action-link.dl:hover { background: #dcfce7; }
+  .badge { display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+  .badge-pending { background: #f3f4f6; color: #6b7280; }
+  .badge-running { background: #eff6ff; color: #2563eb; }
+  .badge-done    { background: #f0fdf4; color: #15803d; }
+  .badge-error   { background: #fef2f2; color: #dc2626; }
+  .badge-spin { display: inline-block; width: 8px; height: 8px; border: 1.5px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; opacity: .7; }
+  .h-empty { text-align: center; color: #9ca3af; padding: 3rem 1rem; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -133,61 +162,89 @@
     <span>Личный кабинет: <strong id="user-email"></strong></span>
     <button class="btn-inline" id="logout-btn" type="button">Выйти</button>
   </div>
-  <div class="title-row">
-    <h1>deTilda v__APP_VERSION__</h1>
-  </div>
-  <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
 
-  <form id="form">
-    <label for="file">ZIP-архив экспорта Tilda</label>
-    <input type="file" id="file" name="file" accept=".zip" multiple required>
-    <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
-    <div class="input-action-row">
-      <input type="email" id="email" name="email" placeholder="owner@example.com">
-      <button class="field-action" id="email_info_btn" type="button">info@</button>
+  <div class="page-nav">
+    <button class="page-tab active" id="tab-process" type="button">Обработка</button>
+    <button class="page-tab" id="tab-history" type="button">История</button>
+  </div>
+
+  <!-- Processing page -->
+  <div id="page-process">
+    <div class="title-row">
+      <h1>deTilda v__APP_VERSION__</h1>
     </div>
-    <label for="ga_measurement_id">Google Analytics Measurement ID <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
-    <input type="text" id="ga_measurement_id" name="ga_measurement_id" placeholder="G-ABC1234567" pattern="G-[A-Za-z0-9]+">
-    <div class="hint">Если поле пустое, GA4 в итоговом сайте не включается.</div>
-    <div id="per-file-toggle" class="per-file-toggle">
-      <div class="per-file-toggle-text">
-        <div class="per-file-toggle-title">Индивидуальные настройки файлов</div>
-        <div class="per-file-toggle-sub">Отдельные email и Google Analytics для каждого сайта</div>
+    <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
+
+    <form id="form">
+      <label for="file">ZIP-архив экспорта Tilda</label>
+      <input type="file" id="file" name="file" accept=".zip" multiple required>
+      <label for="email">Email для форм <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
+      <div class="input-action-row">
+        <input type="email" id="email" name="email" placeholder="owner@example.com">
+        <button class="field-action" id="email_info_btn" type="button">info@</button>
       </div>
-      <label class="switch" for="per_file_enabled">
-        <input type="checkbox" id="per_file_enabled">
-        <span class="switch-slider"></span>
-      </label>
+      <label for="ga_measurement_id">Google Analytics Measurement ID <span style="color:#9ca3af;font-weight:400">(необязательно)</span></label>
+      <input type="text" id="ga_measurement_id" name="ga_measurement_id" placeholder="G-ABC1234567" pattern="G-[A-Za-z0-9]+">
+      <div class="hint">Если поле пустое, GA4 в итоговом сайте не включается.</div>
+      <div id="per-file-toggle" class="per-file-toggle">
+        <div class="per-file-toggle-text">
+          <div class="per-file-toggle-title">Индивидуальные настройки файлов</div>
+          <div class="per-file-toggle-sub">Отдельные email и Google Analytics для каждого сайта</div>
+        </div>
+        <label class="switch" for="per_file_enabled">
+          <input type="checkbox" id="per_file_enabled">
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+      <div id="per-file-settings" class="per-file-settings"></div>
+      <button type="submit" class="btn-primary" id="btn">Обработать</button>
+    </form>
+
+    <div id="status"></div>
+    <div id="batch-list" class="batch-list"></div>
+    <div id="progress-block">
+      <div class="progress-title">Шаги обработки</div>
+      <div class="progress-steps" id="progress-steps"></div>
     </div>
-    <div id="per-file-settings" class="per-file-settings"></div>
-    <button type="submit" class="btn-primary" id="btn">Обработать</button>
-  </form>
+    <div id="err-box" class="err-box" style="display:none">
+      <div id="err-msg" class="err-msg"></div>
+      <div id="err-hint" class="err-hint"></div>
+    </div>
 
-  <div id="status"></div>
-  <div id="batch-list" class="batch-list"></div>
-  <div id="progress-block">
-    <div class="progress-title">Шаги обработки</div>
-    <div class="progress-steps" id="progress-steps"></div>
-  </div>
-  <div id="err-box" class="err-box" style="display:none">
-    <div id="err-msg" class="err-msg"></div>
-    <div id="err-hint" class="err-hint"></div>
-  </div>
+    <div id="stats-block">
+      <div class="stats-title">Результат обработки</div>
+      <div class="stats-grid" id="stats-grid"></div>
+      <div class="stat-time" id="stat-time"></div>
+    </div>
 
-  <div id="stats-block">
-    <div class="stats-title">Результат обработки</div>
-    <div class="stats-grid" id="stats-grid"></div>
-    <div class="stat-time" id="stat-time"></div>
+    <a id="download" class="btn-success" href="#">Скачать результат</a>
+    <button id="btn-again" class="btn-ghost">Обработать ещё</button>
   </div>
 
-  <a  id="download" class="btn-success" href="#">Скачать результат</a>
-  <button id="btn-again" class="btn-ghost">Обработать ещё</button>
-
-  <div class="jobs-list">
-    <div class="jobs-title">Мои задачи</div>
-    <div id="my-jobs"></div>
+  <!-- History page -->
+  <div id="page-history" hidden>
+    <div class="h-header">
+      <span class="h-title">История задач</span>
+      <button class="btn-sm" id="refresh-history" type="button">Обновить</button>
+    </div>
+    <div class="h-wrap">
+      <table class="h-table">
+        <thead>
+          <tr>
+            <th>Сайт</th>
+            <th>Статус</th>
+            <th>Создана</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="4" class="h-empty">—</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
+
 <footer class="site-footer">made with &hearts; by Roman A. Proskurnin</footer>
 
 <div id="details-modal" class="modal-backdrop" hidden>
@@ -208,39 +265,47 @@ let authToken = localStorage.getItem(AUTH_KEY) || '';
 let currentUser = null;
 let authMode = 'login';
 
-const authCard = document.getElementById('auth-card');
-const appCard = document.getElementById('app-card');
-const authForm = document.getElementById('auth-form');
-const authBtn = document.getElementById('auth-btn');
-const authMsg = document.getElementById('auth-msg');
-const loginTab = document.getElementById('login-tab');
-const registerTab = document.getElementById('register-tab');
-const userEmailEl = document.getElementById('user-email');
-const logoutBtn = document.getElementById('logout-btn');
-const myJobsEl = document.getElementById('my-jobs');
-const form      = document.getElementById('form');
-const fileInput = document.getElementById('file');
-const commonEmailInput = document.getElementById('email');
+const authCard     = document.getElementById('auth-card');
+const appCard      = document.getElementById('app-card');
+const authForm     = document.getElementById('auth-form');
+const authBtn      = document.getElementById('auth-btn');
+const authMsg      = document.getElementById('auth-msg');
+const loginTab     = document.getElementById('login-tab');
+const registerTab  = document.getElementById('register-tab');
+const userEmailEl  = document.getElementById('user-email');
+const logoutBtn    = document.getElementById('logout-btn');
+
+const tabProcess     = document.getElementById('tab-process');
+const tabHistory     = document.getElementById('tab-history');
+const pageProcess    = document.getElementById('page-process');
+const pageHistory    = document.getElementById('page-history');
+const historyBody    = document.getElementById('history-body');
+const refreshHistory = document.getElementById('refresh-history');
+
+const form              = document.getElementById('form');
+const fileInput         = document.getElementById('file');
+const commonEmailInput  = document.getElementById('email');
 const commonEmailInfoBtn = document.getElementById('email_info_btn');
-const commonGaInput = document.getElementById('ga_measurement_id');
-const perFileToggle = document.getElementById('per-file-toggle');
-const perFileEnabled = document.getElementById('per_file_enabled');
-const perFileSettings = document.getElementById('per-file-settings');
-const btn       = document.getElementById('btn');
-const statusEl  = document.getElementById('status');
-const downloadEl = document.getElementById('download');
-const btnAgain  = document.getElementById('btn-again');
-const statsBlock = document.getElementById('stats-block');
-const statsGrid  = document.getElementById('stats-grid');
-const statTime   = document.getElementById('stat-time');
-const errBox    = document.getElementById('err-box');
-const errMsg    = document.getElementById('err-msg');
-const errHint   = document.getElementById('err-hint');
-const batchList = document.getElementById('batch-list');
-const detailsModal = document.getElementById('details-modal');
-const detailsTitle = document.getElementById('details-title');
-const detailsList  = document.getElementById('details-list');
-const detailsClose = document.getElementById('details-close');
+const commonGaInput     = document.getElementById('ga_measurement_id');
+const perFileToggle     = document.getElementById('per-file-toggle');
+const perFileEnabled    = document.getElementById('per_file_enabled');
+const perFileSettings   = document.getElementById('per-file-settings');
+const btn               = document.getElementById('btn');
+const statusEl          = document.getElementById('status');
+const downloadEl        = document.getElementById('download');
+const btnAgain          = document.getElementById('btn-again');
+const statsBlock        = document.getElementById('stats-block');
+const statsGrid         = document.getElementById('stats-grid');
+const statTime          = document.getElementById('stat-time');
+const errBox            = document.getElementById('err-box');
+const errMsg            = document.getElementById('err-msg');
+const errHint           = document.getElementById('err-hint');
+const batchList         = document.getElementById('batch-list');
+const progressBlock     = document.getElementById('progress-block');
+const detailsModal      = document.getElementById('details-modal');
+const detailsTitle      = document.getElementById('details-title');
+const detailsList       = document.getElementById('details-list');
+const detailsClose      = document.getElementById('details-close');
 
 let currentStats = null;
 let currentDownloadJobId = null;
@@ -248,6 +313,8 @@ let currentDownloadJobId = null;
 function authHeaders(extra = {}) {
   return authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
 }
+
+/* ── Auth ─────────────────────────────────────────────── */
 
 function setAuthMode(mode) {
   authMode = mode;
@@ -268,14 +335,11 @@ function showApp(user) {
   userEmailEl.textContent = user.email || '';
   authCard.hidden = true;
   appCard.hidden = false;
-  loadMyJobs();
+  switchPage('process');
 }
 
 async function initAuth() {
-  if (!authToken) {
-    showAuth();
-    return;
-  }
+  if (!authToken) { showAuth(); return; }
   const r = await fetch('/api/me', { headers: authHeaders() }).catch(() => null);
   if (!r || !r.ok) {
     localStorage.removeItem(AUTH_KEY);
@@ -313,10 +377,7 @@ authForm.addEventListener('submit', async event => {
   }
   const d = await r.json().catch(() => ({}));
   authBtn.disabled = false;
-  if (!r.ok) {
-    authMsg.textContent = d.detail || 'Не удалось войти';
-    return;
-  }
+  if (!r.ok) { authMsg.textContent = d.detail || 'Не удалось войти'; return; }
   authToken = d.token;
   localStorage.setItem(AUTH_KEY, authToken);
   showApp(d.user);
@@ -330,14 +391,42 @@ logoutBtn.addEventListener('click', async () => {
   showAuth();
 });
 
+/* ── Page tabs ────────────────────────────────────────── */
+
+function switchPage(page) {
+  const isHistory = page === 'history';
+  pageProcess.hidden = isHistory;
+  pageHistory.hidden = !isHistory;
+  tabProcess.classList.toggle('active', !isHistory);
+  tabHistory.classList.toggle('active', isHistory);
+  appCard.classList.toggle('wide', isHistory);
+  if (isHistory) loadHistory();
+}
+
+tabProcess.addEventListener('click', () => switchPage('process'));
+tabHistory.addEventListener('click', () => switchPage('history'));
+refreshHistory.addEventListener('click', loadHistory);
+
+/* ── Helpers ──────────────────────────────────────────── */
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]));
+}
+
+function statusLabel(s) {
+  return { pending: 'ожидание', running: 'обработка', done: 'готово', error: 'ошибка' }[s] || s || 'ожидание';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
 }
 
 const STEPS = [
@@ -377,14 +466,12 @@ function renderProgress(completedSteps) {
 
 function setStatus(text, spinning, isErr) {
   statusEl.className = isErr ? 'err' : '';
-  statusEl.innerHTML = spinning
-    ? `<span class="spinner"></span>${text}`
-    : text;
+  statusEl.innerHTML = spinning ? `<span class="spinner"></span>${text}` : text;
 }
 
-function selectedFiles() {
-  return Array.from(fileInput.files || []);
-}
+/* ── Per-file settings ────────────────────────────────── */
+
+function selectedFiles() { return Array.from(fileInput.files || []); }
 
 function domainFromZipName(filename) {
   return String(filename || '').replace(/\.zip$/i, '').trim();
@@ -404,15 +491,12 @@ function renderPerFileSettings() {
   const files = selectedFiles();
   const showToggle = files.length > 1;
   perFileToggle.style.display = showToggle ? 'flex' : 'none';
-  if (!showToggle) {
-    perFileEnabled.checked = false;
-  }
+  if (!showToggle) perFileEnabled.checked = false;
   if (!showToggle || !perFileEnabled.checked) {
     perFileSettings.style.display = 'none';
     perFileSettings.innerHTML = '';
     return;
   }
-
   const commonEmail = commonEmailInput.value.trim();
   const commonGa = commonGaInput.value.trim().toUpperCase();
   perFileSettings.innerHTML = files.map((file, index) => `
@@ -447,6 +531,8 @@ fileInput.addEventListener('change', renderPerFileSettings);
 perFileEnabled.addEventListener('change', renderPerFileSettings);
 commonEmailInfoBtn.addEventListener('click', fillCommonInfoEmail);
 
+/* ── Form submit & polling ────────────────────────────── */
+
 form.addEventListener('submit', async e => {
   e.preventDefault();
   btn.disabled = true;
@@ -476,7 +562,7 @@ form.addEventListener('submit', async e => {
   }
 
   const body = await resp.json();
-  const jobs = body.jobs || [{ job_id: body.job_id, filename: document.getElementById('file').files[0]?.name || 'archive.zip' }];
+  const jobs = body.jobs || [{ job_id: body.job_id, filename: fileInput.files[0]?.name || 'archive.zip' }];
   if (jobs.length > 1) {
     setStatus(`Поставлено в обработку: ${jobs.length}`, true, false);
     batchList.style.display = 'block';
@@ -497,9 +583,6 @@ form.addEventListener('submit', async e => {
     poll(jobs[0].job_id, { batch: false });
   }
 });
-
-const progressBlock = document.getElementById('progress-block');
-
 
 async function poll(jobId, opts = {}) {
   const isBatch = Boolean(opts.batch);
@@ -533,7 +616,7 @@ async function poll(jobId, opts = {}) {
         state.dataset.status = 'done';
         row.lastElementChild.innerHTML = `<button class="link-btn batch-link" type="button" data-download-job="${jobId}">скачать</button>`;
         row.lastElementChild.querySelector('button').addEventListener('click', () => downloadJob(jobId));
-        loadMyJobs();
+        loadHistory();
         finishBatchIfDone();
       } else {
         setStatus('', false, false);
@@ -544,7 +627,7 @@ async function poll(jobId, opts = {}) {
         downloadEl.style.display = 'block';
         btnAgain.style.display = 'block';
         btn.disabled = false;
-        loadMyJobs();
+        loadHistory();
       }
     } else if (data.status === 'error') {
       clearInterval(interval);
@@ -564,50 +647,6 @@ async function poll(jobId, opts = {}) {
   }, 2000);
 }
 
-async function downloadJob(jobId) {
-  const r = await fetch(`/api/jobs/${jobId}/download`, { headers: authHeaders() });
-  if (!r.ok) {
-    setStatus('Не удалось скачать результат', false, true);
-    return;
-  }
-  const blob = await r.blob();
-  const disposition = r.headers.get('content-disposition') || '';
-  const match = disposition.match(/filename="([^"]+)"/);
-  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}.zip`;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-async function downloadJobReport(jobId) {
-  const r = await fetch(`/api/jobs/${jobId}/report`, { headers: authHeaders() });
-  if (!r.ok) {
-    setStatus('Не удалось скачать отчёт', false, true);
-    return;
-  }
-  const blob = await r.blob();
-  const disposition = r.headers.get('content-disposition') || '';
-  const match = disposition.match(/filename="([^"]+)"/);
-  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}_processing_report.json`;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function statusLabel(s) {
-  return { pending: 'ожидание', running: 'обработка', done: 'готово', error: 'ошибка' }[s] || s || 'ожидание';
-}
-
 function finishBatchIfDone() {
   const states = [...batchList.querySelectorAll('.batch-state')].map(el => el.dataset.status || el.textContent);
   const done = states.every(text => text === 'done' || text === 'готово' || text === 'error' || text.includes('ошибка'));
@@ -617,13 +656,53 @@ function finishBatchIfDone() {
   btn.disabled = false;
 }
 
+/* ── Downloads ────────────────────────────────────────── */
+
+async function downloadJob(jobId) {
+  const r = await fetch(`/api/jobs/${jobId}/download`, { headers: authHeaders() });
+  if (!r.ok) { setStatus('Не удалось скачать результат', false, true); return; }
+  const blob = await r.blob();
+  const disposition = r.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}.zip`;
+  triggerDownload(blob, filename);
+}
+
+async function downloadJobReport(jobId) {
+  const r = await fetch(`/api/jobs/${jobId}/report`, { headers: authHeaders() });
+  if (!r.ok) { setStatus('Не удалось скачать отчёт', false, true); return; }
+  const blob = await r.blob();
+  const disposition = r.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : `detilda_${jobId.slice(0, 8)}_processing_report.json`;
+  triggerDownload(blob, filename);
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+downloadEl.addEventListener('click', event => {
+  event.preventDefault();
+  if (currentDownloadJobId) downloadJob(currentDownloadJobId);
+});
+
+/* ── Error display ────────────────────────────────────── */
+
 const ERROR_HINTS = {
-  invalid_zip:    'Скачайте архив заново через Tilda: Настройки сайта → Экспорт → Скачать.',
-  empty_archive:  'Убедитесь что экспортировали полный сайт, а не отдельную страницу.',
-  unpack_failed:  'Проверьте что загружен ZIP-экспорт Tilda, а не другой архив.',
-  pipeline_error: 'Попробуйте загрузить архив снова. Если ошибка повторяется — обратитесь в поддержку.',
+  invalid_zip:          'Скачайте архив заново через Tilda: Настройки сайта → Экспорт → Скачать.',
+  empty_archive:        'Убедитесь что экспортировали полный сайт, а не отдельную страницу.',
+  unpack_failed:        'Проверьте что загружен ZIP-экспорт Tilda, а не другой архив.',
+  pipeline_error:       'Попробуйте загрузить архив снова. Если ошибка повторяется — обратитесь в поддержку.',
   zero_form_smoke_failed: 'Архив не выдан, потому что zero-block runtime выглядит некорректным.',
-  unknown:        'Попробуйте позже или обратитесь в поддержку.',
+  unknown:              'Попробуйте позже или обратитесь в поддержку.',
 };
 
 function showError(msg, code) {
@@ -637,6 +716,8 @@ function jobErrorText(job) {
   const hint = ERROR_HINTS[job?.error_code] || '';
   return hint ? `${message} ${hint}` : message;
 }
+
+/* ── Stats ────────────────────────────────────────────── */
 
 function showStats(s) {
   if (!s) return;
@@ -664,18 +745,17 @@ function showStats(s) {
       }
     });
   });
-  if (s.exec_time) {
-    statTime.textContent = `Время обработки: ${s.exec_time} сек`;
-  }
+  if (s.exec_time) statTime.textContent = `Время обработки: ${s.exec_time} сек`;
   statsBlock.style.display = 'block';
 }
+
+/* ── Details modal ────────────────────────────────────── */
 
 function openDetails(key) {
   const detail = currentStats?.details?.[key] || {};
   const items = Array.isArray(detail.items) && detail.items.length
     ? detail.items
     : ['Подробной информации для этого поля нет.'];
-
   detailsTitle.textContent = detail.title || 'Детали';
   detailsList.innerHTML = '';
   items.forEach(item => {
@@ -724,7 +804,6 @@ function renderJobDetails(job) {
   const title = job.domain || job.id?.slice(0, 8) || 'Задача';
   detailsTitle.textContent = `Детали: ${title}`;
   detailsList.innerHTML = '';
-
   addDetailItems('Сводка', [
     `ID: ${job.id}`,
     `Статус: ${statusLabel(job.status)}`,
@@ -732,26 +811,21 @@ function renderJobDetails(job) {
     `Создана: ${job.created_at || 'нет данных'}`,
     `Завершена: ${job.finished_at || 'нет данных'}`,
   ]);
-
   if (job.error || job.error_code) {
     addDetailItems('Ошибка', [
       `Код: ${job.error_code || 'unknown'}`,
       jobErrorText(job),
     ]);
   }
-
   const validationItems = job.validation_details?.items || job.stats?.details?.validation?.items || [];
   addDetailItems('Валидация архива', validationItems.length ? validationItems : ['Деталей валидации нет.']);
-
   const progressItems = (job.progress || []).map(stepId => {
     const step = STEPS.find(item => item.id === stepId);
     return step ? step.label : stepId;
   });
   addDetailItems('Этапы pipeline', progressItems.length ? progressItems : ['Pipeline еще не начал выполняться.']);
-
   addDetailItems('Предупреждения', statsDetailItems(job, 'warnings', ['Предупреждений нет.']));
   addDetailItems('Ошибки', statsDetailItems(job, 'errors', ['Ошибок нет.']));
-
   detailsModal.hidden = false;
   detailsClose.focus();
 }
@@ -762,7 +836,6 @@ async function openJobDetails(jobId) {
   detailsList.appendChild(detailItem('Загрузка деталей…'));
   detailsModal.hidden = false;
   detailsClose.focus();
-
   const r = await fetch(`/api/jobs/${jobId}`, { headers: authHeaders() }).catch(() => null);
   if (!r || !r.ok) {
     detailsList.innerHTML = '';
@@ -772,17 +845,15 @@ async function openJobDetails(jobId) {
   renderJobDetails(await r.json());
 }
 
-function closeDetails() {
-  detailsModal.hidden = true;
-}
+function closeDetails() { detailsModal.hidden = true; }
 
 detailsClose.addEventListener('click', closeDetails);
-detailsModal.addEventListener('click', event => {
-  if (event.target === detailsModal) closeDetails();
-});
+detailsModal.addEventListener('click', event => { if (event.target === detailsModal) closeDetails(); });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !detailsModal.hidden) closeDetails();
 });
+
+/* ── Обработать ещё ───────────────────────────────────── */
 
 btnAgain.addEventListener('click', () => {
   form.reset();
@@ -800,52 +871,62 @@ btnAgain.addEventListener('click', () => {
   setStatus('', false, false);
 });
 
-downloadEl.addEventListener('click', event => {
-  event.preventDefault();
-  if (currentDownloadJobId) downloadJob(currentDownloadJobId);
-});
+/* ── History page ─────────────────────────────────────── */
 
-async function loadMyJobs() {
+async function loadHistory() {
   if (!authToken) return;
+  historyBody.innerHTML = '<tr><td colspan="4" class="h-empty">Загрузка…</td></tr>';
   const r = await fetch('/api/jobs', { headers: authHeaders() }).catch(() => null);
-  if (!r || !r.ok) return;
+  if (!r || !r.ok) {
+    historyBody.innerHTML = '<tr><td colspan="4" class="h-empty">Не удалось загрузить историю.</td></tr>';
+    return;
+  }
   const d = await r.json();
   const items = d.items || [];
   if (!items.length) {
-    myJobsEl.innerHTML = '<div class="job-status">Задач пока нет.</div>';
+    historyBody.innerHTML = '<tr><td colspan="4" class="h-empty">Задач пока нет.</td></tr>';
     return;
   }
-  myJobsEl.innerHTML = items.slice(0, 10).map(job => {
+  historyBody.innerHTML = items.map(job => {
     const domain = job.domain || job.id.slice(0, 8);
-    const action = job.status === 'done'
-      ? `<button class="link-btn batch-link" type="button" data-download-job="${job.id}">скачать</button>`
+    const showFile = job.filename && job.filename.replace(/\.zip$/i, '') !== domain;
+    const dlBtn = job.status === 'done'
+      ? `<button class="action-link dl" type="button" data-download-job="${job.id}">скачать</button>`
       : '';
-    const error = job.status === 'error'
-      ? `<div class="job-error">${escapeHtml(jobErrorText(job))}</div>`
+    const badgeIcon = job.status === 'running' ? '<span class="badge-spin"></span>' : '';
+    const errLine = job.status === 'error' && job.error
+      ? `<div class="site-err" title="${escapeHtml(job.error)}">${escapeHtml(job.error.length > 55 ? job.error.slice(0, 55) + '…' : job.error)}</div>`
       : '';
-    return `<div class="job-row">
-      <div>
-        <div class="job-meta">${escapeHtml(domain)}</div>
-        <div class="job-status">${escapeHtml(statusLabel(job.status))}</div>
-        ${error}
-      </div>
-      <div class="job-actions">
-        <button class="link-btn batch-link" type="button" data-job-details="${job.id}">детали</button>
-        <button class="link-btn batch-link" type="button" data-job-report="${job.id}">отчёт</button>
-        ${action}
-      </div>
-    </div>`;
+    return `<tr>
+      <td class="col-site">
+        <div class="site-name" title="${escapeHtml(domain)}">${escapeHtml(domain)}</div>
+        ${showFile ? `<div class="site-file">${escapeHtml(job.filename)}</div>` : ''}
+        ${errLine}
+      </td>
+      <td><span class="badge badge-${escapeHtml(job.status || 'pending')}">${badgeIcon}${statusLabel(job.status)}</span></td>
+      <td class="col-date">${escapeHtml(formatDate(job.created_at))}</td>
+      <td class="col-actions">
+        <div class="action-links">
+          ${dlBtn}
+          <button class="action-link" type="button" data-job-details="${job.id}">детали</button>
+          <button class="action-link" type="button" data-job-report="${job.id}">отчёт</button>
+        </div>
+      </td>
+    </tr>`;
   }).join('');
-  myJobsEl.querySelectorAll('[data-download-job]').forEach(btn => {
-    btn.addEventListener('click', () => downloadJob(btn.dataset.downloadJob));
+
+  historyBody.querySelectorAll('[data-download-job]').forEach(b => {
+    b.addEventListener('click', () => downloadJob(b.dataset.downloadJob));
   });
-  myJobsEl.querySelectorAll('[data-job-details]').forEach(btn => {
-    btn.addEventListener('click', () => openJobDetails(btn.dataset.jobDetails));
+  historyBody.querySelectorAll('[data-job-details]').forEach(b => {
+    b.addEventListener('click', () => openJobDetails(b.dataset.jobDetails));
   });
-  myJobsEl.querySelectorAll('[data-job-report]').forEach(btn => {
-    btn.addEventListener('click', () => downloadJobReport(btn.dataset.jobReport));
+  historyBody.querySelectorAll('[data-job-report]').forEach(b => {
+    b.addEventListener('click', () => downloadJobReport(b.dataset.jobReport));
   });
 }
+
+/* ── Boot ─────────────────────────────────────────────── */
 
 initAuth();
 </script>
