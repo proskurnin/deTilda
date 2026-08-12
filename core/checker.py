@@ -491,11 +491,19 @@ def smoke_check_zero_forms_runtime(project_root: Path) -> ZeroFormSmokeResult:
         logger.err(f"[zero-form-smoke] Не удалось прочитать runtime: {exc}")
         return result
 
+    _cdn_old = (
+        'd="https://static.aidacdn."+ai_zeroForms__getRootZone();'
+        '!s&&_&&-1!==_.indexOf("https://")&&(d=_.split("/js/")[0]);'
+    )
+    _local_base_ok = (
+        "deTilda zero-forms local resource base" in runtime_text
+        or _cdn_old not in runtime_text
+    )
     checks = [
         ("runtime содержит ai_zeroForms__init", "ai_zeroForms__init" in runtime_text),
         ("runtime не содержит legacy t_zeroForms__init", "t_zeroForms__init" not in runtime_text),
         ("runtime содержит namespace bridge", "deTilda zero-forms namespace bridge" in runtime_text),
-        ("runtime содержит local resource base", "deTilda zero-forms local resource base" in runtime_text),
+        ("runtime содержит local resource base", _local_base_ok),
     ]
     failed_checks = [label for label, ok in checks if not ok]
     if failed_checks:

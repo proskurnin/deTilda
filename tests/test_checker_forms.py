@@ -145,6 +145,48 @@ def test_zero_form_smoke_passes_rewritten_runtime(tmp_path: Path) -> None:
     assert result.failed is False
 
 
+def test_zero_form_smoke_passes_runtime_without_cdn_pattern(tmp_path: Path) -> None:
+    """Runtime without the specific CDN URL pattern should not require the local resource base marker."""
+    (tmp_path / "index.html").write_text(
+        '<html><body><script>ai_zeroForms__init("123")</script></body></html>',
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "js" / "aida-zero-forms-1.0.min.js"
+    runtime.parent.mkdir()
+    runtime.write_text(
+        "function ai_zeroForms__init(){}"
+        "/* deTilda zero-forms namespace bridge */",
+        encoding="utf-8",
+    )
+
+    result = smoke_check_zero_forms_runtime(tmp_path)
+
+    assert result.checked is True
+    assert result.failed is False
+
+
+def test_zero_form_smoke_fails_unpatched_cdn_pattern(tmp_path: Path) -> None:
+    """Runtime that still has the old CDN URL but no local resource base marker must fail."""
+    (tmp_path / "index.html").write_text(
+        '<html><body><script>ai_zeroForms__init("123")</script></body></html>',
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "js" / "aida-zero-forms-1.0.min.js"
+    runtime.parent.mkdir()
+    runtime.write_text(
+        "function ai_zeroForms__init(){}"
+        "/* deTilda zero-forms namespace bridge */"
+        'd="https://static.aidacdn."+ai_zeroForms__getRootZone();'
+        '!s&&_&&-1!==_.indexOf("https://")&&(d=_.split("/js/")[0]);',
+        encoding="utf-8",
+    )
+
+    result = smoke_check_zero_forms_runtime(tmp_path)
+
+    assert result.checked is True
+    assert result.failed is True
+
+
 def test_zero_form_smoke_fails_invalid_runtime(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text(
         '<html><body><script>ai_zeroForms__init("123")</script></body></html>',
