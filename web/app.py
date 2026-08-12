@@ -878,3 +878,74 @@ async def admin_cleanup(_: AdminAuth) -> dict:
         shutil.rmtree(_WORKDIR / job_id, ignore_errors=True)
     removed_logs = _cleanup_old_logs(_LOGS_DIR, cfg.log_ttl_days)
     return {"removed_jobs": len(expired_ids), "removed_logs": removed_logs}
+
+
+@app.get("/admin/api/users")
+async def admin_list_users(_: AdminAuth) -> dict:
+    users = _USER_STORE.list_users()
+    items = []
+    for user in users:
+        items.append({
+            **user.to_dict(),
+            "job_count": len(_STORE.list_for_user(user.id)),
+            "session_count": _USER_STORE.get_user_session_count(user.id),
+        })
+    return {"items": items}
+
+
+@app.post("/admin/api/users", status_code=201)
+async def admin_create_user(_: AdminAuth, body: dict = Body(...)) -> dict:
+    email = str(body.get("email", ""))
+    password = str(body.get("password", ""))
+    role = str(body.get("role", "user"))
+    try:
+        user = _USER_STORE.create_user(email=email, password=password, role=role)
+    except ValueError as exc:
+        code = str(exc)
+        messages = {
+            "invalid_email": "Введите корректный email.",
+            "weak_password": "Пароль должен быть не короче 8 символов.",
+            "email_exists": "Пользователь с таким email уже зарегистрирован.",
+            "invalid_role": "Роль должна быть 'user' или 'admin'.",
+        }
+        status = 409 if code == "email_exists" else 422
+        raise HTTPException(status_code=status, detail=messages.get(code, "Ошибка создания пользователя."))
+    return user.to_dict()
+
+
+@app.patch("/admin/api/users/{user_id}/role")
+async def admin_set_user_role(user_id: str, _: AdminAuth, body: dict = Body(...)) -> dict:
+    role = str(body.get("role", ""))
+    if role not in {"user", "admin"}:
+        raise HTTPException(status_code=422, detail="Роль должна быть 'user' или 'admin'")
+    user = _USER_STORE.set_role(user_id, role)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user.to_dict()
+
+
+@app.post("/admin/api/users/{user_id}/password")
+async def admin_set_user_password(user_id: str, _: AdminAuth, body: dict = Body(...)) -> dict:
+    password = str(body.get("password", ""))
+    try:
+        ok = _USER_STORE.set_password(user_id, password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"ok": True}
+
+
+@app.post("/admin/api/users/{user_id}/revoke-sessions")
+async def admin_revoke_user_sessions(user_id: str, _: AdminAuth) -> dict:
+    count = _USER_STORE.revoke_all_sessions(user_id)
+    return {"ok": True, "revoked": count}
+
+
+@app.delete("/admin/api/users/{user_id}", status_code=200)
+async def admin_delete_user(user_id: str, _: AdminAuth) -> dict:
+    revoked = _USER_STORE.revoke_all_sessions(user_id)
+    deleted = _USER_STORE.delete_user(user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"ok": True, "revoked_sessions": revoked}

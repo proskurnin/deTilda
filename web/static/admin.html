@@ -88,6 +88,19 @@
   .collapse-toggle { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; min-width: 118px; }
   .collapse-toggle:hover { background: #e5e7eb; }
   [hidden] { display: none !important; }
+  .role-select { border: 1px solid #d1d5db; border-radius: 6px; padding: .22rem .4rem; font-size: .8rem; background: #fff; color: #374151; cursor: pointer; }
+  .btn-xs { padding: .22rem .5rem; font-size: .78rem; border-radius: 5px; }
+  .user-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; padding: 1rem 1.25rem; }
+  .user-form-field { display: flex; flex-direction: column; gap: .28rem; }
+  .user-form-field label { font-size: .75rem; color: #6b7280; font-weight: 500; }
+  .user-form-field input, .user-form-field select { border: 1px solid #d1d5db; border-radius: 6px; padding: .42rem .55rem; font-size: .9rem; background: #fff; }
+  .user-form-actions { padding: .6rem 1.25rem 1rem; display: flex; align-items: center; gap: .6rem; border-top: 1px solid #f1f5f9; }
+  .modal-form { display: grid; gap: .7rem; padding: 1rem; background: #fff; }
+  .modal-form label { font-size: .78rem; color: #6b7280; font-weight: 500; display: block; margin-bottom: .2rem; }
+  .modal-form input, .modal-form select { width: 100%; border: 1px solid #d1d5db; border-radius: 7px; padding: .5rem .65rem; font-size: .92rem; background: #fff; }
+  .modal-form input:focus, .modal-form select:focus { outline: 2px solid #2563eb; border-color: transparent; }
+  .modal-form-actions { display: flex; align-items: center; gap: .6rem; padding-top: .25rem; }
+  .modal-err { font-size: .8rem; color: #dc2626; min-height: 1.1rem; }
 </style>
 </head>
 <body>
@@ -167,6 +180,24 @@ window._ADMIN_USER = __ADMIN_USER_JSON__;
     </div>
   </div>
 
+  <!-- Users -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Пользователи <span id="users-count" style="font-size:.8rem;color:#6b7280;font-weight:400"></span></h2>
+      <div class="actions">
+        <button class="btn-primary" id="btn-create-user" type="button">Создать</button>
+        <button class="btn-ghost" id="btn-refresh-users" type="button">Обновить</button>
+        <span id="users-msg" class="msg"></span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Email</th><th>Роль</th><th>Задач</th><th>Сессий</th><th>Зарегистрирован</th><th>Действия</th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Jobs -->
   <div class="card">
     <div class="card-head">
@@ -198,6 +229,63 @@ window._ADMIN_USER = __ADMIN_USER_JSON__;
     </div>
   </div>
 </main>
+
+<div id="create-user-modal" class="modal-backdrop" hidden>
+  <div class="modal" style="max-width:440px" role="dialog" aria-modal="true" aria-labelledby="cu-modal-title">
+    <div class="modal-head">
+      <div id="cu-modal-title" class="modal-title">Создать пользователя</div>
+      <button id="cu-modal-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-body" style="background:#fff">
+      <form id="create-user-form" class="modal-form" onsubmit="return false">
+        <div>
+          <label for="cu-email">Email</label>
+          <input id="cu-email" type="email" autocomplete="off" placeholder="user@example.com" required>
+        </div>
+        <div>
+          <label for="cu-password">Пароль (минимум 8 символов)</label>
+          <input id="cu-password" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div>
+          <label for="cu-role">Роль</label>
+          <select id="cu-role">
+            <option value="user">user — обычный пользователь</option>
+            <option value="admin">admin — администратор</option>
+          </select>
+        </div>
+        <div class="modal-form-actions">
+          <button class="btn-primary" id="cu-submit" type="submit">Создать</button>
+          <span id="cu-msg" class="modal-err"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="reset-pw-modal" class="modal-backdrop" hidden>
+  <div class="modal" style="max-width:400px" role="dialog" aria-modal="true" aria-labelledby="rp-modal-title">
+    <div class="modal-head">
+      <div id="rp-modal-title" class="modal-title">Сброс пароля</div>
+      <button id="rp-modal-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-body" style="background:#fff">
+      <form id="reset-pw-form" class="modal-form" onsubmit="return false">
+        <div>
+          <label>Пользователь</label>
+          <input id="rp-email-display" type="text" readonly style="background:#f8fafc;color:#6b7280">
+        </div>
+        <div>
+          <label for="rp-password">Новый пароль (минимум 8 символов)</label>
+          <input id="rp-password" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="modal-form-actions">
+          <button class="btn-primary" id="rp-submit" type="submit">Сохранить</button>
+          <span id="rp-msg" class="modal-err"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <div id="log-modal" class="modal-backdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="log-title">
@@ -408,16 +496,6 @@ function showError(msg) {
   setTimeout(() => { b.style.display = 'none'; }, 6000);
 }
 
-async function refresh() {
-  if (!window._AUTH) {
-    showLogin();
-    return;
-  }
-  await Promise.all([loadStats(), loadJobs()]);
-  document.getElementById('last-refresh').textContent =
-    'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
-}
-
 document.getElementById('auth-form').addEventListener('submit', async event => {
   event.preventDefault();
   const username = document.getElementById('auth-user').value.trim();
@@ -435,7 +513,7 @@ document.getElementById('auth-form').addEventListener('submit', async event => {
     return;
   }
   hideLogin();
-  await refresh();
+  await refreshAll();
 });
 
 document.getElementById('btn-logout').addEventListener('click', () => {
@@ -443,7 +521,7 @@ document.getElementById('btn-logout').addEventListener('click', () => {
   showLogin();
 });
 
-document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('btn-refresh').addEventListener('click', refreshAll);
 document.getElementById('security-toggle').addEventListener('click', () => {
   const panel = document.getElementById('security-panel');
   const toggle = document.getElementById('security-toggle');
@@ -531,10 +609,194 @@ document.getElementById('btn-cleanup').addEventListener('click', async () => {
   await refresh();
 });
 
-if (window._AUTH) refresh();
+/* ── Users ─────────────────────────────────────────────── */
+
+let _rpUserId = null;
+
+async function loadUsers() {
+  const r = await authFetch('/admin/api/users');
+  if (r.status === 401) { clearAuth(); showLogin('Неверный логин или пароль'); return; }
+  if (!r.ok) return;
+  const data = await r.json();
+  const users = data.items || [];
+  document.getElementById('users-count').textContent = `(${users.length})`;
+  const tbody = document.getElementById('users-body');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:1.5rem">Нет пользователей</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(u => `
+    <tr data-user-id="${escapeHtml(u.id)}">
+      <td style="font-size:.84rem">${escapeHtml(u.email)}</td>
+      <td>
+        <select class="role-select" data-role-for="${escapeHtml(u.id)}">
+          <option value="user"${u.role === 'user' ? ' selected' : ''}>user</option>
+          <option value="admin"${u.role === 'admin' ? ' selected' : ''}>admin</option>
+        </select>
+        <button class="btn-ghost btn-xs" style="margin-left:.3rem" data-save-role="${escapeHtml(u.id)}" title="Сохранить роль">✓</button>
+      </td>
+      <td style="color:#6b7280;font-size:.82rem">${u.job_count}</td>
+      <td style="color:#6b7280;font-size:.82rem">${u.session_count}</td>
+      <td style="color:#6b7280;font-size:.8rem;white-space:nowrap">${fmt(u.created_at)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-ghost btn-xs" data-revoke-sessions="${escapeHtml(u.id)}" title="Разлогинить на всех устройствах">Выйти везде</button>
+        <button class="btn-ghost btn-xs" style="margin-left:.3rem" data-reset-pw="${escapeHtml(u.id)}" data-reset-pw-email="${escapeHtml(u.email)}" title="Сбросить пароль">Пароль</button>
+        <button class="btn-danger btn-xs" style="margin-left:.3rem" data-delete-user="${escapeHtml(u.id)}" data-delete-email="${escapeHtml(u.email)}" title="Удалить пользователя">Удалить</button>
+      </td>
+    </tr>`).join('');
+
+  tbody.querySelectorAll('[data-save-role]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const userId = btn.dataset.saveRole;
+      const sel = tbody.querySelector(`[data-role-for="${userId}"]`);
+      const role = sel ? sel.value : 'user';
+      const r = await authFetch(`/admin/api/users/${userId}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      if (r.ok) {
+        showMsg('users-msg', `Роль обновлена`, 'msg-ok');
+      } else {
+        const d = await r.json().catch(() => ({}));
+        showMsg('users-msg', d.detail || 'Ошибка', 'msg-err');
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-revoke-sessions]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const userId = btn.dataset.revokeSessions;
+      const r = await authFetch(`/admin/api/users/${userId}/revoke-sessions`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        showMsg('users-msg', `Сессий отозвано: ${d.revoked}`, 'msg-ok');
+        await loadUsers();
+      } else {
+        showMsg('users-msg', d.detail || 'Ошибка', 'msg-err');
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-reset-pw]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _rpUserId = btn.dataset.resetPw;
+      document.getElementById('rp-email-display').value = btn.dataset.resetPwEmail || '';
+      document.getElementById('rp-password').value = '';
+      document.getElementById('rp-msg').textContent = '';
+      document.getElementById('reset-pw-modal').hidden = false;
+      document.getElementById('rp-password').focus();
+    });
+  });
+
+  tbody.querySelectorAll('[data-delete-user]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const email = btn.dataset.deleteEmail || btn.dataset.deleteUser;
+      if (!confirm(`Удалить пользователя ${email}?\n\nВсе сессии будут отозваны. Задачи останутся в базе.`)) return;
+      const r = await authFetch(`/admin/api/users/${btn.dataset.deleteUser}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        showMsg('users-msg', `Пользователь удалён`, 'msg-ok');
+        await loadUsers();
+      } else {
+        showMsg('users-msg', d.detail || 'Ошибка', 'msg-err');
+      }
+    });
+  });
+}
+
+// Create user modal
+document.getElementById('btn-create-user').addEventListener('click', () => {
+  document.getElementById('cu-email').value = '';
+  document.getElementById('cu-password').value = '';
+  document.getElementById('cu-role').value = 'user';
+  document.getElementById('cu-msg').textContent = '';
+  document.getElementById('create-user-modal').hidden = false;
+  document.getElementById('cu-email').focus();
+});
+
+function closeCreateUserModal() {
+  document.getElementById('create-user-modal').hidden = true;
+}
+document.getElementById('cu-modal-close').addEventListener('click', closeCreateUserModal);
+document.getElementById('create-user-modal').addEventListener('click', e => {
+  if (e.target.id === 'create-user-modal') closeCreateUserModal();
+});
+
+document.getElementById('create-user-form').addEventListener('submit', async () => {
+  const email = document.getElementById('cu-email').value.trim();
+  const password = document.getElementById('cu-password').value;
+  const role = document.getElementById('cu-role').value;
+  const submit = document.getElementById('cu-submit');
+  submit.disabled = true;
+  const r = await authFetch('/admin/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, role }),
+  });
+  const d = await r.json().catch(() => ({}));
+  submit.disabled = false;
+  if (!r.ok) {
+    document.getElementById('cu-msg').textContent = d.detail || 'Ошибка';
+    return;
+  }
+  closeCreateUserModal();
+  showMsg('users-msg', `Пользователь создан: ${email}`, 'msg-ok');
+  await loadUsers();
+});
+
+// Reset password modal
+function closeResetPwModal() {
+  document.getElementById('reset-pw-modal').hidden = true;
+  _rpUserId = null;
+}
+document.getElementById('rp-modal-close').addEventListener('click', closeResetPwModal);
+document.getElementById('reset-pw-modal').addEventListener('click', e => {
+  if (e.target.id === 'reset-pw-modal') closeResetPwModal();
+});
+
+document.getElementById('reset-pw-form').addEventListener('submit', async () => {
+  if (!_rpUserId) return;
+  const password = document.getElementById('rp-password').value;
+  const submit = document.getElementById('rp-submit');
+  submit.disabled = true;
+  const r = await authFetch(`/admin/api/users/${_rpUserId}/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  const d = await r.json().catch(() => ({}));
+  submit.disabled = false;
+  if (!r.ok) {
+    document.getElementById('rp-msg').textContent = d.detail || 'Ошибка';
+    return;
+  }
+  closeResetPwModal();
+  showMsg('users-msg', 'Пароль обновлён', 'msg-ok');
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (!document.getElementById('create-user-modal').hidden) closeCreateUserModal();
+    if (!document.getElementById('reset-pw-modal').hidden) closeResetPwModal();
+  }
+});
+
+document.getElementById('btn-refresh-users').addEventListener('click', loadUsers);
+
+/* ── Boot ──────────────────────────────────────────────── */
+
+async function refreshAll() {
+  if (!window._AUTH) { showLogin(); return; }
+  await Promise.all([loadStats(), loadJobs(), loadUsers()]);
+  document.getElementById('last-refresh').textContent =
+    'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
+}
+
+if (window._AUTH) refreshAll();
 else showLogin();
 setInterval(() => {
-  if (window._AUTH) refresh();
+  if (window._AUTH) refreshAll();
 }, 15000);
 </script>
 </body>

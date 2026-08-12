@@ -172,3 +172,54 @@ class UserStore:
         self._ensure_db()
         with self._lock, sqlite3.connect(self._db_path) as con:
             con.execute("DELETE FROM sessions WHERE token_hash = ?", (self._hash_token(token),))
+
+    def list_users(self) -> list[User]:
+        self._ensure_db()
+        with sqlite3.connect(self._db_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+        return [self._row_to_user(row) for row in rows]
+
+    def get_user_session_count(self, user_id: str) -> int:
+        self._ensure_db()
+        with sqlite3.connect(self._db_path) as con:
+            row = con.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return row[0] if row else 0
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        self._ensure_db()
+        with self._lock, sqlite3.connect(self._db_path) as con:
+            cur = con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        return cur.rowcount
+
+    def delete_user(self, user_id: str) -> bool:
+        self._ensure_db()
+        with self._lock, sqlite3.connect(self._db_path) as con:
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            cur = con.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cur.rowcount > 0
+
+    def set_role(self, user_id: str, role: str) -> User | None:
+        if role not in {"user", "admin"}:
+            raise ValueError("invalid_role")
+        self._ensure_db()
+        with self._lock, sqlite3.connect(self._db_path) as con:
+            con.row_factory = sqlite3.Row
+            cur = con.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+            if cur.rowcount == 0:
+                return None
+            row = con.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return self._row_to_user(row) if row else None
+
+    def set_password(self, user_id: str, password: str) -> bool:
+        if len(password) < 8:
+            raise ValueError("weak_password")
+        self._ensure_db()
+        with self._lock, sqlite3.connect(self._db_path) as con:
+            cur = con.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (self._hash_password(password), user_id),
+            )
+        return cur.rowcount > 0
