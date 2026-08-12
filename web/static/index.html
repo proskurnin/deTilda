@@ -6,7 +6,31 @@
 <title>deTilda</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
+  body { font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* App header */
+  .app-header { background: #1e293b; color: #fff; height: 48px; padding: 0 1.25rem; display: flex; align-items: center; gap: 1rem; position: sticky; top: 0; z-index: 10; flex-shrink: 0; }
+  .brand { font-size: 1.1rem; font-weight: 700; color: #fff; text-decoration: none; letter-spacing: -.01em; }
+  .main-nav { display: flex; gap: .25rem; }
+  .nav-btn { background: transparent; border: 0; color: rgba(255,255,255,.65); padding: .35rem .75rem; border-radius: 6px; font-size: .88rem; font-weight: 500; cursor: pointer; }
+  .nav-btn.active { background: rgba(255,255,255,.15); color: #fff; }
+  .nav-btn:not(.active):hover { background: rgba(255,255,255,.08); }
+  .hdr-right { margin-left: auto; display: flex; align-items: center; gap: .75rem; }
+  .version-btn { background: rgba(255,255,255,.1); border: 0; color: rgba(255,255,255,.7); padding: .25rem .55rem; border-radius: 5px; font-size: .78rem; cursor: pointer; font-weight: 500; }
+  .version-btn:hover { background: rgba(255,255,255,.18); color: #fff; }
+  .user-menu { position: relative; }
+  .user-btn { background: rgba(255,255,255,.1); border: 0; color: #fff; padding: .3rem .65rem; border-radius: 6px; font-size: .84rem; cursor: pointer; display: flex; align-items: center; gap: .45rem; }
+  .user-btn:hover { background: rgba(255,255,255,.18); }
+  .role-badge { font-size: .67rem; font-weight: 700; padding: .1rem .35rem; border-radius: 4px; text-transform: uppercase; }
+  .role-badge.role-admin { background: #f59e0b; color: #1e293b; }
+  .role-badge.role-user { background: rgba(255,255,255,.15); color: rgba(255,255,255,.8); }
+  .user-dropdown { position: absolute; top: calc(100% + .4rem); right: 0; background: #fff; border-radius: 8px; box-shadow: 0 8px 24px rgba(15,23,42,.18); min-width: 180px; border: 1px solid #e5e7eb; overflow: hidden; }
+  .dd-item { display: block; width: 100%; padding: .6rem .9rem; font-size: .87rem; color: #374151; background: none; border: 0; cursor: pointer; text-decoration: none; text-align: left; }
+  .dd-item:hover { background: #f3f4f6; }
+
+  /* Main content area */
+  .app-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1.5rem 1rem; }
+
   .card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,.08); padding: 2rem; width: 100%; max-width: 500px; }
   .card.wide { max-width: 740px; }
   .title-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .25rem; flex-wrap: wrap; }
@@ -19,7 +43,6 @@
   .btn-success { display: none; width: 100%; padding: .65rem; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 500; text-align: center; text-decoration: none; margin-top: .75rem; }
   .btn-ghost { display: none; width: 100%; padding: .6rem; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; font-size: .9rem; cursor: pointer; margin-top: .5rem; }
   .btn-inline { padding: .35rem .65rem; background: #f3f4f6; color: #374151; border: 0; border-radius: 7px; font-size: .82rem; cursor: pointer; }
-  .user-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; color: #6b7280; font-size: .85rem; }
   .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; margin-bottom: 1rem; }
   .auth-tab { padding: .45rem; border: 0; border-radius: 7px; cursor: pointer; background: #f3f4f6; color: #374151; font-weight: 600; }
   .auth-tab.active { background: #2563eb; color: #fff; }
@@ -100,12 +123,6 @@
   .link-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
   .site-footer { width: min(500px, 100%); color: #6b7280; font-size: .8rem; text-align: center; }
 
-  /* Page navigation tabs */
-  .page-nav { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; margin-bottom: 1.25rem; }
-  .page-tab { padding: .45rem; border: 0; border-radius: 7px; cursor: pointer; background: #f3f4f6; color: #374151; font-weight: 600; font-size: .9rem; }
-  .page-tab.active { background: #2563eb; color: #fff; }
-  .page-tab:not(.active):hover { background: #e5e7eb; }
-
   /* History page */
   .h-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .h-title { font-size: 1rem; font-weight: 650; color: #111; }
@@ -138,9 +155,34 @@
 </style>
 </head>
 <body>
+
+<header class="app-header">
+  <a class="brand" href="/">deTilda</a>
+  <nav class="main-nav" id="main-nav" hidden>
+    <button class="nav-btn active" id="nav-process" type="button">Обработка</button>
+    <button class="nav-btn" id="nav-history" type="button">История</button>
+  </nav>
+  <div class="hdr-right" id="hdr-right" hidden>
+    <button class="version-btn" id="hdr-version" type="button">v__APP_VERSION__</button>
+    <div class="user-menu">
+      <button class="user-btn" id="user-menu-btn" type="button">
+        <span id="hdr-email"></span>
+        <span class="role-badge" id="hdr-role-badge"></span>
+        <span>▾</span>
+      </button>
+      <div class="user-dropdown" id="user-dropdown" hidden>
+        <a class="dd-item" id="dd-admin" href="/admin" target="_blank" hidden>Администрирование</a>
+        <button class="dd-item" id="dd-logout" type="button">Выйти</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+
 <div class="card" id="auth-card">
   <div class="title-row">
-    <h1>deTilda v__APP_VERSION__</h1>
+    <h1>deTilda</h1>
   </div>
   <p class="sub">Войдите, чтобы обрабатывать Tilda ZIP-экспорты и видеть только свои задачи</p>
   <div class="auth-tabs">
@@ -158,22 +200,10 @@
 </div>
 
 <div class="card" id="app-card" hidden>
-  <div class="user-row">
-    <span>Личный кабинет: <strong id="user-email"></strong></span>
-    <button class="btn-inline" id="logout-btn" type="button">Выйти</button>
-  </div>
-
-  <div class="page-nav">
-    <button class="page-tab active" id="tab-process" type="button">Обработка</button>
-    <button class="page-tab" id="tab-history" type="button">История</button>
-  </div>
 
   <!-- Processing page -->
   <div id="page-process">
-    <div class="title-row">
-      <h1>deTilda v__APP_VERSION__</h1>
-    </div>
-    <p class="sub">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
+    <p class="sub" style="margin-bottom:1.5rem">Обработка Tilda ZIP-экспорта для самостоятельного хостинга</p>
 
     <form id="form">
       <label for="file">ZIP-архив экспорта Tilda</label>
@@ -247,6 +277,8 @@
 
 <footer class="site-footer">made with &hearts; by Roman A. Proskurnin</footer>
 
+</main>
+
 <div id="details-modal" class="modal-backdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="details-title">
     <div class="modal-head">
@@ -272,11 +304,20 @@ const authBtn      = document.getElementById('auth-btn');
 const authMsg      = document.getElementById('auth-msg');
 const loginTab     = document.getElementById('login-tab');
 const registerTab  = document.getElementById('register-tab');
-const userEmailEl  = document.getElementById('user-email');
-const logoutBtn    = document.getElementById('logout-btn');
 
-const tabProcess     = document.getElementById('tab-process');
-const tabHistory     = document.getElementById('tab-history');
+// Header elements
+const mainNav      = document.getElementById('main-nav');
+const hdrRight     = document.getElementById('hdr-right');
+const hdrVersion   = document.getElementById('hdr-version');
+const hdrEmail     = document.getElementById('hdr-email');
+const hdrRoleBadge = document.getElementById('hdr-role-badge');
+const userMenuBtn  = document.getElementById('user-menu-btn');
+const userDropdown = document.getElementById('user-dropdown');
+const ddAdmin      = document.getElementById('dd-admin');
+const ddLogout     = document.getElementById('dd-logout');
+const navProcess   = document.getElementById('nav-process');
+const navHistory   = document.getElementById('nav-history');
+
 const pageProcess    = document.getElementById('page-process');
 const pageHistory    = document.getElementById('page-history');
 const historyBody    = document.getElementById('history-body');
@@ -328,13 +369,23 @@ function setAuthMode(mode) {
 function showAuth() {
   authCard.hidden = false;
   appCard.hidden = true;
+  mainNav.hidden = true;
+  hdrRight.hidden = true;
 }
 
 function showApp(user) {
   currentUser = user;
-  userEmailEl.textContent = user.email || '';
   authCard.hidden = true;
   appCard.hidden = false;
+
+  // Populate header
+  hdrEmail.textContent = user.email || '';
+  hdrRoleBadge.textContent = user.role === 'admin' ? 'admin' : 'user';
+  hdrRoleBadge.className = `role-badge role-${user.role === 'admin' ? 'admin' : 'user'}`;
+  ddAdmin.hidden = user.role !== 'admin';
+  mainNav.hidden = false;
+  hdrRight.hidden = false;
+
   switchPage('process');
 }
 
@@ -383,28 +434,43 @@ authForm.addEventListener('submit', async event => {
   showApp(d.user);
 });
 
-logoutBtn.addEventListener('click', async () => {
+async function doLogout() {
   await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => null);
   localStorage.removeItem(AUTH_KEY);
   authToken = '';
   currentUser = null;
+  userDropdown.hidden = true;
   showAuth();
+}
+
+ddLogout.addEventListener('click', doLogout);
+
+/* ── Header dropdown ──────────────────────────────────── */
+
+userMenuBtn.addEventListener('click', event => {
+  event.stopPropagation();
+  userDropdown.hidden = !userDropdown.hidden;
 });
 
-/* ── Page tabs ────────────────────────────────────────── */
+document.addEventListener('click', () => { userDropdown.hidden = true; });
+userDropdown.addEventListener('click', event => event.stopPropagation());
+
+hdrVersion.addEventListener('click', () => { window.open('/changelog', '_blank'); });
+
+/* ── Page navigation ──────────────────────────────────── */
 
 function switchPage(page) {
   const isHistory = page === 'history';
   pageProcess.hidden = isHistory;
   pageHistory.hidden = !isHistory;
-  tabProcess.classList.toggle('active', !isHistory);
-  tabHistory.classList.toggle('active', isHistory);
+  navProcess.classList.toggle('active', !isHistory);
+  navHistory.classList.toggle('active', isHistory);
   appCard.classList.toggle('wide', isHistory);
   if (isHistory) loadHistory();
 }
 
-tabProcess.addEventListener('click', () => switchPage('process'));
-tabHistory.addEventListener('click', () => switchPage('history'));
+navProcess.addEventListener('click', () => switchPage('process'));
+navHistory.addEventListener('click', () => switchPage('history'));
 refreshHistory.addEventListener('click', loadHistory);
 
 /* ── Helpers ──────────────────────────────────────────── */

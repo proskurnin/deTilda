@@ -529,6 +529,83 @@ async def index() -> str:
     return html.replace("__APP_VERSION__", _get_runtime_version())
 
 
+@app.get("/changelog", response_class=HTMLResponse)
+async def changelog() -> str:
+    md_path = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+    md = md_path.read_text(encoding="utf-8") if md_path.exists() else "# Changelog\n\nНет данных."
+    body = _md_to_html(md)
+    ver = _get_runtime_version()
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>deTilda — Release Notes</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: system-ui, sans-serif; background: #f4f4f5; min-height: 100vh; display: flex; flex-direction: column; }}
+  .app-header {{ background: #1e293b; color: #fff; height: 48px; padding: 0 1.25rem; display: flex; align-items: center; gap: 1rem; flex-shrink: 0; }}
+  .brand {{ font-size: 1.1rem; font-weight: 700; color: #fff; text-decoration: none; }}
+  .hdr-title {{ color: rgba(255,255,255,.6); font-size: .9rem; }}
+  main {{ flex: 1; max-width: 760px; width: 100%; margin: 0 auto; padding: 2rem 1rem; }}
+  h1 {{ font-size: 1.6rem; margin-bottom: 1.5rem; color: #111; }}
+  h2 {{ font-size: 1.15rem; margin: 2rem 0 .6rem; color: #1e293b; border-bottom: 2px solid #e5e7eb; padding-bottom: .3rem; }}
+  h3 {{ font-size: .95rem; font-weight: 700; margin: 1.2rem 0 .4rem; color: #374151; text-transform: uppercase; letter-spacing: .04em; }}
+  ul {{ margin-left: 1.4rem; margin-bottom: .5rem; }}
+  li {{ margin-bottom: .25rem; color: #374151; font-size: .9rem; line-height: 1.5; }}
+  strong {{ color: #111; }}
+  code {{ background: #f3f4f6; border-radius: 4px; padding: .1rem .35rem; font-size: .85em; font-family: ui-monospace, monospace; }}
+  p {{ color: #374151; font-size: .9rem; line-height: 1.6; margin-bottom: .5rem; }}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="brand" href="/">deTilda</a>
+  <span class="hdr-title">Release Notes · v{ver}</span>
+</header>
+<main>
+{body}
+</main>
+</body>
+</html>"""
+
+
+def _md_to_html(md: str) -> str:
+    lines = md.splitlines()
+    out: list[str] = []
+    in_ul = False
+    for raw in lines:
+        line = raw.rstrip()
+        if line.startswith("### "):
+            if in_ul: out.append("</ul>"); in_ul = False
+            out.append(f"<h3>{_md_inline(line[4:])}</h3>")
+        elif line.startswith("## "):
+            if in_ul: out.append("</ul>"); in_ul = False
+            out.append(f"<h2>{_md_inline(line[3:])}</h2>")
+        elif line.startswith("# "):
+            if in_ul: out.append("</ul>"); in_ul = False
+            out.append(f"<h1>{_md_inline(line[2:])}</h1>")
+        elif line.startswith("- ") or line.startswith("* "):
+            if not in_ul: out.append("<ul>"); in_ul = True
+            out.append(f"<li>{_md_inline(line[2:])}</li>")
+        elif line == "":
+            if in_ul: out.append("</ul>"); in_ul = False
+        else:
+            if in_ul: out.append("</ul>"); in_ul = False
+            out.append(f"<p>{_md_inline(line)}</p>")
+    if in_ul:
+        out.append("</ul>")
+    return "\n".join(out)
+
+
+def _md_inline(text: str) -> str:
+    import html as _html
+    text = _html.escape(text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"`(.+?)`", r"<code>\1</code>", text)
+    return text
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "version": _get_runtime_version()}

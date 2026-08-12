@@ -24,6 +24,48 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.7.9 - 2026-08-12
+
+### Added
+
+- Added user management section to the admin panel (`/admin`).
+  - Table with all registered users: email, role, job count, active session count, registration date.
+  - Per-user actions: change role (user/admin), revoke all sessions (force logout), reset password, delete user.
+  - "Создать пользователя" modal: create a new account with email, password, and role without going through the public registration form.
+  - "Сброс пароля" modal: admin can set a new password for any user.
+  - User table auto-refreshes every 15 seconds alongside jobs and stats.
+- Added 6 new `UserStore` methods in `web/auth.py`: `list_users`, `get_user_session_count`, `revoke_all_sessions`, `delete_user`, `set_role`, `set_password`.
+- Added 6 new admin API endpoints in `web/app.py`:
+  - `GET /admin/api/users` — list users with job and session counts;
+  - `POST /admin/api/users` — create user;
+  - `PATCH /admin/api/users/{id}/role` — change role;
+  - `POST /admin/api/users/{id}/password` — reset password;
+  - `POST /admin/api/users/{id}/revoke-sessions` — revoke all sessions;
+  - `DELETE /admin/api/users/{id}` — delete user and sessions.
+
+### Verified
+
+- Ran `python -m pytest tests/ -q`: `348 passed, 2 warnings`.
+- Deployed to staging (`detilda.proskurnin.com`) and production (`detilda.com`, `detilda.ru`); all three `/health` endpoints confirmed `5.7.9`.
+
+## 5.7.8 - 2026-08-12
+
+### Added
+
+- Restructured the main user interface (`web/static/index.html`) into two pages:
+  - **Обработка** — upload form, processing progress, stats, and download button for the current job only. Submitting a new archive resets the page for the new job; previous results move to История.
+  - **История** — full job history table with columns: Сайт, Статус (colour-coded badge with spinner for running jobs), Создана, Действия (скачать / детали / отчёт). The table loads on tab switch and refreshes in the background when jobs complete.
+- Added two regression tests for the zero-block form smoke-check: one verifies that a runtime without the CDN URL pattern passes without the local-resource-base marker; one verifies that a runtime with the unpatched CDN URL still fails.
+
+### Fixed
+
+- Fixed `smoke_check_zero_forms_runtime` incorrectly blocking archives whose `aida-zero-forms-1.0.min.js` does not contain the specific CDN URL pattern expected by `_patch_zero_forms_resource_base`. The check now only fails when the old CDN URL pattern is present but the local-resource-base marker is absent; if the CDN pattern is not in the file at all (different JS version), the check passes. Affected: `core/checker.py`.
+
+### Verified
+
+- Ran `python -m pytest tests/ -q`: `348 passed, 2 warnings`.
+- Deployed to staging and production; all three `/health` endpoints confirmed `5.7.8`.
+
 ## 5.7.7 - 2026-07-17
 
 ### Added
