@@ -71,8 +71,17 @@ def test_health(client: TestClient) -> None:
     assert r.json()["status"] == "ok"
 
 
-def test_index_renders_app_version(client: TestClient) -> None:
+def test_root_serves_landing_with_sign_in_to_app(client: TestClient) -> None:
     r = client.get("/")
+    assert r.status_code == 200
+    assert 'name="robots" content="noindex, nofollow"' in r.text
+    assert 'href="/app"' in r.text
+    assert "https://detilda.com" not in r.text
+    assert "made with" in r.text
+
+
+def test_index_renders_app_version(client: TestClient) -> None:
+    r = client.get("/app")
     assert r.status_code == 200
     assert "made with &hearts; by Roman A. Proskurnin" in r.text
     assert f"v{APP_VERSION}" in r.text
@@ -81,7 +90,7 @@ def test_index_renders_app_version(client: TestClient) -> None:
 
 
 def test_index_renders_my_jobs_error_details(client: TestClient) -> None:
-    r = client.get("/")
+    r = client.get("/app")
     assert r.status_code == 200
     assert "function jobErrorText(job)" in r.text
     assert "site-err" in r.text
@@ -89,7 +98,7 @@ def test_index_renders_my_jobs_error_details(client: TestClient) -> None:
 
 
 def test_index_renders_per_file_upload_settings(client: TestClient) -> None:
-    r = client.get("/")
+    r = client.get("/app")
     assert r.status_code == 200
     assert 'id="email_info_btn"' in r.text
     assert 'id="per_file_enabled"' in r.text
@@ -103,7 +112,7 @@ def test_index_renders_per_file_upload_settings(client: TestClient) -> None:
 
 
 def test_index_renders_job_details_modal_hooks(client: TestClient) -> None:
-    r = client.get("/")
+    r = client.get("/app")
     assert r.status_code == 200
     assert 'data-job-details="${job.id}"' in r.text
     assert 'data-job-report="${job.id}"' in r.text
@@ -119,7 +128,7 @@ def test_index_renders_job_details_modal_hooks(client: TestClient) -> None:
 
 def test_index_reads_runtime_manifest_version(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(app_module, "load_manifest", lambda: {"version": "9.9.9"})
-    r = client.get("/")
+    r = client.get("/app")
     assert r.status_code == 200
     assert "v9.9.9" in r.text
 

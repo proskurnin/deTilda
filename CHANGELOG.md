@@ -24,6 +24,20 @@ Each release entry should explain:
 
 - Nothing yet.
 
+## 5.8.0 - 2026-10-22
+
+### Added
+
+- Public product landing page at `/` (`web/static/landing.html`): `noindex, nofollow`, RU by default with EN toggle, every sign-in button leads to `/app`.
+
+### Changed
+
+- The converter UI moved from `GET /` to `GET /app` so the landing can live at the site root. `/api/*`, `/admin`, `/changelog` and `/health` are unchanged; the header logo in the UI now links to `/app`.
+
+### Verified
+
+- `python -m pytest tests/ -q` — 307 passed, 2 skipped; web tests now request `/app` for the UI and check the landing at `/`.
+
 ## 5.7.9 - 2026-08-12
 
 ### Added
