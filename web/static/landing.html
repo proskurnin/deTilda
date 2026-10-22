@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>deTilda</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Rubik:wght@400;500;700&family=PT+Mono&display=swap">
+<style>
+html, body { margin: 0; }
+img { max-width: 100%; }
+/* Layout: brutalist cutting poster — giant word sliced by a dashed cut line, a ticker, a before/after code slider, and the 18 steps printed as a shop receipt; black, white, cut-red */
+:root {
+  --bg: #FFFFFF;
+  --ink: #0D0D0D;
+  --soft: #5E5E5E;
+  --red: #FF3B1F;
+  --paper: #F4F1EC;
+  --code: #F3F3F3;
+  --dirty: #B83A2A;
+  --clean: #12805F;
+  --f-display: "Rubik Mono One", "Arial Black", sans-serif;
+  --f-body: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "PT Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D0D0D; --ink: #F5F5F5; --soft: #A3A3A3; --red: #FF5638; --paper: #1C1B19; --code: #181818; --dirty: #FF7B66; --clean: #3FD3A3; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D0D0D; --ink: #F5F5F5; --soft: #A3A3A3; --red: #FF5638; --paper: #1C1B19; --code: #181818; --dirty: #FF7B66; --clean: #3FD3A3; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 400 18px/1.5 var(--f-body); overflow-x: hidden; }
+#page[data-lang="ru"] [lang="en"], #page[data-lang="en"] [lang="ru"] { display: none !important; }
+.wrap { max-width: 1280px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+a { color: inherit; }
+:focus-visible { outline: 4px solid var(--red); outline-offset: 2px; }
+
+.top { border-bottom: 4px solid var(--ink); }
+.top .wrap { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.top .nm { font: 400 15px/1 var(--f-display); padding-block: 18px; margin-right: auto; display: flex; align-items: center; }
+.top button { border: 0; border-left: 4px solid var(--ink); background: none; color: var(--ink); font: 700 14px/1 var(--f-body); padding: 0 18px; cursor: pointer; }
+.top button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.top a { border-left: 4px solid var(--ink); background: var(--red); color: #fff; text-decoration: none; font: 700 15px/1 var(--f-body); padding: 0 22px; display: flex; align-items: center; }
+
+.poster { position: relative; padding-block: 40px 30px; overflow: hidden; }
+.poster .word { font: 400 clamp(48px, 14vw, 210px)/.85 var(--f-display); letter-spacing: -.06em; margin: 0; position: relative; white-space: nowrap; }
+.poster .word .de { color: var(--red); }
+.poster .cut { position: absolute; left: -2vw; right: -2vw; top: 30%; border-top: 3px dashed var(--ink); transform: rotate(-4deg); pointer-events: none; }
+.poster .sc { position: absolute; left: 7%; top: calc(30% - 22px); font-size: 34px; transform: rotate(-4deg); background: var(--bg); padding: 0 6px; line-height: 1; }
+.poster .tag { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; margin-top: 36px; align-items: end; }
+.poster .tag h1 { font: 700 clamp(26px, 3.4vw, 44px)/1.1 var(--f-body); margin: 0; letter-spacing: -.02em; text-wrap: balance; }
+.poster .tag p { margin: 0; color: var(--soft); font-size: 19px; }
+
+.ticker { background: var(--ink); color: var(--bg); overflow: hidden; white-space: nowrap; border-block: 4px solid var(--ink); }
+.ticker .t { display: inline-block; padding-block: 14px; font: 400 18px/1 var(--f-display); animation: tk 32s linear infinite; }
+.ticker .t span { margin-right: 40px; }
+.ticker .t s { color: var(--red); text-decoration-thickness: 3px; }
+@keyframes tk { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+.ba { padding-block: 90px; }
+.ba-h { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: end; margin-bottom: 28px; }
+.ba-h h2 { font: 400 clamp(26px, 4vw, 52px)/1 var(--f-display); margin: 0; letter-spacing: -.04em; }
+.ba-h p { margin: 0; color: var(--soft); max-width: 26em; }
+.cmp { position: relative; border: 4px solid var(--ink); background: var(--code); overflow: hidden; font: 400 14px/1.85 var(--f-mono); cursor: ew-resize; user-select: none; }
+.cmp pre { margin: 0; padding: 48px 22px 22px; white-space: pre; overflow: hidden; font: inherit; }
+.cmp .after { position: absolute; inset: 0; background: var(--bg); clip-path: inset(0 0 0 var(--x, 50%)); }
+.cmp .lbl { position: absolute; top: 10px; font: 700 12px/1 var(--f-body); text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; z-index: 2; }
+.cmp .lbl.l { left: 10px; background: var(--dirty); color: #fff; }
+.cmp .lbl.r { right: 10px; background: var(--clean); color: #fff; }
+.cmp .handle { position: absolute; top: 0; bottom: 0; left: var(--x, 50%); width: 4px; margin-left: -2px; background: var(--red); z-index: 2; pointer-events: none; }
+.cmp .handle::after { content: "⇆"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 50%; background: var(--red); color: #fff; display: grid; place-items: center; font: 700 20px/1 var(--f-body); }
+.cmp .d { color: var(--dirty); }
+.cmp .c { color: var(--clean); }
+.cmp .m { color: var(--soft); }
+.range { width: 100%; margin-top: 14px; accent-color: var(--red); }
+.range-note { font: 400 13px/1.4 var(--f-mono); color: var(--soft); }
+
+.receipt-sec { background: var(--red); padding-block: 90px; }
+.receipt-sec .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 56px; align-items: start; }
+.receipt-sec h2 { font: 400 clamp(28px, 4.4vw, 60px)/1 var(--f-display); color: #fff; margin: 0 0 20px; letter-spacing: -.04em; }
+.receipt-sec .side p { color: #fff; font-size: 20px; margin: 0 0 16px; max-width: 24em; }
+.receipt { background: var(--paper); color: var(--ink); font: 400 14px/1.6 var(--f-mono); padding: 26px 22px 34px; transform: rotate(1.5deg); box-shadow: 10px 10px 0 var(--ink); }
+.receipt .hd { text-align: center; border-bottom: 1px dashed var(--soft); padding-bottom: 12px; margin-bottom: 10px; }
+.receipt .hd b { font-size: 18px; letter-spacing: .1em; }
+.receipt .row { display: flex; gap: 8px; }
+.receipt .row span:first-child { flex: none; width: 26px; color: var(--soft); }
+.receipt .row span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.receipt .row span:nth-child(2)::after { content: " ........................................"; color: var(--soft); }
+.receipt .row span:last-child { flex: none; color: var(--clean); }
+.receipt .tot { border-top: 1px dashed var(--soft); margin-top: 12px; padding-top: 12px; display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; }
+.receipt .tot b { color: var(--red); }
+.receipt .thx { text-align: center; margin-top: 14px; color: var(--soft); }
+
+.steps3 { padding-block: 90px; }
+.steps3 .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.st { padding: 28px; border: 4px solid var(--ink); margin-left: -4px; }
+.st:first-child { margin-left: 0; }
+.st .n { font: 400 64px/1 var(--f-display); color: var(--red); letter-spacing: -.05em; }
+.st h3 { font: 700 24px/1.2 var(--f-body); margin: 14px 0 8px; }
+.st p { margin: 0; color: var(--soft); font-size: 16px; }
+
+.go { border-top: 4px solid var(--ink); }
+.go a { display: block; text-decoration: none; text-align: center; font: 400 clamp(40px, 11vw, 160px)/1 var(--f-display); letter-spacing: -.06em; padding-block: 40px; transition: background .15s, color .15s; }
+.go a:hover { background: var(--ink); color: var(--bg); }
+footer { border-top: 4px solid var(--ink); padding-block: 18px 30px; font: 700 14px/1.5 var(--f-body); }
+footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+footer .tm { color: var(--soft); font-weight: 400; }
+.heart { color: #FF2E4D; }
+
+@media (max-width: 900px) {
+  .poster .tag, .receipt-sec .wrap { grid-template-columns: minmax(0, 1fr); }
+  .steps3 .wrap { grid-template-columns: minmax(0, 1fr); }
+  .st { margin-left: 0; margin-top: -4px; }
+  .st:first-child { margin-top: 0; }
+  .cmp { font-size: 12px; }
+  .receipt { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ticker .t { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="page" data-lang="ru">
+  <header class="top">
+    <div class="wrap">
+      <span class="nm">deTilda</span>
+      <button type="button" id="l-ru" data-set-lang="ru" aria-pressed="true">RU</button>
+      <button type="button" id="l-en" data-set-lang="en" aria-pressed="false">EN</button>
+      <a href="/app"><span lang="ru">Войти</span><span lang="en">Sign in</span></a>
+    </div>
+  </header>
+
+  <main>
+    <section class="poster">
+      <div class="wrap">
+        <p class="word" aria-hidden="true"><span class="de">de</span>Tilda</p>
+        <div class="cut"></div><span class="sc" aria-hidden="true">✂</span>
+        <div class="tag">
+          <h1><span lang="ru">Отрезаем сайт от Tilda. Аккуратно, по линии.</span><span lang="en">We cut your site loose from Tilda. Cleanly, along the line.</span></h1>
+          <p><span lang="ru">Загрузите ZIP-экспорт и получите папку, которая работает на любом хостинге. Без чужих скриптов, CDN и аналитики.</span><span lang="en">Upload the export ZIP and get a folder that runs on any hosting. No third-party scripts, CDNs or analytics.</span></p>
+        </div>
+      </div>
+    </section>
+
+    <div class="ticker" aria-hidden="true">
+      <div class="t">
+        <span><s>tilda-stat.js</s></span><span>✂</span><span><s>static.tildacdn.com</s></span><span>✂</span><span><s>TildaSans</s></span><span>✂</span><span><s>tilda-forms.js</s></span><span>✂</span><span>send_email.php</span><span>✂</span><span><s>t-records</s> → ai-records</span><span>✂</span>
+        <span><s>tilda-stat.js</s></span><span>✂</span><span><s>static.tildacdn.com</s></span><span>✂</span><span><s>TildaSans</s></span><span>✂</span><span><s>tilda-forms.js</s></span><span>✂</span><span>send_email.php</span><span>✂</span><span><s>t-records</s> → ai-records</span><span>✂</span>
+      </div>
+    </div>
+
+    <section class="ba">
+      <div class="wrap">
+        <div class="ba-h">
+          <h2><span lang="ru">До / после</span><span lang="en">Before / after</span></h2>
+          <p><span lang="ru">Потяните разделитель. Слева — экспорт с Tilda, справа — та же страница после deTilda.</span><span lang="en">Drag the divider. Left is the Tilda export, right is the same page after deTilda.</span></p>
+        </div>
+        <div class="cmp" id="cmp">
+          <span class="lbl l"><span lang="ru">экспорт</span><span lang="en">export</span></span>
+          <span class="lbl r"><span lang="ru">после deTilda</span><span lang="en">after deTilda</span></span>
+<pre class="before">&lt;head&gt;
+  &lt;link href="https://static.tildacdn.com/css/<span class="d">tilda-grid-3.0.min.css</span>"&gt;
+  &lt;script src="https://static.tildacdn.com/js/<span class="d">tilda-stat-1.0.min.js</span>"&gt;&lt;/script&gt;
+  &lt;script src="https://static.tildacdn.com/js/<span class="d">tilda-forms-1.0.min.js</span>"&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;div class="<span class="d">t-records</span>" data-<span class="d">tilda-page-id</span>="34127"&gt;
+  &lt;img data-original="https://static.tildacdn.com/<span class="d">tild3a61/hero.jpg</span>"&gt;
+  &lt;p style="font-family:'<span class="d">TildaSans</span>'"&gt;Записаться на урок&lt;/p&gt;</pre>
+<pre class="after" aria-hidden="true">&lt;head&gt;
+  &lt;link href="<span class="c">css/grid.min.css</span>"&gt;
+  <span class="m">&lt;!-- stat script removed --&gt;</span>
+  &lt;script src="<span class="c">js/form-handler.js</span>"&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;div class="<span class="c">ai-records</span>" data-<span class="c">ai-page-id</span>="34127"&gt;
+  &lt;img src="<span class="c">images/hero.jpg</span>"&gt;
+  &lt;p style="font-family:'<span class="c">Manrope</span>'"&gt;Записаться на урок&lt;/p&gt;</pre>
+          <span class="handle"></span>
+        </div>
+        <label class="range-note" for="split"><span lang="ru">Положение разделителя</span><span lang="en">Divider position</span></label>
+        <input class="range" id="split" type="range" min="0" max="100" value="50">
+      </div>
+    </section>
+
+    <section class="receipt-sec">
+      <div class="wrap">
+        <div class="side">
+          <h2><span lang="ru">18 операций в каждом заказе</span><span lang="en">18 operations in every order</span></h2>
+          <p><span lang="ru">Каждый архив проходит один и тот же конвейер. В конце — проверка: ссылок на Tilda должно остаться ноль.</span><span lang="en">Every archive runs through the same pipeline. At the end there’s a check: zero Tilda references must remain.</span></p>
+          <p><span lang="ru">Вместе с сайтом вы получаете подробный отчёт: что удалено, что скачано, что переименовано.</span><span lang="en">Along with the site you get a detailed report: what was removed, downloaded and renamed.</span></p>
+        </div>
+        <div class="receipt" aria-label="Processing steps">
+          <div class="hd"><b>deTilda</b><br><span lang="ru">чек № 34127 · пример</span><span lang="en">receipt #34127 · example</span></div>
+          <div id="rows"></div>
+          <div class="tot"><span><span lang="ru">ССЫЛОК НА TILDA</span><span lang="en">TILDA REFERENCES</span></span><b>0</b></div>
+          <div class="thx"><span lang="ru">спасибо, что уходите красиво</span><span lang="en">thanks for leaving in style</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="steps3">
+      <div class="wrap">
+        <div class="st"><div class="n">1</div><h3><span lang="ru">Экспорт</span><span lang="en">Export</span></h3><p><span lang="ru">Скачайте архив сайта в настройках проекта Tilda.</span><span lang="en">Download the site archive from your Tilda project settings.</span></p></div>
+        <div class="st"><div class="n">2</div><h3><span lang="ru">Загрузка</span><span lang="en">Upload</span></h3><p><span lang="ru">Войдите и отправьте ZIP. Прогресс виден на экране.</span><span lang="en">Sign in and upload the ZIP. Watch the progress live.</span></p></div>
+        <div class="st"><div class="n">3</div><h3><span lang="ru">Переезд</span><span lang="en">Move</span></h3><p><span lang="ru">Скачайте результат и положите на свой хостинг. Формы уже работают.</span><span lang="en">Download the result and put it on your hosting. Forms already work.</span></p></div>
+      </div>
+    </section>
+
+    <section class="go">
+      <a href="/app"><span lang="ru">ВОЙТИ ✂</span><span lang="en">SIGN IN ✂</span></a>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>made with <span class="heart">♥</span> by Roman A. Proskurnin</span>
+      <span class="tm"><span lang="ru">Tilda — товарный знак её владельца</span><span lang="en">Tilda is a trademark of its owner</span></span>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var page = document.getElementById('page');
+  var steps = {
+    ru: ['распаковка архива', 'ресурсы и мусор', 'страница 404', 'robots.txt, readme', 'обработчик форм', 'внедрение скриптов', 'замена шрифтов', 'шрифты Google локально', 'обновление ссылок', 'локализация CDN', 'рендер в браузере', 'чистка CDN', 'ленивые картинки', 'встроенные скрипты', 'имена классов', 'проверка форм', 'форматирование HTML', 'финальная проверка'],
+    en: ['unpack archive', 'assets and junk', '404 page', 'robots.txt, readme', 'form handler', 'inject scripts', 'font swap', 'local Google Fonts', 'update links', 'localise CDN', 'browser render', 'CDN cleanup', 'lazy images', 'inline scripts', 'class names', 'form check', 'HTML formatting', 'final check']
+  };
+  function rows(l) {
+    document.getElementById('rows').innerHTML = steps[l].map(function (s, i) {
+      return '<div class="row"><span>' + (i < 9 ? '0' : '') + (i + 1) + '</span><span>' + s + '</span><span>✓</span></div>';
+    }).join('');
+  }
+  function setLang(l) {
+    page.setAttribute('data-lang', l);
+    document.documentElement.lang = l;
+    document.querySelectorAll('[data-set-lang]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-set-lang') === l)); });
+    rows(l);
+  }
+  var cmp = document.getElementById('cmp');
+  var split = document.getElementById('split');
+  function setX(v) { cmp.style.setProperty('--x', v + '%'); }
+  split.addEventListener('input', function () { setX(split.value); });
+  var drag = false;
+  function fromPointer(e) {
+    var r = cmp.getBoundingClientRect();
+    var v = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
+    split.value = Math.round(v); setX(v);
+  }
+  cmp.addEventListener('pointerdown', function (e) { drag = true; try { cmp.setPointerCapture(e.pointerId); } catch (err) {} fromPointer(e); });
+  cmp.addEventListener('pointermove', function (e) { if (drag) fromPointer(e); });
+  cmp.addEventListener('pointerup', function () { drag = false; });
+  cmp.addEventListener('pointercancel', function () { drag = false; });
+  cmp.style.touchAction = 'pan-y';
+  var l = 'ru';
+  try { var ls = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || '']).map(function (x) { return String(x).toLowerCase(); }); if (!ls.some(function (x) { return x.indexOf('ru') === 0; }) && ls.some(function (x) { return x.indexOf('en') === 0; })) l = 'en'; } catch (e) {}
+  try { l = localStorage.getItem('lang-v3') || l; } catch (e) {}
+  if (location.hash === '#en' || location.hash === '#ru') l = location.hash.slice(1);
+  setLang(l === 'en' ? 'en' : 'ru');
+  document.querySelectorAll('[data-set-lang]').forEach(function (b) { b.addEventListener('click', function () { var v = b.getAttribute('data-set-lang'); try { localStorage.setItem('lang-v3', v); } catch (e) {} setLang(v); }); });
+})();
+</script>
+</body>
+</html>

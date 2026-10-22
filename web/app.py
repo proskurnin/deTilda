@@ -524,6 +524,11 @@ CurrentUser = Annotated[User, Depends(_current_user)]
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
+async def landing() -> str:
+    return (Path(__file__).parent / "static" / "landing.html").read_text(encoding="utf-8")
+
+
+@app.get("/app", response_class=HTMLResponse)
 async def index() -> str:
     html = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
     return html.replace("__APP_VERSION__", _get_runtime_version())
